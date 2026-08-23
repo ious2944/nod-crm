@@ -27,8 +27,23 @@ updates:
     directory: "/"
     schedule:
       interval: monthly
+    # Same rule as npm, and it has to be repeated: `ignore` is per-ecosystem,
+    # so the block above governs npm only. Without this one, Dependabot
+    # proposed actions/checkout v4 -> v7 on the very first push — a major
+    # bump of the step every job depends on, exactly the decision this policy
+    # says a human should make.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: docker
     directory: "/"
     schedule:
       interval: monthly
+    # Likewise, and this one matters most: the base image is the production
+    # runtime. Left unguarded, Dependabot proposed node:22-bookworm ->
+    # node:26-bookworm, which would change what every self-hosted instance
+    # runs on, untested. Patch and minor bumps of Node 22 still come through.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
