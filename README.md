@@ -1,5 +1,12 @@
 # NOD CRM
 
+# NOD CRM
+
+[![CI](https://github.com/ious2944/nod-crm/actions/workflows/ci.yml/badge.svg)](https://github.com/ious2944/nod-crm/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ious2944/nod-crm)](https://github.com/ious2944/nod-crm/releases)
+[![License](https://img.shields.io/github/license/ious2944/nod-crm)](LICENSE)
+![Self-hosted](https://img.shields.io/badge/self--hosted-Docker-informational)
+
 **Open-source self-hosted CRM focused on follow-ups.**
 
 Most CRMs answer "who are my customers?". NOD CRM answers a smaller, more
