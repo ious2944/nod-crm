@@ -1,0 +1,128 @@
+@import "tailwindcss";
+
+/*
+ * NOD CRM — jetons de design.
+ * Une seule échelle sémantique (surface / texte / urgence) déclinée en clair et
+ * en sombre : les composants n'écrivent jamais une couleur brute.
+ */
+:root {
+  --nod-bg: #f6f7f9;
+  --nod-surface: #ffffff;
+  --nod-surface-muted: #f1f3f7;
+  --nod-border: #e3e7ee;
+  --nod-border-strong: #cfd6e2;
+  --nod-text: #101828;
+  --nod-text-muted: #667085;
+  --nod-accent: #4f46e5;
+  --nod-accent-hover: #4338ca;
+  --nod-accent-soft: #eef0ff;
+  --nod-accent-contrast: #ffffff;
+
+  /* Vieillissement : du discret au très visible. */
+  --nod-calm-fg: #667085;
+  --nod-calm-bg: #f1f3f7;
+  --nod-soon-fg: #0369a1;
+  --nod-soon-bg: #e6f2fb;
+  --nod-today-fg: #a35c00;
+  --nod-today-bg: #fdf1de;
+  --nod-late-fg: #b4400f;
+  --nod-late-bg: #fdeae1;
+  --nod-critical-fg: #b42318;
+  --nod-critical-bg: #fde5e3;
+  --nod-done-fg: #067647;
+  --nod-done-bg: #e6f5ed;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --nod-bg: #0a0c11;
+    --nod-surface: #12151c;
+    --nod-surface-muted: #181c25;
+    --nod-border: #242a35;
+    --nod-border-strong: #333b49;
+    --nod-text: #e7eaf0;
+    --nod-text-muted: #98a2b3;
+    --nod-accent: #7c7cf5;
+    --nod-accent-hover: #8f8ff7;
+    --nod-accent-soft: #1d1d3a;
+    --nod-accent-contrast: #0a0c11;
+
+    --nod-calm-fg: #98a2b3;
+    --nod-calm-bg: #1b1f28;
+    --nod-soon-fg: #7cc4f5;
+    --nod-soon-bg: #10222f;
+    --nod-today-fg: #f3bd6a;
+    --nod-today-bg: #2a1f0e;
+    --nod-late-fg: #f79e73;
+    --nod-late-bg: #2d190f;
+    --nod-critical-fg: #f98a80;
+    --nod-critical-bg: #30130f;
+    --nod-done-fg: #6ede9f;
+    --nod-done-bg: #0d2418;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--nod-bg);
+  --color-surface: var(--nod-surface);
+  --color-surface-muted: var(--nod-surface-muted);
+  --color-border-subtle: var(--nod-border);
+  --color-border-strong: var(--nod-border-strong);
+  --color-ink: var(--nod-text);
+  --color-muted: var(--nod-text-muted);
+  --color-accent: var(--nod-accent);
+  --color-accent-hover: var(--nod-accent-hover);
+  --color-accent-soft: var(--nod-accent-soft);
+  --color-accent-contrast: var(--nod-accent-contrast);
+
+  --color-calm-fg: var(--nod-calm-fg);
+  --color-calm-bg: var(--nod-calm-bg);
+  --color-soon-fg: var(--nod-soon-fg);
+  --color-soon-bg: var(--nod-soon-bg);
+  --color-today-fg: var(--nod-today-fg);
+  --color-today-bg: var(--nod-today-bg);
+  --color-late-fg: var(--nod-late-fg);
+  --color-late-bg: var(--nod-late-bg);
+  --color-critical-fg: var(--nod-critical-fg);
+  --color-critical-bg: var(--nod-critical-bg);
+  --color-done-fg: var(--nod-done-fg);
+  --color-done-bg: var(--nod-done-bg);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+body {
+  background: var(--nod-bg);
+  color: var(--nod-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Focus visible et homogène partout, sans anneau parasite à la souris. */
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--nod-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@keyframes nod-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.nod-rise {
+  animation: nod-rise 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nod-rise {
+    animation: none;
+  }
+}

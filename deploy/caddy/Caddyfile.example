@@ -1,0 +1,46 @@
+# NOD CRM — Caddy (example).
+#
+# Caddy obtains and renews the TLS certificate on its own, and sets HSTS by
+# default on HTTPS sites. Replace the domain and the upstream port, then:
+#
+#   sudo install -o root -g root -m 644 Caddyfile.example /etc/caddy/Caddyfile
+#   sudo caddy validate --config /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+
+crm.example.com {
+	encode zstd gzip
+
+	# The health probe queries the database. The container calls it on its own
+	# loopback interface; the internet does not need a free way to make
+	# PostgreSQL work.
+	handle /api/health {
+		respond 404
+	}
+
+	handle /robots.txt {
+		header Content-Type text/plain
+		respond "User-agent: *\nDisallow: /\n" 200
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:3000 {
+			# NOD CRM reads X-Real-IP and nothing else for rate limiting.
+			# Caddy sets it from the actual peer address, so a client cannot
+			# forge it.
+			header_up X-Real-IP {remote_host}
+			# Server Components stream: do not buffer.
+			flush_interval -1
+		}
+	}
+
+	# The application emits CSP, Referrer-Policy, Permissions-Policy and
+	# nosniff itself. Do not duplicate them here.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	request_body {
+		max_size 2MB
+	}
+}

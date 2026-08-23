@@ -1,0 +1,56 @@
+# NOD CRM — Traefik v3 (example).
+#
+# Traefik reads its configuration from container labels. Add these to the `app`
+# service of your `docker-compose.yml`, put the app on Traefik's network, and
+# REMOVE the `ports:` mapping — Traefik reaches the container over the Docker
+# network, so the app must not be published on the host at all.
+#
+# This file is documentation, not a compose file you run directly.
+
+services:
+  app:
+    # ports: []            # <- remove the host publication
+    networks:
+      - internal
+      - traefik            # external network created by your Traefik stack
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "traefik"
+
+      # --- router -------------------------------------------------------
+      traefik.http.routers.nodcrm.rule: "Host(`crm.example.com`)"
+      traefik.http.routers.nodcrm.entrypoints: "websecure"
+      traefik.http.routers.nodcrm.tls.certresolver: "letsencrypt"
+      traefik.http.routers.nodcrm.service: "nodcrm"
+      traefik.http.routers.nodcrm.middlewares: "nodcrm-hsts,nodcrm-ratelimit"
+
+      traefik.http.services.nodcrm.loadbalancer.server.port: "3000"
+
+      # --- /api/health is not published --------------------------------
+      # The container probes it on its own loopback interface. Exposing it
+      # would offer the internet a free way to make PostgreSQL work.
+      traefik.http.routers.nodcrm-health.rule: "Host(`crm.example.com`) && Path(`/api/health`)"
+      traefik.http.routers.nodcrm-health.entrypoints: "websecure"
+      traefik.http.routers.nodcrm-health.tls.certresolver: "letsencrypt"
+      traefik.http.routers.nodcrm-health.priority: "100"
+      traefik.http.routers.nodcrm-health.service: "noop@internal"
+      traefik.http.routers.nodcrm-health.middlewares: "nodcrm-block"
+
+      # --- middlewares --------------------------------------------------
+      # HSTS belongs to the terminating proxy: only it knows the request
+      # really arrived over TLS. Every other security header comes from the
+      # application and must not be duplicated here.
+      traefik.http.middlewares.nodcrm-hsts.headers.stsSeconds: "31536000"
+      traefik.http.middlewares.nodcrm-hsts.headers.stsIncludeSubdomains: "true"
+
+      traefik.http.middlewares.nodcrm-block.ipallowlist.sourcerange: "127.0.0.1/32"
+
+      # Rate limit roughly equivalent to the Nginx sample. Traefik applies it
+      # to the whole router: keep it generous enough for normal browsing.
+      traefik.http.middlewares.nodcrm-ratelimit.ratelimit.average: "60"
+      traefik.http.middlewares.nodcrm-ratelimit.ratelimit.burst: "30"
+
+# Traefik must be configured to forward the real client address as X-Real-IP;
+# with the default `forwardedHeaders` setup it sets X-Forwarded-For and
+# X-Real-IP from the peer address. NOD CRM reads X-Real-IP only, and falls back
+# to per-account rate limiting when it is missing or invalid.

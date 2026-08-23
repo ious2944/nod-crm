@@ -1,0 +1,103 @@
+# NOD CRM — Nginx virtual host (example).
+#
+# Copy this file, replace `crm.example.com` with your own domain and `3000`
+# with the port NOD CRM is published on (see `APP_HOST_PORT` in your `.env`).
+#
+#   sudo install -o root -g root -m 644 nod-crm.conf.example \
+#        /etc/nginx/sites-available/crm.example.com
+#   sudo ln -s /etc/nginx/sites-available/crm.example.com \
+#              /etc/nginx/sites-enabled/crm.example.com
+#   sudo nginx -t && sudo systemctl reload nginx
+#   # Never reload if `nginx -t` fails.
+#
+# Prerequisites:
+#   - a TLS certificate for the domain (Let's Encrypt / certbot);
+#   - the rate-limit zone: /etc/nginx/conf.d/nod-crm-limits.conf;
+#   - the proxy snippet:   /etc/nginx/snippets/nod-crm-proxy.conf;
+#   - NOD CRM listening on 127.0.0.1:3000 (never on 0.0.0.0).
+
+# ------------------------------------------------------------ HTTP -> HTTPS
+server {
+    listen 80;
+    listen [::]:80;
+    server_name crm.example.com;
+
+    # Certbot renewal must stay reachable over plain HTTP.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ------------------------------------------------------------------- HTTPS
+server {
+    # `listen ... http2` rather than the `http2 on;` directive: the latter
+    # requires nginx >= 1.25.1, while Debian/Ubuntu stable still ships 1.24.
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name crm.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/crm.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/crm.example.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    # HSTS belongs here, not in the application: only the terminating proxy
+    # knows the request really arrived over TLS. `preload` is deliberately
+    # omitted — submitting to the preload list commits your whole domain and
+    # is hard to undo.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # Every other security header (nonce-based CSP, Referrer-Policy,
+    # Permissions-Policy, nosniff, frame-ancestors) is emitted by the
+    # application and passed through untouched. Do not duplicate them here:
+    # two sources of truth eventually disagree.
+
+    location = /robots.txt {
+        add_header Content-Type text/plain always;
+        return 200 "User-agent: *\nDisallow: /\n";
+    }
+
+    # A login form fits well within this limit; oversized requests are
+    # rejected before they ever reach the application.
+    client_max_body_size 2m;
+    client_body_timeout 15s;
+    server_tokens off;
+
+    # ------------------------------------------------------------ /login
+    # Targeted rate limiting. The zone lives in nod-crm-limits.conf and is
+    # referenced by this virtual host only.
+    location = /login {
+        limit_req zone=nodcrm_login burst=10 nodelay;
+        limit_req_status 429;
+
+        proxy_pass http://127.0.0.1:3000;
+        include /etc/nginx/snippets/nod-crm-proxy.conf;
+    }
+
+    # -------------------------------------------------------- /api/health
+    # The health probe queries the database. The container calls it on its own
+    # loopback interface; there is no reason to offer the internet a free way
+    # to make PostgreSQL work. 404 rather than 403: the path does not even
+    # advertise that it exists.
+    #
+    # From the host it stays reachable without Nginx:
+    #   curl -s http://127.0.0.1:3000/api/health
+    location = /api/health {
+        access_log off;
+        return 404;
+    }
+
+    # ------------------------------------------------------------- the rest
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        include /etc/nginx/snippets/nod-crm-proxy.conf;
+    }
+
+    access_log /var/log/nginx/crm.example.com.access.log;
+    error_log  /var/log/nginx/crm.example.com.error.log;
+}

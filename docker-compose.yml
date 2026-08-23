@@ -1,0 +1,130 @@
+# NOD CRM — self-hosted stack.
+#
+#   ./scripts/init-env.sh     # writes .env with freshly generated secrets
+#   docker compose up -d      # builds the image, migrates, starts the app
+#
+# Then create your first workspace and user:
+#
+#   docker compose exec app node scripts/admin.mjs create-workspace
+#   docker compose exec app node scripts/admin.mjs create-user
+#
+# Everything lives on a private Docker network. PostgreSQL publishes no port
+# at all, and the application is published on the loopback interface only —
+# put a reverse proxy in front of it for HTTPS (see deploy/ and
+# docs/self-hosting.md).
+
+name: nod-crm
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nod-crm-postgres
+    restart: unless-stopped
+    # NO published port: the database is reachable from the stack's private
+    # network only. Not `5432:5432`, not `127.0.0.1:5432:5432`.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is missing from .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is missing from .env}
+      # Deterministic dumps and restores.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    # Memory ceiling: without one, a pathological query grows until the host
+    # kernel kills "a" process — with no guarantee it picks ours rather than
+    # a neighbouring service. With a ceiling, the overrun stays inside NOD
+    # CRM's cgroup.
+    mem_limit: 768m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # Ephemeral container: applies migrations, then exits. `app` waits for it to
+  # succeed, which removes any start-up race.
+  migrate:
+    # No `build:` section: this service reuses the image built by `app`. A
+    # second identical `build:` makes `docker compose build` run two concurrent
+    # builds of the same image — duplicated work, and two writers on one tag.
+    # `pull_policy: never` makes Compose say so plainly if the image is
+    # missing, instead of querying a registry where it does not exist.
+    image: nod-crm-app:local
+    pull_policy: never
+    container_name: nod-crm-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+    # `migrate deploy` only: never `migrate dev` outside development.
+    command: ["npx", "prisma", "migrate", "deploy"]
+    networks:
+      - internal
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    image: nod-crm-app:local
+    container_name: nod-crm-app
+    restart: unless-stopped
+    # `init` provides a PID 1 that reaps orphans; the grace period gives Next
+    # time to finish in-flight requests on SIGTERM.
+    init: true
+    stop_grace_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is missing from .env}
+      APP_NAME: ${APP_NAME:-NOD CRM}
+      APP_SOURCE_URL: ${APP_SOURCE_URL:-https://github.com/ious2944/nod-crm}
+      APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Paris}
+    ports:
+      # Loopback by default: a reverse proxy is the only intended entry point.
+      # Session cookies are `Secure` in production, so a directly exposed
+      # instance over plain HTTP cannot be logged into.
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_HOST_PORT:-3000}:3000"
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+    # See postgres: the ceiling protects the host and its neighbours, not us.
+    # This Next.js server sits around 200 MB.
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  internal:
+    name: nod-crm-network
+    driver: bridge
+
+volumes:
+  postgres-data:
+    # Overridable so an existing deployment can adopt its current volume
+    # instead of starting from an empty database.
+    name: ${POSTGRES_VOLUME_NAME:-nod-crm-postgres-data}

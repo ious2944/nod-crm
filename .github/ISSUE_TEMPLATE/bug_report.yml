@@ -1,0 +1,90 @@
+name: Bug report
+description: Something does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        **Found a security problem? Do not open an issue.** Report it privately
+        through the Security tab — see
+        [SECURITY.md](https://github.com/ious2944/nod-crm/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+      placeholder: |
+        I clicked "Nudge" on an overdue follow-up.
+        I expected the due date to move to +3 days.
+        Instead the card disappeared from the board.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The smallest sequence that shows the problem.
+      placeholder: |
+        1. Create a follow-up due yesterday, ball on their side
+        2. Open the board with the "To nudge" filter
+        3. Click "Nudge"
+        4. …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: how-run
+    attributes:
+      label: How do you run NOD CRM?
+      options:
+        - Docker Compose (docker-compose.yml)
+        - Docker Compose (development stack)
+        - npm run dev
+        - npm run build && npm run start
+        - Something else (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: A release tag, or the output of `git rev-parse --short HEAD`.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Host OS, browser, and the reverse proxy in front of it if any.
+      placeholder: Debian 12, Firefox 141, behind Nginx
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        `docker compose logs app`, or the browser console.
+        **Remove anything sensitive first** — NOD CRM does not log secrets, but
+        your paste may include hostnames or email addresses.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues
+          required: true
+        - label: This is not a security vulnerability (those go through the Security tab)
+          required: true

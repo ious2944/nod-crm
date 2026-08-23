@@ -1,0 +1,41 @@
+# NOD CRM jails — a separate file in jail.d/ so that existing jails (sshd,
+# nginx-limit-req, nginx-botsearch…) are neither redefined, widened, nor
+# weakened. This file only ADDS jails whose name and `logpath` are specific to
+# NOD CRM.
+#
+# Replace `crm.example.com` with your own virtual host, then:
+#
+#   sudo install -o root -g root -m 644 nod-crm.local \
+#        /etc/fail2ban/jail.d/nod-crm.local
+#   sudo fail2ban-client -t          # MUST succeed before any reload
+#   sudo fail2ban-client reload
+#
+# Always `fail2ban-client -t` first: a syntax error in jail.d/ stops Fail2ban
+# from starting — and would take SSH protection down with it.
+
+[nod-crm-login]
+enabled  = true
+port     = http,https
+filter   = nod-crm-login
+logpath  = /var/log/nginx/crm.example.com.access.log
+# 20 submissions in 10 minutes: far above human use, including behind an office
+# NAT, and far below an automated attack.
+findtime = 600
+maxretry = 20
+bantime  = 3600
+
+# Repeat offenders against the Nginx rate limit.
+#
+# The stock `nginx-limit-req` jail only reads /var/log/nginx/error.log. The NOD
+# CRM virtual host writes to its own file, so that jail would never see our
+# rejections. Rather than widening an existing jail's `logpath` — a change that,
+# done wrong, weakens protection for every other site — we declare a second jail
+# using the distribution's filter and our log only.
+[nod-crm-limit-req]
+enabled  = true
+port     = http,https
+filter   = nginx-limit-req
+logpath  = /var/log/nginx/crm.example.com.error.log
+findtime = 600
+maxretry = 10
+bantime  = 3600

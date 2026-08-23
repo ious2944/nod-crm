@@ -1,0 +1,75 @@
+# NOD CRM — development stack.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#   docker compose -f docker-compose.dev.yml exec app npm run db:migrate
+#   docker compose -f docker-compose.dev.yml exec app npm run db:seed
+#
+# Different containers, network and volume from the self-hosted stack in
+# docker-compose.yml: the two can run side by side and share no data.
+#
+# The source tree is bind-mounted and Next.js reloads on change. This stack
+# runs in development mode: it is not hardened and must never face a network.
+#
+# You do not need it. `npm install && npm run dev` against any PostgreSQL 16
+# works just as well — this is only a batteries-included shortcut.
+
+name: nod-crm-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nod-crm-postgres-dev
+    restart: unless-stopped
+    # No published port even in development: `docker compose exec` is enough
+    # for psql, and the database has no reason to be reachable from the LAN.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nodcrm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nodcrm}
+      POSTGRES_DB: ${POSTGRES_DB:-nod_crm}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    image: node:22-bookworm-slim
+    container_name: nod-crm-app-dev
+    restart: unless-stopped
+    working_dir: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${POSTGRES_USER:-nodcrm}:${POSTGRES_PASSWORD:-nodcrm}@postgres:5432/${POSTGRES_DB:-nod_crm}?schema=public
+      APP_NAME: ${APP_NAME:-NOD CRM}
+      APP_SOURCE_URL: ${APP_SOURCE_URL:-https://github.com/ious2944/nod-crm}
+      APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Paris}
+      # Development only. Production refuses this value outright.
+      AUTH_SECRET: ${AUTH_SECRET:-nod-crm-development-only-secret-do-not-use-in-production}
+    volumes:
+      - .:/app
+      # Named volume: native modules compiled for Linux must not be overwritten
+      # by the ones built on the host.
+      - node-modules:/app/node_modules
+    ports:
+      - "127.0.0.1:${DEV_HOST_PORT:-3000}:3000"
+    networks:
+      - internal
+    command: sh -c "npm install && npm run dev"
+
+networks:
+  internal:
+    name: nod-crm-network-dev
+    driver: bridge
+
+volumes:
+  postgres-data:
+    name: nod-crm-postgres-data-dev
+  node-modules:
+    name: nod-crm-node-modules-dev

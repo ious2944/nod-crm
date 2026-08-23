@@ -1,0 +1,142 @@
+// NOD CRM — schéma minimal V0.1
+// Périmètre : Workspace / Contact / FollowUp uniquement.
+// Les autres modules (organisations, actions, opportunités…) viendront plus tard.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum FollowUpStatus {
+  OPEN
+  COMPLETED
+  ABANDONED
+}
+
+enum BallOwner {
+  ME
+  THEM
+}
+
+model Workspace {
+  id        String   @id @default(uuid()) @db.Uuid
+  slug      String   @unique
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  contacts  Contact[]
+  followUps FollowUp[]
+  users     User[]
+
+  @@map("workspaces")
+}
+
+/// Un utilisateur appartient à exactement un workspace. Le workspace autorisé
+/// est donc entièrement déterminé par la session : il n'est jamais lu depuis
+/// une entrée client.
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  workspaceId  String    @map("workspace_id") @db.Uuid
+  email        String    @unique
+  /// Argon2id. Ne jamais journaliser, ne jamais renvoyer au client.
+  passwordHash String    @map("password_hash")
+  displayName  String?   @map("display_name")
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sessions  Session[]
+
+  @@index([workspaceId])
+  @@map("users")
+}
+
+/// Session opaque côté serveur. Le cookie ne transporte qu'un jeton aléatoire ;
+/// la base ne stocke que son HMAC-SHA256 (clé = AUTH_SECRET). Une fuite de la
+/// base seule ne permet donc pas de forger un cookie valide.
+model Session {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  tokenHash     String    @unique @map("token_hash")
+  /// Expiration absolue : la session meurt même si elle reste active.
+  expiresAt     DateTime  @map("expires_at")
+  /// Expiration d'inactivité, repoussée au fil des requêtes.
+  idleExpiresAt DateTime  @map("idle_expires_at")
+  lastUsedAt    DateTime  @default(now()) @map("last_used_at")
+  revokedAt     DateTime? @map("revoked_at")
+  /// Contexte de création, à des fins de détection d'abus. L'IP est hachée.
+  userAgent     String?   @map("user_agent")
+  ipHash        String?   @map("ip_hash")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+/// Tentatives de connexion, pour la limitation de débit applicative.
+/// Aucun mot de passe n'y est stocké ; l'IP est hachée.
+model LoginAttempt {
+  id         String   @id @default(uuid()) @db.Uuid
+  /// Clé de comptage : `email:<adresse>` ou `ip:<empreinte>`.
+  scope      String
+  successful Boolean  @default(false)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([scope, createdAt])
+  @@map("login_attempts")
+}
+
+model Contact {
+  id               String   @id @default(uuid()) @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  firstName        String   @map("first_name")
+  lastName         String   @map("last_name")
+  email            String?
+  organizationName String?  @map("organization_name")
+  isDemo           Boolean  @default(false) @map("is_demo")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  followUps FollowUp[]
+
+  // Ordre calqué sur le tri de `listContacts` : sans cela, PostgreSQL
+  // trie en mémoire au lieu de parcourir l'index.
+  @@index([workspaceId, firstName, lastName])
+  @@map("contacts")
+}
+
+model FollowUp {
+  id          String         @id @default(uuid()) @db.Uuid
+  workspaceId String         @map("workspace_id") @db.Uuid
+  contactId   String?        @map("contact_id") @db.Uuid
+  title       String
+  description String?
+  status      FollowUpStatus @default(OPEN)
+  ballOwner   BallOwner      @default(THEM) @map("ball_owner")
+  dueAt       DateTime       @map("due_at")
+  // Une « relance » n'envoie rien en V0.1 : elle est simplement matérialisée ici.
+  nudgeCount  Int            @default(0) @map("nudge_count")
+  lastNudgedAt DateTime?     @map("last_nudged_at")
+  isDemo      Boolean        @default(false) @map("is_demo")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  completedAt DateTime?      @map("completed_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status, dueAt])
+  @@index([contactId])
+  @@map("follow_ups")
+}

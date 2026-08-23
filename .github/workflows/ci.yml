@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same pull request cancels the first run: nobody needs
+# the result for a commit that has already been replaced.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  quality:
+    name: Lint, typecheck, unit tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The Prisma client is generated into src/generated/, which is not
+      # committed. Everything below imports it.
+      - run: npm run db:generate
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      # A production build needs no database — that contract is covered by
+      # tests/unit/build-without-database.test.ts, and this step proves it
+      # again on a runner where none exists.
+      - name: Build
+        run: npm run build
+        env:
+          # The build reads AUTH_SECRET at import time in a few modules. This
+          # value never reaches a running instance; production refuses
+          # placeholder secrets outright.
+          AUTH_SECRET: ci-build-placeholder-not-used-at-runtime-32chars
+
+  integration:
+    name: Integration tests (PostgreSQL)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nodcrm
+          POSTGRES_PASSWORD: nodcrm
+          POSTGRES_DB: nod_crm_test
+        ports:
+          - 5432:5432
+        # Without a health check the steps below race the database's first
+        # start and fail intermittently, which is worse than failing always.
+        options: >-
+          --health-cmd "pg_isready -U nodcrm -d nod_crm_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # A throwaway database inside the runner: the suite truncates its tables
+      # between files. No external service and no secret are involved.
+      #
+      # `DATABASE_URL` is deliberately NOT set at job level. The suite sets it
+      # from `TEST_DATABASE_URL` itself, and warns when the two are already
+      # equal — a guard meant to catch someone about to truncate their own
+      # development database. Setting both here would fire that warning on
+      # every run and teach everyone to ignore it.
+      TEST_DATABASE_URL: postgresql://nodcrm:nodcrm@127.0.0.1:5432/nod_crm_test?schema=public
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run db:generate
+
+      - name: Apply migrations
+        run: npm run db:deploy
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+
+      - name: Integration tests
+        run: npm run test:integration
+
+      # Exercises the admin CLI through a real pseudo-terminal. The bug it
+      # guards against only reproduced in a genuine TTY, never with a mocked
+      # stdin.
+      - name: Admin CLI (pseudo-terminal)
+        run: npm run test:cli
+
+  docker:
+    name: Docker image and compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Validates the self-hosted stack a newcomer actually runs. The env file
+      # is the committed template: placeholder values are fine here because
+      # nothing is started.
+      - name: Validate compose files
+        run: |
+          docker compose --env-file .env.example config >/dev/null
+          docker compose -f docker-compose.dev.yml config >/dev/null
+
+      # The image is what self-hosters run. A broken Dockerfile is a broken
+      # release, so it is built on every pull request rather than at tag time.
+      - name: Build the production image
+        run: docker build --target runner -t nod-crm-app:ci .

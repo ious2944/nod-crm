@@ -1,0 +1,76 @@
+{
+  "name": "nod-crm",
+  "version": "0.1.0",
+  "description": "Open-source self-hosted CRM focused on follow-ups.",
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "homepage": "https://github.com/ious2944/nod-crm#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ious2944/nod-crm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ious2944/nod-crm/issues"
+  },
+  "keywords": [
+    "crm",
+    "follow-up",
+    "self-hosted",
+    "nextjs",
+    "postgresql",
+    "prisma"
+  ],
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "dev": "prisma generate && next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.mts",
+    "test:e2e": "node e2e/run.mjs",
+    "test:e2e:popover": "node e2e/popover.mjs",
+    "test:cli": "python3 tests/pty/admin-cli.py",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio",
+    "workspace:create": "node scripts/admin.mjs create-workspace",
+    "workspace:list": "node scripts/admin.mjs list-workspaces",
+    "user:create": "node scripts/admin.mjs create-user"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "^2.1.0",
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
+    "next": "16.3.2",
+    "pg": "^8.16.3",
+    "prisma": "^7.9.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "server-only": "^0.0.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20.19.43",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.2",
+    "playwright": "^1.62.1",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.12",
+    "typescript": "^5",
+    "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.2"
+  }
+}

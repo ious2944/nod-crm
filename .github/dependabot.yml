@@ -1,0 +1,34 @@
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    # One pull request per group rather than fifteen. Patch and minor bumps of
+    # the framework move together anyway, and reviewing them together is the
+    # only way they actually get reviewed.
+    groups:
+      next:
+        patterns: ["next", "eslint-config-next", "react", "react-dom", "@types/react*"]
+      prisma:
+        patterns: ["prisma", "@prisma/*"]
+      dev-tooling:
+        patterns: ["vitest", "typescript", "eslint", "tailwindcss", "@tailwindcss/*", "tsx", "playwright"]
+    # Major bumps are deliberately excluded: stability beats currency, and a
+    # major upgrade deserves a human deciding when, not a robot deciding
+    # Monday. Security advisories still open pull requests regardless.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: monthly

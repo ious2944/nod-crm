@@ -1,0 +1,73 @@
+name: Feature request
+description: Suggest something NOD CRM should do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        NOD CRM answers one question: **who should I follow up with today?**
+
+        A feature is not accepted because another CRM has it. It is accepted
+        when it solves a real problem *and* leaves the product as easy to
+        understand as it was before. The questions below are the ones that
+        actually decide it — please answer them honestly, including when the
+        answer is "I am not sure".
+
+        Some things are [explicitly out of scope](https://github.com/ious2944/nod-crm/blob/main/ROADMAP.md):
+        pipelines, deal scoring, marketing automation, plugin systems, SSO.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: |
+        What goes wrong today, in terms of what you were trying to do — not in
+        terms of the feature you already have in mind.
+      placeholder: |
+        I have around 60 open follow-ups. When someone emails me I cannot find
+        theirs without scrolling the whole board.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: Your proposed solution, if you have one.
+    validations:
+      required: false
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do instead today
+      description: |
+        How you work around it. "Nothing, I just live with it" is a perfectly
+        good answer, and a useful one.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: Does this add something to the interface?
+      description: |
+        A new field, a new screen, a new setting — anything a user has to learn.
+        Features that make NOD CRM *smaller* are the easiest to accept.
+      options:
+        - "No: it changes existing behaviour without adding anything"
+        - "A little: one control or one column"
+        - "Yes: a new screen, or several new fields"
+        - "I am not sure"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and the roadmap
+          required: true
+        - label: This helps answer "who should I follow up with today?"
+          required: false
