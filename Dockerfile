@@ -21,7 +21,7 @@
 # `npm ci` n'est jamais exécuté au démarrage : tout est figé à la construction.
 
 # ---------------------------------------------------------------- dépendances
-FROM node:22-bookworm AS deps
+FROM node:26-bookworm AS deps
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -57,7 +57,7 @@ RUN AUTH_SECRET="build-time-placeholder-value-not-used-at-runtime" \
 RUN npm prune --omit=dev
 
 # -------------------------------------------------------------------- runtime
-FROM node:22-bookworm AS runner
+FROM node:26-bookworm AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \
