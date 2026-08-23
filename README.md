@@ -75,9 +75,9 @@ Contacts, Organisations.
 
 ## Screenshots
 
-No screenshots are committed yet. Rather than ship mockups that do not match
-the product, the placeholders live in [`docs/screenshots/`](docs/screenshots/),
-which explains what to capture and how to contribute one.
+![NOD CRM Follow-Up board](docs/screenshots/board-light.png)
+
+The Follow-Up board keeps the next action visible: what needs your attention, what's on your side, and what's on theirs.
 
 ---
 
