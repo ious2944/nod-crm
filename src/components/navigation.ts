@@ -2,8 +2,8 @@
  * Navigation du CRM.
  *
  * Les entrées `available: false` sont affichées désactivées : elles annoncent la
- * suite (Contacts, Organisations, Dashboard) sans faire croire qu'un module
- * existe déjà. Rien d'autre que Follow-up n'est développé en V0.1.
+ * suite (Organisations, Dashboard) sans faire croire qu'un module existe déjà.
+ * En V0.2, Contacts rejoint Follow-up parmi les modules réellement développés.
  */
 export interface NavItem {
   label: string;
@@ -25,7 +25,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "CRM",
     items: [
-      { label: "Contacts", available: false, icon: "◍" },
+      { label: "Contacts", href: "/contacts", available: true, icon: "◍" },
       { label: "Organisations", available: false, icon: "▤" },
     ],
   },

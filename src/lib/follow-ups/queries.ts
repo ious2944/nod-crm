@@ -7,7 +7,15 @@ import { matchesOpenFilter, type FollowUpFilter } from "./filters";
 import { toFollowUpView, type FollowUpView } from "./view";
 
 const CONTACT_SELECTION = {
-  select: { id: true, firstName: true, lastName: true, organizationName: true },
+  // `archivedAt` sert uniquement à afficher « — archivé » à côté du nom : un
+  // suivi historique ne doit pas perdre silencieusement son interlocuteur.
+  select: {
+    id: true,
+    firstName: true,
+    lastName: true,
+    organizationName: true,
+    archivedAt: true,
+  },
 } as const;
 
 /** Compteurs du bandeau « Aujourd'hui ». */
@@ -23,12 +31,6 @@ export interface FollowUpStats {
 export interface FollowUpBoard {
   stats: FollowUpStats;
   items: FollowUpView[];
-}
-
-export interface ContactOption {
-  id: string;
-  name: string;
-  organizationName: string | null;
 }
 
 /**
@@ -79,18 +81,7 @@ export async function getFollowUpBoard(filter: FollowUpFilter): Promise<FollowUp
   };
 }
 
-export async function listContacts(): Promise<ContactOption[]> {
-  const workspaceId = await getWorkspaceIdForPage();
-
-  const contacts = await prisma.contact.findMany({
-    where: { workspaceId },
-    orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-    select: { id: true, firstName: true, lastName: true, organizationName: true },
-  });
-
-  return contacts.map((contact) => ({
-    id: contact.id,
-    name: `${contact.firstName} ${contact.lastName}`.trim(),
-    organizationName: contact.organizationName,
-  }));
-}
+// `listContacts` a disparu en V0.2 : le formulaire Follow-Up ne charge plus
+// l'annuaire entier dans la page, il interroge `searchContactOptions`
+// (`src/lib/contacts/queries.ts`), qui cherche côté serveur et plafonne le
+// résultat.

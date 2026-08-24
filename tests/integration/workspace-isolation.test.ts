@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { applyQuickAction, createFollowUp } from "@/app/(app)/follow-ups/actions";
 import { initialCreateState } from "@/lib/follow-ups/create-state";
-import { getFollowUpBoard, listContacts } from "@/lib/follow-ups/queries";
+import { searchContactOptions } from "@/lib/contacts/queries";
+import { getFollowUpBoard } from "@/lib/follow-ups/queries";
 import { prisma } from "@/lib/prisma";
 
 import {
@@ -53,7 +54,7 @@ describe("isolation des workspaces", () => {
   it("ne montre à Alice que ses propres contacts", async () => {
     await createContactRecord(alice.workspaceId);
 
-    const contacts = await listContacts();
+    const contacts = await searchContactOptions("");
 
     expect(contacts).toHaveLength(1);
     expect(contacts.map((contact) => contact.id)).not.toContain(bobContactId);

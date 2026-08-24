@@ -7,6 +7,8 @@ e2e
 tests
 coverage
 backups
+# Photos de contacts d'un environnement local : le conteneur monte un volume.
+var
 
 # Jamais dans le contexte de build : ils finiraient dans une couche d'image.
 .env

@@ -4,20 +4,12 @@ import { useActionState, useEffect, useId, useState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { createFollowUp } from "@/app/(app)/follow-ups/actions";
+import { FIELD, FieldError, LABEL } from "@/components/ui/form";
 import {
   initialCreateState,
   type CreateFollowUpState,
 } from "@/lib/follow-ups/create-state";
-import type { ContactOption } from "@/lib/follow-ups/queries";
-
-const FIELD =
-  "w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted/70";
-const LABEL = "block text-xs font-semibold uppercase tracking-wide text-muted";
-
-function FieldError({ message }: { message?: string }) {
-  if (!message) return null;
-  return <p className="mt-1 text-xs text-critical-fg">{message}</p>;
-}
+import { ContactPicker, type PickerSelection } from "./contact-picker";
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -33,14 +25,19 @@ function SubmitButton() {
 }
 
 export function NewFollowUpDialog({
-  contacts,
   defaultDueDate,
+  defaultContact,
+  triggerLabel = "Nouveau suivi",
+  triggerClassName,
 }: {
-  contacts: ContactOption[];
   defaultDueDate: string;
+  /** Contact déjà choisi — le bouton « + Nouveau Follow-Up » d'une fiche. */
+  defaultContact?: PickerSelection;
+  triggerLabel?: string;
+  triggerClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [contactMode, setContactMode] = useState("");
+  const [contactMode, setContactMode] = useState(defaultContact?.id ?? "");
   const titleId = useId();
 
   // La fermeture est décidée dans l'action elle-même : c'est le seul endroit qui
@@ -51,7 +48,7 @@ export function NewFollowUpDialog({
       const result = await createFollowUp(previous, formData);
       if (result.status === "success") {
         setOpen(false);
-        setContactMode("");
+        setContactMode(defaultContact?.id ?? "");
       }
       return result;
     },
@@ -74,9 +71,12 @@ export function NewFollowUpDialog({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accent-contrast transition-colors hover:bg-accent-hover"
+        className={
+          triggerClassName ??
+          "inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accent-contrast transition-colors hover:bg-accent-hover"
+        }
       >
-        <span aria-hidden>+</span> Nouveau suivi
+        <span aria-hidden>+</span> {triggerLabel}
       </button>
 
       {open && (
@@ -129,28 +129,12 @@ export function NewFollowUpDialog({
                 <FieldError message={errors.title} />
               </div>
 
-              <div>
-                <label className={LABEL} htmlFor="contactId">
-                  Contact
-                </label>
-                <select
-                  id="contactId"
-                  name="contactId"
-                  value={contactMode}
-                  onChange={(event) => setContactMode(event.target.value)}
-                  className={`mt-1 ${FIELD}`}
-                >
-                  <option value="">— Aucun contact —</option>
-                  {contacts.map((contact) => (
-                    <option key={contact.id} value={contact.id}>
-                      {contact.name}
-                      {contact.organizationName ? ` · ${contact.organizationName}` : ""}
-                    </option>
-                  ))}
-                  <option value="new">+ Nouveau contact…</option>
-                </select>
-                <FieldError message={errors.contactId} />
-              </div>
+              <ContactPicker
+                defaultSelection={defaultContact}
+                mode={contactMode}
+                onModeChange={setContactMode}
+                error={errors.contactId}
+              />
 
               {contactMode === "new" && (
                 <div className="nod-rise grid gap-3 rounded-lg border border-dashed border-border-strong p-3 sm:grid-cols-2">

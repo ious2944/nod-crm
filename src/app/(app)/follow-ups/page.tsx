@@ -11,7 +11,7 @@ import { NewFollowUpDialog } from "@/components/follow-ups/new-follow-up-dialog"
 import { APP_TIME_ZONE } from "@/lib/config";
 import { addDaysToKey, dayKey } from "@/lib/date";
 import { parseFilter } from "@/lib/follow-ups/filters";
-import { getFollowUpBoard, listContacts } from "@/lib/follow-ups/queries";
+import { getFollowUpBoard } from "@/lib/follow-ups/queries";
 
 export const metadata = {
   title: "Follow-up — NOD CRM",
@@ -25,7 +25,9 @@ export default async function FollowUpsPage({ searchParams }: PageProps<"/follow
   await connection();
 
   const filter = parseFilter((await searchParams).f);
-  const [board, contacts] = await Promise.all([getFollowUpBoard(filter), listContacts()]);
+  // Les contacts ne sont plus chargés ici : le sélecteur du formulaire les
+  // cherche côté serveur à la demande (`ContactPicker`).
+  const board = await getFollowUpBoard(filter);
   const today = dayKey(new Date(), APP_TIME_ZONE);
 
   return (
@@ -35,10 +37,7 @@ export default async function FollowUpsPage({ searchParams }: PageProps<"/follow
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Aujourd&apos;hui</h1>
           <AttentionHeadline count={board.stats.needsAttention} />
         </div>
-        <NewFollowUpDialog
-          contacts={contacts}
-          defaultDueDate={addDaysToKey(today, DEFAULT_DUE_IN_DAYS)}
-        />
+        <NewFollowUpDialog defaultDueDate={addDaysToKey(today, DEFAULT_DUE_IN_DAYS)} />
       </header>
 
       <section aria-label="Indicateurs" className="mt-6">

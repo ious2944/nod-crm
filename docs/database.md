@@ -21,7 +21,7 @@ login_attempts                  (standalone, rate limiting)
 | `users` | email (unique), Argon2id hash, display name, active flag, last login, `workspace_id` |
 | `sessions` | token **HMAC** (unique), absolute expiry, idle expiry, last used, revoked, user agent, IP **hash** |
 | `login_attempts` | scope (`email:…` or `ip:<fingerprint>`), success flag, timestamp |
-| `contacts` | first name, last name, optional email and organisation, `is_demo`, `workspace_id` |
+| `contacts` | first name, last name, optional email, phone, job title, organisation, notes, photo key and MIME type, `archived_at`, `is_demo`, `workspace_id` |
 | `follow_ups` | title, description, status, ball owner, due date, nudge count, last nudge, completed at, `is_demo`, `workspace_id`, optional `contact_id` |
 
 Everything is a UUID primary key, `snake_case` in the database, `camelCase` in
@@ -43,7 +43,9 @@ Each one earns its place:
 
 | Index | Why |
 | --- | --- |
-| `contacts (workspace_id, first_name, last_name)` | matches `listContacts`'s sort exactly, so PostgreSQL walks the index instead of sorting in memory |
+| `contacts (workspace_id, archived_at, first_name, last_name)` | the Contacts list always filters on the workspace and on "not archived", then sorts by name — the index order matches, so PostgreSQL walks it instead of sorting in memory |
+| `contacts (workspace_id, archived_at, created_at)` | the "recently added" sort |
+| `contacts (workspace_id, archived_at, updated_at)` | the "recently modified" sort |
 | `follow_ups (workspace_id, status, due_at)` | the board's only query: open items of one workspace, sorted by due date |
 | `follow_ups (contact_id)` | resolves the contact relation |
 | `sessions (user_id)`, `sessions (expires_at)` | session lookup and expiry sweeps |
@@ -94,8 +96,38 @@ migration means the new application never starts, which is the correct outcome.
 | `20260822061131_init` | workspaces, contacts, follow_ups |
 | `20260822110939_add_auth_users_sessions` | users, sessions, login_attempts |
 | `20260822122616_align_contacts_index` | contacts index aligned with the query's sort |
+| `20260824080401_contacts_module` | contacts gain phone, job title, notes, photo key and MIME type, `archived_at`; indexes realigned on the three list sorts |
 
-All three are additive. None destroys data.
+All four are additive. None destroys data. The V0.2 migration adds nullable
+columns only: existing contacts keep working, with `archived_at IS NULL`
+meaning "active".
+
+`follow_ups.contact_id` is untouched by the Contacts module — it has been
+nullable with `ON DELETE SET NULL` since the initial migration, which is
+exactly what the optional relation needs.
+
+## Contact search
+
+`ILIKE '%term%'` across first name, last name, email, phone, job title and
+organisation, one `AND` clause per typed word. No index can serve a leading
+wildcard, so this is a sequential scan of the workspace's contacts — fine at
+the volumes NOD CRM targets, and honest about it.
+
+If a workspace ever grows past a few thousand contacts, the next step is a
+`pg_trgm` GIN index rather than more `B-tree`s. It is deliberately not shipped
+now: the extension needs privileges some managed hosts do not grant, and it
+would cost write throughput for a problem nobody has yet.
+
+## Contact photos
+
+Photos are **never** stored in PostgreSQL. The row keeps an opaque key
+(`contacts/<uuid>.<ext>`) and the MIME type observed at upload; the bytes live
+in the object store (`src/lib/storage`), which is a local directory today and
+a bucket the day someone needs one. See `docs/contacts.md`.
+
+The practical consequence: a database dump alone is not a complete backup.
+`nod-crm-backup.sh` therefore writes a second archive of the uploads volume on
+every run, sharing the dump's timestamp — see `docs/backup-restore.md`.
 
 ## Demo data
 

@@ -7,7 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Nothing yet.
+**NOD CRM v0.2 — Contacts.**
+
+### Added
+
+- **Contacts module** — a real directory at `/contacts`, and the sidebar entry
+  is no longer marked "bientôt". A contact exists on its own: it does not need
+  a follow-up. First and last name, organisation, job title, email, phone,
+  free-form notes and an optional photo.
+- **Contact sheet** (`/contacts/[id]`) — the person's details, the follow-ups
+  attached to them, and a `+ Nouveau Follow-Up` button that opens the follow-up
+  form with the contact already selected.
+- **Server-side search** across first name, last name, email, phone, job title
+  and organisation. Case-insensitive, tolerant of empty fields, one `AND`
+  clause per typed word (so "julien doussot" works), debounced in the browser
+  and carried by the URL. The browser never receives the whole directory.
+- **Filters and sorting** — organisation (including "without organisation"),
+  follow-up state (any / active / none / all closed), and four sort orders
+  (name A→Z, Z→A, recently added, recently modified). Pagination is
+  server-side, 20 per page.
+- **Follow-up counts per contact** — computed with one grouped aggregation for
+  the whole page, never one query per row.
+- **Contact photos** — optional upload, validated by the file's actual leading
+  bytes (PNG, JPEG, GIF, WebP; 2 MB max), stored under a server-generated
+  random key in a new object store (`src/lib/storage`) behind a swappable
+  interface. Images are never stored in PostgreSQL. They are served by
+  `/api/contacts/[id]/photo`, which re-checks session and workspace. Contacts
+  without a photo get an initials avatar.
+- **Archiving** — `DELETE` sets `archived_at`. Archived contacts leave the
+  list, the search and the follow-up picker; their sheet stays reachable so
+  they can be restored. Their follow-ups are never deleted or unlinked.
+- **`docs/contacts.md`** — the module's design decisions, including why
+  organisations are still a text field and the exact path to a table.
+
+### Changed
+
+- The follow-up form's contact field is a **search box** instead of a
+  drop-down: it queries PostgreSQL as you type and returns at most eight
+  suggestions. The page no longer loads every contact of the workspace. The
+  submitted field contract is unchanged (`contactId` = empty, `new`, or a
+  UUID), as is inline contact creation.
+- `contacts` gains `phone`, `job_title`, `notes`, `photo_key`,
+  `photo_mime_type` and `archived_at`; its indexes are realigned on the three
+  list sorts. The migration is additive — no existing row or column is touched,
+  and `follow_ups.contact_id` is untouched.
+- The Docker stack mounts a named volume for contact photos
+  (`nod-crm-uploads-data`), and `deploy/backup/nod-crm-backup.sh` now writes a
+  second archive of it on every run, sharing the dump's timestamp. It refuses
+  to produce a database-only backup unless asked explicitly
+  (`NOD_CRM_SKIP_UPLOADS=1`): a backup that silently covers half the data is
+  the one you discover is incomplete on the day you need it. Restoring the
+  photos stays a manual step, documented in `docs/backup-restore.md`.
+- Shared form styling and a confirmation dialog moved to `src/components/ui/`,
+  so Contacts and Follow-Up render identical fields.
+
+### Security
+
+- Photo uploads: real MIME sniffing (the announced type and file name are
+  ignored), a 2 MB ceiling checked before the file is read into memory, a
+  server-generated random storage key, and two independent guards against path
+  traversal. SVG is refused.
+- Photos are not static assets. Serving one goes through the data access layer;
+  an unknown id and another workspace's id return the same `404`.
+- Every contact read and write is scoped to the workspace derived from the
+  session, and validated by a schema that enumerates its fields — an
+  enriched form cannot set `workspace_id`, `is_demo` or `archived_at`.
+
 
 ## [0.1.0] — first open-source release
 

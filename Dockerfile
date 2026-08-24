@@ -82,6 +82,14 @@ COPY --chown=nextjs:nodejs package.json next.config.ts prisma.config.ts ./
 COPY --chown=nextjs:nodejs prisma ./prisma
 COPY --chown=nextjs:nodejs scripts ./scripts
 
+# Répertoire des photos de contacts. Il est créé ici pour que le point de
+# montage existe et appartienne à `nextjs` même si aucun volume n'est monté :
+# sans cela, le premier envoi de photo échouerait en écriture, en production
+# comme sur un simple `docker run`. `docker-compose.yml` y monte un volume
+# nommé, seule façon de survivre à une reconstruction de l'image.
+ENV NOD_UPLOAD_DIR=/app/var/uploads
+RUN mkdir -p /app/var/uploads && chown -R nextjs:nodejs /app/var
+
 # Le processus ne tourne pas en root.
 USER nextjs
 
