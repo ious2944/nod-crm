@@ -11,7 +11,7 @@ The filter every item goes through:
 
 ---
 
-## V0.1 — Follow-Up *(current)*
+## V0.1 — Follow-Up
 
 Shipped and in use:
 
@@ -30,11 +30,27 @@ Shipped and in use:
 
 ---
 
-## V0.2 — better workflows
+## V0.2 — Contacts *(current)*
+
+Shipped:
+
+- A Contacts module of its own: directory, contact sheet, creation and editing.
+- Server-side search across name, email, phone, job title and organisation.
+- Filters (organisation, follow-up state), four sort orders, server pagination.
+- Optional contact photo, validated and stored outside the database.
+- Archiving instead of deletion — follow-ups are always preserved.
+- An optional contact on any follow-up, chosen through a server-side search.
+
+---
+
+## V0.3 — Organisations and follow-up editing
 
 The gaps that show up fastest in daily use:
 
-- **Search** across follow-ups and contacts.
+- **Organisations** promoted from a text field to a table, with the contacts
+  hanging off it. The migration path is already written down in
+  [docs/contacts.md](docs/contacts.md).
+- **Search** across follow-ups (contacts already have it).
 - **Editing an existing follow-up** — today only the quick actions can change
   one after creation.
 - **CSV import and export** for contacts, so nobody is locked in.
@@ -50,8 +66,7 @@ The gaps that show up fastest in daily use:
 
 Worth building eventually, in no particular order:
 
-- **Contacts module** — a real page, contact history, duplicate merging.
-- **Organisations module**.
+- **Contact history and duplicate merging** — the page itself shipped in V0.2.
 - **Follow-up history** — every nudge, snooze and hand-off, visible on the item.
 - **Business audit log** — who completed what, and when.
 - **MFA (TOTP), then passkeys.** The data model already accommodates it: a
@@ -59,7 +74,10 @@ Worth building eventually, in no particular order:
 - **Self-service password reset**, once there is a mail path worth securing.
 - **Real multi-user workspaces** with invitations. Isolation is already
   enforced everywhere; what is missing is the UI and the invitation flow.
-- **Pagination**, needed past roughly 2,000 open follow-ups.
+- **Pagination on the follow-up board**, needed past roughly 2,000 open items.
+  The Contacts list is already paginated.
+- **Trigram search index** (`pg_trgm`) for contacts, once a workspace is large
+  enough that the sequential scan shows.
 - **Public API and webhooks**, if and when something concrete needs them.
 - **Recurring follow-ups** ("nudge every 15 days while the ball is theirs").
 - **Notes** on a follow-up, timestamped.

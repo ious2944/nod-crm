@@ -21,9 +21,9 @@ forty-field contact forms — and there is no plan to add them.
 The metaphor is table tennis: 🏓 the ball is either **on your side** or **on
 theirs**. Everything on screen exists to make the next action obvious.
 
-> ⚠️ **V0.1.** One module, Follow-Up. It works and it is used in production,
-> but it is a young project — read [Limitations](#limitations) before you
-> commit to it. The user interface is currently in French only; the
+> ⚠️ **V0.2.** Two modules, Follow-Up and Contacts. They work and are used in
+> production, but it is a young project — read [Limitations](#limitations)
+> before you commit to it. The user interface is currently in French only; the
 > documentation is in English and internationalisation is on the roadmap.
 
 ---
@@ -43,14 +43,22 @@ theirs**. Everything on screen exists to make the next action obvious.
 
 ---
 
-## Features (V0.1)
+## Features (V0.2)
 
 Only what actually exists today:
 
-- **Contacts** — first name, last name, optional email and organisation.
-  Created inline from the follow-up form; there is no separate Contacts page
-  yet.
-- **Follow-ups** — subject, optional context, due date, ball owner.
+- **Contacts** — a directory of its own, at `/contacts`. First and last name,
+  organisation, job title, email, phone, free-form notes and an optional photo.
+  A contact exists with or without follow-ups.
+- **Contact search and filters** — one search box across name, email, phone,
+  job title and organisation, executed by PostgreSQL; filters by organisation
+  and by follow-up state; four sort orders; server-side pagination.
+- **Contact sheet** — everything about a person on one page, with their
+  follow-ups and a button to open a new one with the contact already selected.
+- **Archiving** — contacts are archived, never destroyed, and archiving one
+  never touches its follow-ups.
+- **Follow-ups** — subject, optional context, due date, ball owner, and an
+  optional contact.
 - **Due dates** with day-level reasoning in a configurable time zone, and a
   five-level visual ageing scale (upcoming → tomorrow → today → overdue →
   7+ days late).
@@ -69,7 +77,7 @@ Only what actually exists today:
   UI so it can never be confused with real data.
 
 Not built yet, and deliberately shown as disabled in the navigation: Dashboard,
-Contacts, Organisations.
+Organisations.
 
 ---
 
@@ -250,7 +258,7 @@ Third-party dependencies keep their own licenses; none of them was modified.
 
 ## Limitations
 
-Known and accepted in V0.1:
+Known and accepted in V0.2:
 
 - No MFA. A stolen password is enough. The data model is ready; the feature is
   not built.
@@ -259,8 +267,16 @@ Known and accepted in V0.1:
 - Multi-workspace isolation is enforced everywhere, but there is no UI to
   create or switch workspaces beyond the CLI.
 - "Nudge" records the nudge. It does not send an email — NOD CRM sends nothing.
-- No pagination: the board loads every open follow-up. Comfortable below
-  roughly 2,000 open items.
+- No pagination on the **Follow-up board**: it loads every open follow-up.
+  Comfortable below roughly 2,000 open items. The Contacts list *is* paginated.
+- Contact search is `ILIKE`, so it is a sequential scan. Fine at the volumes
+  NOD CRM targets; a `pg_trgm` index is the next step, not shipped yet.
+- Contact photos are files on a volume, not rows. Back that volume up with the
+  database — see [docs/backup-restore.md](docs/backup-restore.md).
+- Organisations are a text field on the contact, not a table. The migration
+  path is written down in [docs/contacts.md](docs/contacts.md).
+- Existing follow-ups still cannot be edited after creation; only the quick
+  actions change them.
 - Quick actions need JavaScript. The login screen does not.
 - The interface is French only.
 
@@ -270,15 +286,17 @@ Known and accepted in V0.1:
 
 Directions, not commitments. Full version in [ROADMAP.md](ROADMAP.md).
 
-**V0.1 — Follow-Up (current).** Contacts, follow-ups, the workflow,
-authentication, self-hosting.
+**V0.1 — Follow-Up.** Follow-ups, the workflow, authentication, self-hosting.
 
-**V0.2 — better workflows.** Search, richer filtering, CSV import/export,
-editing an existing follow-up, empty and error states, English UI.
+**V0.2 — Contacts (current).** A real Contacts module: directory, server-side
+search, filters, sorting, pagination, photos, archiving, and an optional link
+from any follow-up.
 
-**Later.** Contacts and Organisations modules, business audit log, MFA,
-self-service password reset, real multi-user workspaces, public API,
-integrations.
+**V0.3 — Organisations.** Promoting the organisation field to a table, plus
+searching follow-ups and editing an existing one.
+
+**Later.** Business audit log, MFA, self-service password reset, real
+multi-user workspaces, CSV import/export, public API, integrations.
 
 Deliberately out of scope for a long time: pipelines, deal scoring, marketing
 automation, and anything that turns NOD CRM into a generalist CRM.

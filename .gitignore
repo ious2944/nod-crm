@@ -61,3 +61,6 @@ next-env.d.ts
 # dumps de base
 /backups
 *.sql.gz
+
+# Photos de contacts stockées localement (montées sur un volume en production).
+/var/

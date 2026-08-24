@@ -78,12 +78,41 @@ export async function createFollowUpRecord(
   return followUp.id;
 }
 
-export async function createContactRecord(workspaceId: string): Promise<string> {
+export async function createContactRecord(
+  workspaceId: string,
+  overrides: Partial<{
+    firstName: string;
+    lastName: string;
+    email: string | null;
+    phone: string | null;
+    jobTitle: string | null;
+    organizationName: string | null;
+    notes: string | null;
+    archivedAt: Date | null;
+  }> = {},
+): Promise<string> {
   const contact = await prisma.contact.create({
-    data: { workspaceId, firstName: "Test", lastName: "Contact" },
+    data: { workspaceId, firstName: "Test", lastName: "Contact", ...overrides },
     select: { id: true },
   });
   return contact.id;
+}
+
+/** Construit un `FormData` en y joignant un fichier — pour tester l'upload. */
+export function formDataWithFile(
+  fields: Record<string, string | number>,
+  file: { name: string; type: string; bytes: Uint8Array },
+): FormData {
+  const data = formData(fields);
+  data.set("photo", new File([file.bytes as BlobPart], file.name, { type: file.type }));
+  return data;
+}
+
+/** En-tête PNG valide, suivi d'un remplissage. Assez pour la détection MIME. */
+export function pngBytes(size = 64): Uint8Array {
+  const bytes = new Uint8Array(size);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  return bytes;
 }
 
 /** Construit un `FormData` à partir d'un objet simple. */

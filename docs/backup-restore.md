@@ -3,6 +3,15 @@
 Two scripts, in [`deploy/backup/`](../deploy/backup/). They only ever touch the
 NOD CRM database.
 
+> **Since V0.2, the database is no longer the whole story.** Contact photos are
+> files, not rows: they live on the `nod-crm-uploads-data` volume
+> (`NOD_UPLOAD_DIR`, `/app/var/uploads` in the container). A `pg_dump` restored
+> without them leaves contacts pointing at photos that are gone. Snapshot that
+> volume alongside the dump — for example
+> `docker run --rm -v nod-crm-uploads-data:/data:ro -v "$PWD":/out alpine tar czf /out/nod-crm-uploads.tar.gz -C /data .`
+> — and restore it before starting the application again. The scripts below do
+> not do this for you.
+
 | | |
 | --- | --- |
 | Tool | `pg_dump`, plain format, `--clean --if-exists` |

@@ -25,12 +25,6 @@ export interface FollowUpBoard {
   items: FollowUpView[];
 }
 
-export interface ContactOption {
-  id: string;
-  name: string;
-  organizationName: string | null;
-}
-
 /**
  * Une seule lecture pour toute la page : les suivis ouverts servent à la fois
  * aux compteurs et à la liste. Le volume attendu en V0.1 (quelques dizaines de
@@ -79,18 +73,7 @@ export async function getFollowUpBoard(filter: FollowUpFilter): Promise<FollowUp
   };
 }
 
-export async function listContacts(): Promise<ContactOption[]> {
-  const workspaceId = await getWorkspaceIdForPage();
-
-  const contacts = await prisma.contact.findMany({
-    where: { workspaceId },
-    orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-    select: { id: true, firstName: true, lastName: true, organizationName: true },
-  });
-
-  return contacts.map((contact) => ({
-    id: contact.id,
-    name: `${contact.firstName} ${contact.lastName}`.trim(),
-    organizationName: contact.organizationName,
-  }));
-}
+// `listContacts` a disparu en V0.2 : le formulaire Follow-Up ne charge plus
+// l'annuaire entier dans la page, il interroge `searchContactOptions`
+// (`src/lib/contacts/queries.ts`), qui cherche côté serveur et plafonne le
+// résultat.

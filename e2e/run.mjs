@@ -109,7 +109,11 @@ try {
   const title = `E2E ${Date.now()}`;
   await page.getByRole("button", { name: "Nouveau suivi" }).click();
   await page.fill("#title", title);
-  await page.selectOption("#contactId", "new");
+  // Le sélecteur de contact n'est plus une liste déroulante : il cherche côté
+  // serveur. On passe donc par son champ de recherche puis par l'option de
+  // création rapide, qui fait réapparaître les champs prénom / nom.
+  await page.getByPlaceholder("Rechercher un contact...").click();
+  await page.getByRole("option", { name: "+ Créer un contact" }).click();
   await page.fill("#newContactFirstName", "Camille");
   await page.fill("#newContactLastName", "Durand");
   await page.fill("#dueDate", "2020-01-01");
@@ -177,7 +181,45 @@ try {
   await page.waitForTimeout(1200);
   check("abandonné", (await page.locator("article", { hasText: title }).count()) === 0);
 
-  section("6. Déconnexion");
+  section("6. Module Contacts");
+  const contactName = `Contact E2E ${Date.now()}`;
+  await page.getByRole("link", { name: "Contacts", exact: true }).first().click();
+  await page.waitForURL("**/contacts", { timeout: 15000 });
+  check("la sidebar mène au module Contacts", new URL(page.url()).pathname === "/contacts");
+
+  await page.getByRole("button", { name: "Nouveau contact" }).click();
+  await page.fill("#firstName", contactName);
+  await page.fill("#lastName", "Durand");
+  await page.fill("#organizationName", "E2E Corp");
+  await page.fill("#email", "e2e@example.test");
+  await page.getByRole("button", { name: "Créer le contact" }).click();
+  await page.waitForSelector(`text=${contactName}`, { timeout: 15000 });
+  check("contact créé et listé", (await page.locator("article", { hasText: contactName }).count()) === 1);
+
+  // La recherche passe par l'URL : c'est PostgreSQL qui filtre, pas le navigateur.
+  await page.getByPlaceholder("Rechercher un contact...").fill(contactName);
+  await page.waitForFunction(
+    (value) => new URL(window.location.href).searchParams.get("q") === value,
+    contactName,
+    { timeout: 10000 },
+  );
+  check("la recherche est portée par l'URL", new URL(page.url()).searchParams.get("q") === contactName);
+  check("le contact est retrouvé", (await page.locator("article", { hasText: contactName }).count()) === 1);
+
+  await page.getByPlaceholder("Rechercher un contact...").fill("aucune-correspondance-possible");
+  await page.waitForSelector("text=Aucun contact ne correspond", { timeout: 10000 });
+  check("une recherche sans résultat le dit", true);
+
+  await page.goto(`/contacts?q=${encodeURIComponent(contactName)}`, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name: contactName }).click();
+  await page.waitForSelector("text=Follow-Ups", { timeout: 15000 });
+  check("la fiche contact s'ouvre", new URL(page.url()).pathname.startsWith("/contacts/"));
+  check(
+    "elle annonce l'absence de suivi",
+    (await page.locator("text=Aucun suivi pour ce contact.").count()) === 1,
+  );
+
+  section("7. Déconnexion");
   await page.getByRole("button", { name: "Déconnexion" }).first().click();
   await page.waitForURL("**/login", { timeout: 15000 });
   check("redirection vers /login", new URL(page.url()).pathname === "/login");
@@ -186,7 +228,7 @@ try {
   await page.goto("/follow-ups", { waitUntil: "networkidle" });
   check("la session est bien invalidée", new URL(page.url()).pathname === "/login");
 
-  section("7. Hygiène");
+  section("8. Hygiène");
   check("aucune erreur JavaScript", consoleErrors.length === 0, consoleErrors.join(" | "));
   const html = await page.content();
   check(

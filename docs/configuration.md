@@ -96,6 +96,23 @@ existing volume. Pointing it at a name that does not exist creates an empty
 volume: PostgreSQL initialises a blank database and the application starts with
 no data. It does not migrate anything.
 
+### `NOD_UPLOAD_DIR` — default `<project>/var/uploads`
+
+Directory holding contact photos. Images are never stored in PostgreSQL: the
+row keeps an opaque key, the bytes live here. The directory sits outside the
+web root and is only ever read through an authenticated route that re-checks
+the workspace.
+
+The Docker image sets it to `/app/var/uploads` and `docker-compose.yml` mounts
+a named volume there. Back that volume up **together** with the database — a
+dump restored without it leaves contacts pointing at photos that are gone.
+
+### `UPLOADS_VOLUME_NAME` — default `nod-crm-uploads-data`
+
+Name of the Docker volume holding contact photos. Same warning as
+`POSTGRES_VOLUME_NAME`: a name that does not exist creates an empty volume, and
+existing contacts then reference files that are not there.
+
 ### `DATABASE_URL` — development only
 
 Direct connection string, used when you run the application outside Docker

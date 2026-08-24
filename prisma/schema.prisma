@@ -96,23 +96,51 @@ model LoginAttempt {
   @@map("login_attempts")
 }
 
+/// Référentiel central des personnes (V0.2).
+///
+/// Un contact existe indépendamment de tout suivi : c'est lui le référentiel,
+/// pas le Follow-Up. La relation `follow_ups.contact_id` reste facultative.
+///
+/// **Organisation.** Le rattachement est un simple champ texte
+/// (`organization_name`) et non une clé étrangère. C'est un choix assumé pour
+/// la V0.2 : créer une table `organizations` complète aurait imposé un module
+/// de gestion (création, fusion, doublons, renommage) qui n'est pas au
+/// programme. La migration future est préparée sans être développée — voir
+/// `docs/contacts.md` : ajouter `organizations`, y insérer les valeurs
+/// distinctes de `organization_name`, ajouter `organization_id` nullable, et
+/// ne retirer la colonne texte qu'une fois la reprise faite.
 model Contact {
-  id               String   @id @default(uuid()) @db.Uuid
-  workspaceId      String   @map("workspace_id") @db.Uuid
-  firstName        String   @map("first_name")
-  lastName         String   @map("last_name")
+  id               String    @id @default(uuid()) @db.Uuid
+  workspaceId      String    @map("workspace_id") @db.Uuid
+  firstName        String    @map("first_name")
+  lastName         String    @map("last_name")
   email            String?
-  organizationName String?  @map("organization_name")
-  isDemo           Boolean  @default(false) @map("is_demo")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  phone            String?
+  jobTitle         String?   @map("job_title")
+  organizationName String?   @map("organization_name")
+  notes            String?
+  /// Clé opaque dans le magasin d'objets (`src/lib/storage`), jamais un chemin
+  /// choisi par l'utilisateur. L'image elle-même n'est PAS stockée en base.
+  photoKey         String?   @map("photo_key")
+  /// Type MIME **constaté** à l'upload (octets d'en-tête), pas celui annoncé.
+  photoMimeType    String?   @map("photo_mime_type")
+  /// Archivage logique : aucune suppression destructive, et les suivis liés
+  /// sont conservés tels quels.
+  archivedAt       DateTime? @map("archived_at")
+  isDemo           Boolean   @default(false) @map("is_demo")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   followUps FollowUp[]
 
-  // Ordre calqué sur le tri de `listContacts` : sans cela, PostgreSQL
-  // trie en mémoire au lieu de parcourir l'index.
-  @@index([workspaceId, firstName, lastName])
+  // Les trois index suivent les trois tris proposés par la liste Contacts, et
+  // commencent tous par le couple réellement filtré (`workspace_id`,
+  // `archived_at`) : sans `archived_at` en tête, PostgreSQL filtrait les
+  // archivés après avoir trié.
+  @@index([workspaceId, archivedAt, firstName, lastName])
+  @@index([workspaceId, archivedAt, createdAt])
+  @@index([workspaceId, archivedAt, updatedAt])
   @@map("contacts")
 }
 

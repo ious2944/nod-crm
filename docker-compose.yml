@@ -102,6 +102,13 @@ services:
       APP_NAME: ${APP_NAME:-NOD CRM}
       APP_SOURCE_URL: ${APP_SOURCE_URL:-https://github.com/ious2944/nod-crm}
       APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Paris}
+      NOD_UPLOAD_DIR: /app/var/uploads
+    volumes:
+      # Contact photos. They live on a named volume, not inside the image: a
+      # rebuild replaces the image, and anything written into its filesystem
+      # would go with it. Nothing else is mounted — the application code stays
+      # immutable, exactly as built.
+      - uploads-data:/app/var/uploads
     ports:
       # Loopback by default: a reverse proxy is the only intended entry point.
       # Session cookies are `Secure` in production, so a directly exposed
@@ -128,3 +135,8 @@ volumes:
     # Overridable so an existing deployment can adopt its current volume
     # instead of starting from an empty database.
     name: ${POSTGRES_VOLUME_NAME:-nod-crm-postgres-data}
+  uploads-data:
+    # Same reasoning as postgres-data: overridable to adopt an existing volume.
+    # Back it up alongside the database — the rows reference these files, so
+    # a dump restored without them leaves contacts with missing photos.
+    name: ${UPLOADS_VOLUME_NAME:-nod-crm-uploads-data}
