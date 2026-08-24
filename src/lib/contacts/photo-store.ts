@@ -47,7 +47,22 @@ export async function storePhotoUpload(value: FormDataEntryValue | null): Promis
   }
 
   const key = buildPhotoKey(inspection.format, randomUUID());
-  await objectStore.put(key, bytes);
+
+  try {
+    await objectStore.put(key, bytes);
+  } catch {
+    // Volume non monté, monté en lecture seule, mauvais propriétaire, disque
+    // plein : autant de pannes d'exploitation bien réelles. Elles ne doivent
+    // pas remonter en exception jusqu'à la frontière d'erreur — l'utilisateur
+    // y perdrait tout son formulaire pour un problème qui n'est pas le sien.
+    // Le détail part dans les journaux du conteneur, jamais dans la réponse :
+    // un message système contient un chemin du système de fichiers.
+    console.error("[contacts] écriture impossible dans le magasin d'objets");
+    return {
+      status: "rejected",
+      message: "La photo n'a pas pu être enregistrée. Réessaie ou enregistre le contact sans photo.",
+    };
+  }
 
   return {
     status: "stored",

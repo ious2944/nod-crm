@@ -64,7 +64,14 @@ format would be worse than accepting an odd-looking one.
 - the contact leaves the list, the search and the follow-up picker;
 - its detail sheet stays reachable, so it can be restored;
 - **its follow-ups are untouched** — not deleted, not unlinked. The historical
-  relation stays readable.
+  relation stays readable;
+- it accepts **no new follow-up**. `createFollowUp` filters on
+  `archivedAt: null` alongside the workspace, so a form left open in another
+  tab cannot post its id either. The sheet hides the button rather than
+  offering one that would fail;
+- in the Follow-up board its name is still shown, followed by a discreet
+  **archivé** badge. Making the contact vanish from a historical follow-up
+  would read as data loss; saying it is archived reads as what it is.
 
 There is no destructive delete in the interface. Removing a contact for good is
 a database operation, and the `ON DELETE SET NULL` on `follow_ups.contact_id`
@@ -110,8 +117,10 @@ Swapping in object storage means writing a second implementation of
 `ObjectStore` and changing the last line of `src/lib/storage/index.ts`. No
 caller changes.
 
-**Back up `NOD_UPLOAD_DIR` with the database.** A `pg_dump` restored without it
-leaves contacts pointing at photos that are gone.
+**`NOD_UPLOAD_DIR` is backed up with the database**, as a second archive per
+run (`docs/backup-restore.md`). A `pg_dump` restored without it leaves contacts
+pointing at photos that are gone — the sheet then falls back to the initials
+avatar, so the contact survives, the picture does not.
 
 ## Follow-up counts, without N+1
 

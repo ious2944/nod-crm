@@ -52,8 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   list sorts. The migration is additive — no existing row or column is touched,
   and `follow_ups.contact_id` is untouched.
 - The Docker stack mounts a named volume for contact photos
-  (`nod-crm-uploads-data`). **Back it up with the database:** a `pg_dump`
-  restored without it leaves contacts pointing at photos that are gone.
+  (`nod-crm-uploads-data`), and `deploy/backup/nod-crm-backup.sh` now writes a
+  second archive of it on every run, sharing the dump's timestamp. It refuses
+  to produce a database-only backup unless asked explicitly
+  (`NOD_CRM_SKIP_UPLOADS=1`): a backup that silently covers half the data is
+  the one you discover is incomplete on the day you need it. Restoring the
+  photos stays a manual step, documented in `docs/backup-restore.md`.
 - Shared form styling and a confirmation dialog moved to `src/components/ui/`,
   so Contacts and Follow-Up render identical fields.
 

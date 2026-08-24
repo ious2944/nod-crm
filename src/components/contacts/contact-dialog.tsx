@@ -150,7 +150,12 @@ export function ContactDialog({
           </fieldset>
 
           <div>
-            <span className={LABEL}>Photo (facultatif)</span>
+            {/* Un `<label for>`, pas un `<span>` : sans lui le sélecteur de
+                fichier n'a aucun nom accessible — un lecteur d'écran annonce
+                « bouton Parcourir », sans dire de quoi il s'agit. */}
+            <label className={LABEL} htmlFor="photo">
+              Photo (facultatif)
+            </label>
             <div className="mt-1 flex items-center gap-3">
               <ContactAvatar
                 initials={initialsPreview(contact)}

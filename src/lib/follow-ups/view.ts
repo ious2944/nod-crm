@@ -26,6 +26,7 @@ export interface FollowUpRecord {
     firstName: string;
     lastName: string;
     organizationName: string | null;
+    archivedAt: Date | null;
   } | null;
 }
 
@@ -46,6 +47,8 @@ export interface FollowUpView {
   ballLabel: string;
   contactName: string | null;
   contactInitials: string | null;
+  /** Le contact lié a été archivé : on le dit, on ne le fait pas disparaître. */
+  contactArchived: boolean;
   organizationName: string | null;
   nudgeCount: number;
   nudgeLabel: string | null;
@@ -90,6 +93,7 @@ export function toFollowUpView(
     ballLabel: ballLabel(record.ballOwner, record.contact?.firstName),
     contactName: record.contact ? contactFullName(record.contact) : null,
     contactInitials: record.contact ? initials(record.contact) : null,
+    contactArchived: record.contact?.archivedAt != null,
     organizationName: record.contact?.organizationName ?? null,
     nudgeCount: record.nudgeCount,
     nudgeLabel: nudgeLabel(record.nudgeCount),

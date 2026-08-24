@@ -126,7 +126,8 @@ in the object store (`src/lib/storage`), which is a local directory today and
 a bucket the day someone needs one. See `docs/contacts.md`.
 
 The practical consequence: a database dump alone is not a complete backup.
-Back the uploads volume up with it.
+`nod-crm-backup.sh` therefore writes a second archive of the uploads volume on
+every run, sharing the dump's timestamp — see `docs/backup-restore.md`.
 
 ## Demo data
 

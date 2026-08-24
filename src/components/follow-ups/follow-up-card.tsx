@@ -56,6 +56,11 @@ export function FollowUpCard({ item }: { item: FollowUpView }) {
                   {item.contactInitials}
                 </span>
                 {item.contactName}
+                {item.contactArchived && (
+                  <span className="rounded-full border border-border-subtle px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-muted">
+                    archivé
+                  </span>
+                )}
               </span>
             ) : (
               <span className="italic">Sans contact</span>

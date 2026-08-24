@@ -7,7 +7,15 @@ import { matchesOpenFilter, type FollowUpFilter } from "./filters";
 import { toFollowUpView, type FollowUpView } from "./view";
 
 const CONTACT_SELECTION = {
-  select: { id: true, firstName: true, lastName: true, organizationName: true },
+  // `archivedAt` sert uniquement à afficher « — archivé » à côté du nom : un
+  // suivi historique ne doit pas perdre silencieusement son interlocuteur.
+  select: {
+    id: true,
+    firstName: true,
+    lastName: true,
+    organizationName: true,
+    archivedAt: true,
+  },
 } as const;
 
 /** Compteurs du bandeau « Aujourd'hui ». */

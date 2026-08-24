@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildContactListHref,
+  escapeLikePattern,
   MAX_SEARCH_TOKENS,
   parseContactFollowUpFilter,
   parseContactListParams,
@@ -37,6 +38,19 @@ describe("parsePage", () => {
 
   it("plafonne les valeurs absurdes plutôt que de les passer à OFFSET", () => {
     expect(parsePage("99999999")).toBe(10_000);
+  });
+});
+
+describe("escapeLikePattern", () => {
+  it("neutralise les jokers de LIKE", () => {
+    expect(escapeLikePattern("50%")).toBe("50\\%");
+    expect(escapeLikePattern("john_doe")).toBe("john\\_doe");
+    expect(escapeLikePattern("a\\b")).toBe("a\\\\b");
+  });
+
+  it("laisse le reste intact", () => {
+    expect(escapeLikePattern("Doussot")).toBe("Doussot");
+    expect(escapeLikePattern("julien@example.com")).toBe("julien@example.com");
   });
 });
 

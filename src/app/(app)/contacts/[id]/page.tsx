@@ -123,12 +123,21 @@ export default async function ContactPage({ params }: PageProps<"/contacts/[id]"
       <section aria-label="Follow-Ups" className="mt-8 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold tracking-tight">Follow-Ups</h2>
-          <NewFollowUpDialog
-            defaultDueDate={addDaysToKey(today, DEFAULT_DUE_IN_DAYS)}
-            defaultContact={{ id: contact.id, name: contact.displayName }}
-            triggerLabel="Nouveau Follow-Up"
-            triggerClassName="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:bg-surface-muted"
-          />
+          {/* Pas de nouveau suivi sur un contact archivé : le serveur le refuse
+              (`createFollowUp`), et proposer un bouton qui échoue serait pire
+              que ne rien proposer. Les suivis existants restent affichés. */}
+          {contact.archived ? (
+            <p className="text-xs text-muted">
+              Restaure le contact pour lui ouvrir un nouveau suivi.
+            </p>
+          ) : (
+            <NewFollowUpDialog
+              defaultDueDate={addDaysToKey(today, DEFAULT_DUE_IN_DAYS)}
+              defaultContact={{ id: contact.id, name: contact.displayName }}
+              triggerLabel="Nouveau Follow-Up"
+              triggerClassName="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:bg-surface-muted"
+            />
+          )}
         </div>
 
         <ContactFollowUps followUps={contact.followUps} />

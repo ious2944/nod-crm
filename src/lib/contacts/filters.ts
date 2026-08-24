@@ -92,6 +92,19 @@ export function parsePage(value: RawParam): number {
 }
 
 /**
+ * Neutralise les jokers de `LIKE` dans un terme de recherche.
+ *
+ * Prisma paramètre la requête — il n'y a donc pas d'injection SQL possible —
+ * mais il ne protège PAS `%` et `_`, qui gardent leur sens de joker à
+ * l'intérieur du motif. Sans cet échappement, chercher `%` renvoyait tout le
+ * carnet, et `john_doe@…` ramenait aussi `johnXdoe@…`. PostgreSQL retient la
+ * barre oblique inverse comme caractère d'échappement par défaut de `LIKE`.
+ */
+export function escapeLikePattern(term: string): string {
+  return term.replace(/[\\%_]/g, "\\$&");
+}
+
+/**
  * Découpe la recherche en mots. Chaque mot devra correspondre à *au moins un*
  * champ du contact : « julien doussot » retrouve ainsi la personne, alors
  * qu'aucun champ pris isolément ne contient les deux mots.

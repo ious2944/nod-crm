@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { getWorkspaceIdForPage } from "@/lib/workspace";
 import {
   CONTACTS_PAGE_SIZE,
+  escapeLikePattern,
   NO_ORGANIZATION,
   searchTokens,
   type ContactListParams,
@@ -49,7 +50,13 @@ const CONTACT_FIELDS = {
 } as const;
 
 const FOLLOW_UP_CONTACT_SELECTION = {
-  select: { id: true, firstName: true, lastName: true, organizationName: true },
+  select: {
+    id: true,
+    firstName: true,
+    lastName: true,
+    organizationName: true,
+    archivedAt: true,
+  },
 } as const;
 
 export interface ContactListPage {
@@ -108,7 +115,11 @@ function buildWhere(
 ): Prisma.ContactWhereInput {
   const and: Prisma.ContactWhereInput[] = [];
 
-  for (const token of searchTokens(params.search)) {
+  for (const rawToken of searchTokens(params.search)) {
+    // `%` et `_` sont des jokers pour `LIKE` : on les neutralise, sinon une
+    // recherche sur « 50% » ou « john_doe » ne veut plus dire ce qu'elle dit.
+    const token = escapeLikePattern(rawToken);
+
     and.push({
       OR: [
         { firstName: { contains: token, mode: "insensitive" } },

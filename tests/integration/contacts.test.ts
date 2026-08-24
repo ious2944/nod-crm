@@ -23,6 +23,7 @@ import {
   searchContactOptions,
 } from "@/lib/contacts/queries";
 import { initialCreateState } from "@/lib/follow-ups/create-state";
+import { getFollowUpBoard } from "@/lib/follow-ups/queries";
 import { prisma } from "@/lib/prisma";
 import { objectStore } from "@/lib/storage";
 
@@ -693,6 +694,36 @@ describe("photos de contact", () => {
     expect(await objectStore.read(before.photoKey!)).toBeNull();
   });
 
+  it("rend proprement une panne d'écriture du magasin d'objets", async () => {
+    const original = objectStore.put;
+    // Volume non monté, monté en lecture seule, mauvais propriétaire, disque
+    // plein : la panne est réelle en exploitation, et l'utilisateur ne doit ni
+    // perdre son formulaire ni voir un chemin du système de fichiers.
+    (objectStore as { put: typeof objectStore.put }).put = async () => {
+      const error = new Error("EACCES: permission denied, open '/app/var/uploads/x'");
+      (error as NodeJS.ErrnoException).code = "EACCES";
+      throw error;
+    };
+
+    try {
+      const result = await createContact(
+        initialContactFormState,
+        formDataWithFile(
+          { firstName: "Disque" },
+          { name: "a.png", type: "image/png", bytes: pngBytes() },
+        ),
+      );
+
+      expect(result.status).toBe("error");
+      expect(result.fieldErrors?.photo).toBeDefined();
+      expect(JSON.stringify(result)).not.toContain("EACCES");
+      expect(JSON.stringify(result)).not.toContain("/app/var");
+      expect(await prisma.contact.count()).toBe(0);
+    } finally {
+      (objectStore as { put: typeof objectStore.put }).put = original;
+    }
+  });
+
   it("ne touche pas à la photo quand le formulaire n'en envoie pas", async () => {
     await createContact(
       initialContactFormState,
@@ -712,6 +743,150 @@ describe("photos de contact", () => {
 
     const after = await prisma.contact.findUniqueOrThrow({ where: { id: before.id } });
     expect(after.photoKey).toBe(before.photoKey);
+  });
+});
+
+describe("recherche — jokers et caractères spéciaux", () => {
+  let user: TestUser;
+
+  beforeEach(async () => {
+    await resetDatabase();
+    user = await createWorkspaceWithUser("contacts-jokers-ws");
+    await signIn(user);
+
+    await createContactRecord(user.workspaceId, { firstName: "Alpha", lastName: "One" });
+    await createContactRecord(user.workspaceId, { firstName: "Beta", lastName: "Two" });
+    await createContactRecord(user.workspaceId, {
+      firstName: "Litteral",
+      lastName: "Pourcent",
+      jobTitle: "Remise 50%",
+      email: "john_doe@example.com",
+    });
+  });
+
+  async function names(search: string): Promise<string[]> {
+    const page = await listContactsPage(listParams({ search }));
+    return page.items.map((item) => item.displayName);
+  }
+
+  /**
+   * Prisma paramètre la requête, donc aucune injection n'est possible — mais il
+   * ne neutralise pas `%` ni `_`, qui restent des jokers à l'intérieur du motif
+   * `LIKE`. Sans échappement, « % » renvoyait tout le carnet et « john_doe »
+   * ramenait aussi « johnXdoe ».
+   */
+  it("traite « % » comme un caractère, pas comme « tout »", async () => {
+    expect(await names("%")).toEqual(["Litteral Pourcent"]);
+    expect(await names("50%")).toEqual(["Litteral Pourcent"]);
+  });
+
+  it("traite « _ » comme un caractère, pas comme « n'importe lequel »", async () => {
+    expect(await names("A_pha")).toEqual([]);
+    expect(await names("john_doe")).toEqual(["Litteral Pourcent"]);
+  });
+
+  it("ne se laisse pas désarçonner par une tentative d'injection", async () => {
+    for (const attempt of [
+      "' OR 1=1 --",
+      "'; DROP TABLE contacts; --",
+      "\\",
+      "%' --",
+    ]) {
+      await expect(names(attempt), attempt).resolves.toEqual([]);
+    }
+    // La table est toujours là, avec ses trois lignes.
+    expect(await prisma.contact.count()).toBe(3);
+  });
+});
+
+describe("photo — gestionnaire de route", () => {
+  let alice: TestUser;
+  let bob: TestUser;
+  let aliceContactId: string;
+  let bobContactId: string;
+
+  async function get(id: string): Promise<Response> {
+    const { GET } = await import("@/app/api/contacts/[id]/photo/route");
+    return GET(new Request(`http://localhost/api/contacts/${id}/photo`), {
+      params: Promise.resolve({ id }),
+    });
+  }
+
+  beforeEach(async () => {
+    await resetDatabase();
+    alice = await createWorkspaceWithUser("photo-route-a");
+    bob = await createWorkspaceWithUser("photo-route-b");
+
+    await signIn(alice);
+    await createContact(
+      initialContactFormState,
+      formDataWithFile(
+        { firstName: "Alice" },
+        { name: "a.png", type: "image/png", bytes: pngBytes() },
+      ),
+    );
+    aliceContactId = (
+      await prisma.contact.findFirstOrThrow({ where: { workspaceId: alice.workspaceId } })
+    ).id;
+
+    await signIn(bob);
+    await createContact(
+      initialContactFormState,
+      formDataWithFile(
+        { firstName: "Bob" },
+        { name: "b.png", type: "image/png", bytes: pngBytes(96) },
+      ),
+    );
+    bobContactId = (
+      await prisma.contact.findFirstOrThrow({ where: { workspaceId: bob.workspaceId } })
+    ).id;
+
+    await signIn(alice);
+  });
+
+  it("sert la photo du workspace courant", async () => {
+    const response = await get(aliceContactId);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("cache-control")).toContain("private");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(pngBytes());
+  });
+
+  it("refuse la photo d'un contact d'un autre workspace", async () => {
+    const response = await get(bobContactId);
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("");
+  });
+
+  it("répond comme pour un contact inexistant — rien à énumérer", async () => {
+    const unknown = await get("11111111-2222-4333-8444-555555555555");
+    const foreign = await get(bobContactId);
+
+    expect(unknown.status).toBe(foreign.status);
+    expect(unknown.status).toBe(404);
+  });
+
+  it("refuse un identifiant qui n'est pas un UUID", async () => {
+    expect((await get("../../etc/passwd")).status).toBe(404);
+    expect((await get("42")).status).toBe(404);
+  });
+
+  it("refuse un visiteur sans session", async () => {
+    dropCookie();
+    expect((await get(aliceContactId)).status).toBe(401);
+  });
+
+  it("ne rend pas 500 quand le fichier a disparu du magasin", async () => {
+    const contact = await prisma.contact.findUniqueOrThrow({
+      where: { id: aliceContactId },
+      select: { photoKey: true },
+    });
+    await objectStore.remove(contact.photoKey!);
+
+    expect((await get(aliceContactId)).status).toBe(404);
   });
 });
 
@@ -891,6 +1066,44 @@ describe("non-régression Follow-Up", () => {
 
     // La fiche du contact archivé continue de montrer l'historique.
     expect((await getContactDetail(contactId))?.followUps).toHaveLength(1);
+  });
+
+  it("refuse un nouveau suivi sur un contact archivé", async () => {
+    await archiveContact(formData({ id: contactId }));
+
+    // Le sélecteur ne le propose plus, mais un formulaire resté ouvert dans un
+    // onglet poste encore son UUID : c'est le serveur qui doit refuser.
+    const result = await createFollowUp(
+      initialCreateState,
+      formData({
+        title: "Sur archivé",
+        dueDate: "2026-05-01",
+        ballOwner: "THEM",
+        contactId,
+      }),
+    );
+
+    expect(result.status).toBe("error");
+    expect(await prisma.followUp.count()).toBe(0);
+  });
+
+  it("marque « archivé » le contact d'un suivi historique, sans le masquer", async () => {
+    await createFollowUp(
+      initialCreateState,
+      formData({
+        title: "Historique",
+        dueDate: "2026-05-01",
+        ballOwner: "THEM",
+        contactId,
+      }),
+    );
+    await archiveContact(formData({ id: contactId }));
+
+    const board = await getFollowUpBoard("all");
+    const view = board.items.find((item) => item.title === "Historique");
+
+    expect(view?.contactName).toBe("Julien Doussot");
+    expect(view?.contactArchived).toBe(true);
   });
 
   it("ne propose plus un contact archivé dans le sélecteur", async () => {

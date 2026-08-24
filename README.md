@@ -271,8 +271,9 @@ Known and accepted in V0.2:
   Comfortable below roughly 2,000 open items. The Contacts list *is* paginated.
 - Contact search is `ILIKE`, so it is a sequential scan. Fine at the volumes
   NOD CRM targets; a `pg_trgm` index is the next step, not shipped yet.
-- Contact photos are files on a volume, not rows. Back that volume up with the
-  database — see [docs/backup-restore.md](docs/backup-restore.md).
+- Contact photos are files on a volume, not rows. `nod-crm-backup.sh` archives
+  them alongside the database dump, but restoring them is a manual step — see
+  [docs/backup-restore.md](docs/backup-restore.md).
 - Organisations are a text field on the contact, not a table. The migration
   path is written down in [docs/contacts.md](docs/contacts.md).
 - Existing follow-ups still cannot be edited after creation; only the quick

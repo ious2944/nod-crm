@@ -1,29 +1,13 @@
 # Backup and restore
 
-Two scripts, in [`deploy/backup/`](../deploy/backup/). They only ever touch the
-NOD CRM database.
+Two scripts, in [`deploy/backup/`](../deploy/backup/). They only ever touch NOD
+CRM's own data — its database and its contact photos.
 
-> **Since V0.2, the database is no longer the whole story.** Contact photos are
+> **Since V0.2 the backup covers two things, not one.** Contact photos are
 > files, not rows: they live on the `nod-crm-uploads-data` volume
-> (`NOD_UPLOAD_DIR`, `/app/var/uploads` in the container). A `pg_dump` restored
-> without them leaves contacts pointing at photos that are gone. Snapshot that
-> volume alongside the dump — for example
-> `docker run --rm -v nod-crm-uploads-data:/data:ro -v "$PWD":/out alpine tar czf /out/nod-crm-uploads.tar.gz -C /data .`
-> — and restore it before starting the application again. The scripts below do
-> not do this for you.
-
-| | |
-| --- | --- |
-| Tool | `pg_dump`, plain format, `--clean --if-exists` |
-| Location | `/var/backups/nod-crm/` (directory `700`, archives `600`) |
-| Naming | `nod-crm-<YYYYMMDD>T<HHMMSS>Z.sql.gz` (UTC) |
-| Retention | 30 days, never dropping below 7 archives |
-| Compression | `gzip -9` |
-
-Everything is overridable through the environment, so the scripts fit your
-layout instead of dictating one: `NOD_CRM_DIR`, `NOD_CRM_ENV`,
-`NOD_CRM_BACKUP_DIR`, `NOD_CRM_DB_CONTAINER`, `NOD_CRM_APP_CONTAINER`,
-`NOD_CRM_RETENTION_DAYS`, `NOD_CRM_MIN_KEPT`.
+> (`NOD_UPLOAD_DIR`, `/app/var/uploads` in the container), and the database
+> rows reference them. `nod-crm-backup.sh` therefore writes **two archives per
+> run, sharing one timestamp** — restore them together.
 
 ## Taking a backup
 
@@ -37,7 +21,15 @@ The script aborts — **without leaving a partial archive** — if:
 - the PostgreSQL container is not running;
 - `pg_dump` fails;
 - the gzip archive does not verify;
-- the dump does not contain `CREATE TABLE public.follow_ups`.
+- the dump does not contain `CREATE TABLE public.follow_ups`;
+- the application container is not running, so the photos cannot be read.
+
+That last one is a refusal, not a warning: a backup that quietly covers the
+database but not the photos is exactly the one you discover is incomplete on
+the day you need it. If you genuinely want a database-only run — during a
+migration window, say — ask for it explicitly with `NOD_CRM_SKIP_UPLOADS=1`.
+A deployment that predates V0.2 and has no uploads directory at all is the one
+case that is logged and skipped without failing.
 
 That last check is the useful one. It catches a syntactically valid but empty
 dump, which passes every other test and is exactly the backup you discover is
@@ -51,6 +43,7 @@ container as an environment variable, never as a command-line argument — so it
 never appears in `ps`. The file is parsed literally rather than with `source`,
 because `source` executes its content: a password containing `$(…)` would be
 run as a shell command.
+
 
 ## Automating it
 
@@ -108,6 +101,29 @@ Everyone is logged out afterwards: the `sessions` table is restored to the
 state captured in the archive, so current sessions no longer exist. That is
 expected — sign in again.
 
+## Restoring the photos
+
+`nod-crm-restore.sh` restores **PostgreSQL only** — it is unchanged, and its
+pre-restore safety dump still covers just the database. The photos are a
+separate, deliberately manual step, because overwriting a live uploads volume
+is not something a script should decide on its own:
+
+```bash
+# Same timestamp as the .sql.gz you just restored.
+docker cp nod-crm-uploads-20260824T031500Z.tar.gz nod-crm-app:/tmp/uploads.tar.gz
+docker exec nod-crm-app tar -xzf /tmp/uploads.tar.gz -C /app/var/uploads
+docker exec nod-crm-app rm /tmp/uploads.tar.gz
+```
+
+Extracting **adds and overwrites**, it never deletes. Restoring an older
+archive onto a newer volume therefore leaves any photo added since in place —
+harmless, since a photo nothing references is simply never served. To start
+from exactly the archived state, empty the directory first.
+
+A contact whose `photo_key` points at a file that is not there is not broken:
+the sheet falls back to the initials avatar and the route answers `404`. You
+lose the picture, not the contact.
+
 ## Restoring somewhere else
 
 To spin up a copy on another machine — for a test, or a migration:
@@ -132,7 +148,9 @@ copy of your database on another host should not inherit live sessions.
   in the dump and not in Git. Copy it into a password manager. Without it you
   can restore the data but not start the stack.
 - **The Docker image.** Rebuilt from the repository; nothing to back up.
-- **Uploaded files.** There are none — NOD CRM stores no files.
+- **Uploaded files.** Since V0.2 there *are* some — contact photos — and they
+  **are** covered, by the second archive each run produces. Everything else
+  under `NOD_UPLOAD_DIR` that NOD CRM did not write is not its business.
 
 ## Residual risk
 

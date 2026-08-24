@@ -55,16 +55,20 @@ export async function createFollowUp(
     });
     contactId = contact.id;
   } else if (input.contactId) {
-    // On re-vérifie que le contact appartient bien au workspace : l'id vient du client.
+    // On re-vérifie que le contact appartient bien au workspace : l'id vient du
+    // client. `archivedAt: null` fait partie du filtre, pas d'un contrôle
+    // séparé : un contact archivé ne doit pas plus accepter un nouveau suivi
+    // que le contact d'un autre workspace. Le sélecteur ne le propose plus,
+    // mais un formulaire resté ouvert dans un onglet, lui, le poste encore.
     const contact = await prisma.contact.findFirst({
-      where: { id: input.contactId, workspaceId },
+      where: { id: input.contactId, workspaceId, archivedAt: null },
       select: { id: true },
     });
 
     if (!contact) {
       return {
         status: "error",
-        message: "Ce contact n'existe pas.",
+        message: "Ce contact n'existe pas ou a été archivé.",
         fieldErrors: { contactId: "Contact introuvable." },
       };
     }

@@ -53,7 +53,17 @@ export async function GET(
     return new Response(null, { status: 304, headers: { ETag: etag } });
   }
 
-  const bytes = await objectStore.read(contact.photoKey);
+  // `read` peut aussi *lever* : volume démonté, droits perdus. Une image
+  // manquante ne doit jamais transformer une page en erreur serveur, et le
+  // message système — qui contient un chemin — ne doit pas sortir d'ici.
+  let bytes: Uint8Array | null = null;
+  try {
+    bytes = await objectStore.read(contact.photoKey);
+  } catch {
+    console.error("[contacts] lecture impossible dans le magasin d'objets");
+    return NOT_FOUND;
+  }
+
   if (!bytes) {
     // La fiche référence un objet absent (volume non monté, fichier effacé à la
     // main). On le signale dans les journaux plutôt qu'à l'utilisateur.
