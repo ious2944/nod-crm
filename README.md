@@ -47,18 +47,23 @@ theirs**. Everything on screen exists to make the next action obvious.
 
 Only what actually exists today:
 
-- **Contacts** — a directory of its own, at `/contacts`. First and last name,
-  organisation, job title, email, phone, free-form notes and an optional photo.
-  A contact exists with or without follow-ups.
+- **Contacts** — a dedicated directory at `/contacts`, with creation, viewing
+  and editing. Each contact can store first and last name, organisation, job
+  title, email, phone, free-form notes and an optional photo. A contact exists
+  independently and does not need to be linked to a follow-up.
 - **Contact search and filters** — one search box across name, email, phone,
   job title and organisation, executed by PostgreSQL; filters by organisation
-  and by follow-up state; four sort orders; server-side pagination.
-- **Contact sheet** — everything about a person on one page, with their
-  follow-ups and a button to open a new one with the contact already selected.
-- **Archiving** — contacts are archived, never destroyed, and archiving one
-  never touches its follow-ups.
+  and follow-up state; four sort orders; server-side pagination. The list also
+  shows the number of active follow-ups for each contact.
+- **Contact sheet** — everything about a person on one page, including their
+  linked follow-ups and a button to create a new follow-up with that contact
+  already selected.
+- **Archiving** — contacts are archived rather than destroyed and can be
+  restored. Archiving a contact never deletes or detaches its existing
+  follow-ups; historical follow-ups keep the contact and mark it as archived.
 - **Follow-ups** — subject, optional context, due date, ball owner, and an
-  optional contact.
+  optional contact selected from the central Contacts directory. New follow-ups
+  cannot be attached to an archived contact.
 - **Due dates** with day-level reasoning in a configurable time zone, and a
   five-level visual ageing scale (upcoming → tomorrow → today → overdue →
   7+ days late).
