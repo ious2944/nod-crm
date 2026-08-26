@@ -43,14 +43,15 @@ Shipped:
 
 ---
 
-## V0.3 — Cockpit "Aujourd'hui" *(current)*
+## V0.3 — Aujourd'hui *(current)*
 
 Shipped:
 
 - A cockpit at `/today`, the landing page of an open session: four attention
   counters, one priority feed, next seven days, and what is waiting on them.
-- Prioritisation that mixes late, today, stalled and upcoming into one list
-  instead of several screens.
+- A feed that lists what needs doing now — late, today, stalled — instead of
+  spreading it over several screens. What is merely due this week lives in
+  "Prochainement", not in the feed.
 - A stagnation signal derived from `updated_at` — no new column. Its limits are
   written down in [docs/cockpit.md](docs/cockpit.md).
 - Acting from the cockpit through the existing follow-up actions, not a second
@@ -58,7 +59,23 @@ Shipped:
 
 ---
 
-## V0.4 — Organisations and follow-up editing
+## V0.4 — Tasks
+
+Not built. The idea, and the line that separates it from what exists:
+
+> A **task** is something to do. A **follow-up** is something to move forward
+> with someone.
+
+Today only the second exists, so anything that is simply on your plate has to
+be dressed up as a follow-up with a contact and a ball owner. Tasks would carry
+their own weight, and could eventually be attached to a contact or to a
+follow-up.
+
+Nothing beyond that is decided yet — no data model, no screens.
+
+---
+
+## V0.5 — Organisations and follow-up editing
 
 The gaps that show up fastest in daily use:
 
