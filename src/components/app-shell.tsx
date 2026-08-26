@@ -7,6 +7,9 @@ import type { ReactNode } from "react";
 import { logout } from "@/app/login/actions";
 import { NAV_SECTIONS, type NavItem } from "./navigation";
 
+/** Sous-titre de la marque : les deux briques métier, dans l'ordre du produit. */
+const MODULE_TAGLINE = "Suivis & Tâches";
+
 function LogoutButton({ compact = false }: { compact?: boolean }) {
   return (
     <form action={logout}>
@@ -35,7 +38,7 @@ function Brand({ appName, compact = false }: { appName: string; compact?: boolea
       </span>
       <span className="flex flex-col leading-tight">
         <span className="text-sm font-semibold tracking-tight">{appName}</span>
-        {!compact && <span className="text-[11px] text-muted">Follow-Up</span>}
+        {!compact && <span className="text-[11px] text-muted">{MODULE_TAGLINE}</span>}
       </span>
     </div>
   );
@@ -104,10 +107,17 @@ export function AppShell({
 
   return (
     <div className="flex min-h-dvh flex-col md:flex-row">
-      {/* Barre supérieure — mobile et tablette */}
-      <header className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-border-subtle bg-surface/90 px-4 py-3 backdrop-blur md:hidden">
-        <Brand appName={appName} compact />
-        <nav aria-label="Modules" className="flex items-center gap-1.5">
+      {/* Barre supérieure — mobile et tablette.
+          Deux rangées depuis la V0.4 : à quatre modules, une seule ligne
+          débordait sous 400 px. Les pastilles passent à la ligne (`flex-wrap`)
+          plutôt que de défiler latéralement — un défilement horizontal sans
+          indice visuel cache des entrées de navigation entières. */}
+      <header className="sticky top-0 z-20 flex flex-col gap-2 border-b border-border-subtle bg-surface/90 px-4 py-3 backdrop-blur md:hidden">
+        <div className="flex items-center justify-between gap-3">
+          <Brand appName={appName} compact />
+          <LogoutButton compact />
+        </div>
+        <nav aria-label="Modules" className="flex flex-wrap items-center gap-1.5">
           {NAV_SECTIONS.flatMap((section) => section.items)
             .filter((item) => item.available && item.href)
             .map((item) => (
@@ -115,16 +125,15 @@ export function AppShell({
                 key={item.label}
                 href={item.href!}
                 aria-current={isActive(item) ? "page" : undefined}
-                className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+                className={`rounded-full px-2.5 py-1.5 text-xs font-medium ${
                   isActive(item)
                     ? "bg-accent-soft text-accent"
                     : "text-muted hover:bg-surface-muted"
                 }`}
               >
-                {item.icon} {item.label}
+                <span aria-hidden>{item.icon}</span> {item.label}
               </Link>
             ))}
-          <LogoutButton compact />
         </nav>
       </header>
 

@@ -16,13 +16,20 @@ You create a follow-up, you wait, you nudge, the ball goes back to them, you
 close it. That is the whole product. There are no pipelines, no scoring, no
 forty-field contact forms — and there is no plan to add them.
 
+Since V0.4 it also answers the smaller question next to it — *what do I have to
+do?* — with tasks. The two are deliberately different objects:
+
+> **A task is something to do. A follow-up is something to move forward with
+> someone.**
+
 The metaphor is table tennis: 🏓 the ball is either **on your side** or **on
 theirs**. Everything on screen exists to make the next action obvious.
 
-> ⚠️ **V0.2.** Two modules, Follow-Up and Contacts. They work and are used in
-> production, but it is a young project — read [Limitations](#limitations)
-> before you commit to it. The user interface is currently in French only; the
-> documentation is in English and internationalisation is on the roadmap.
+> ⚠️ **V0.4.** Three modules — Follow-Up, Contacts and Tasks. They work and are
+> used in production, but it is a young project — read
+> [Limitations](#limitations) before you commit to it. The user interface is
+> currently in French only; the documentation is in English and
+> internationalisation is on the roadmap.
 
 ---
 
@@ -41,7 +48,7 @@ theirs**. Everything on screen exists to make the next action obvious.
 
 ---
 
-## Features (V0.2)
+## Features (V0.4)
 
 Only what actually exists today:
 
@@ -69,6 +76,16 @@ Only what actually exists today:
 - **Quick actions** — Nudge, Received, Ball sent, Snooze (+1 d / +3 d / +1 w),
   Complete, Abandon, Reopen.
 - **Filters** — All / To nudge / My court / Their court / Completed.
+- **Tasks** — a title, a due date, and two states: to do or done. Optionally a
+  contact and a linked follow-up, both for context only: no ball, no nudge, and
+  **no state is ever synchronised** between a task and a follow-up. The list at
+  `/tasks` orders them overdue → today → upcoming, with Complete and Snooze on
+  each row and completed tasks one tab away. See
+  [docs/tasks.md](docs/tasks.md).
+- **Today cockpit** (`/today`) — one feed with everything that needs action
+  now: open follow-ups whose due date has arrived, and unfinished tasks due
+  today or overdue. Completing or snoozing from there updates the page
+  immediately, and never touches the other object.
 - **Authentication** — email and password, Argon2id, server-side sessions with
   absolute and idle expiry, rate limiting.
 - **Admin CLI** — create workspaces and users, reset passwords, disable
@@ -76,8 +93,8 @@ Only what actually exists today:
   arguments.
 - **Self-hosting** — Docker Compose, PostgreSQL 16, migrations applied
   automatically at startup.
-- **Demo data** — a seed of fictional contacts and follow-ups, flagged in the
-  UI so it can never be confused with real data.
+- **Demo data** — a seed of fictional contacts, follow-ups and tasks, flagged
+  in the UI so it can never be confused with real data.
 
 Not built yet, and deliberately shown as disabled in the navigation: Dashboard,
 Organisations.
@@ -85,6 +102,14 @@ Organisations.
 ---
 
 ## Screenshots
+
+![NOD CRM — cockpit Aujourd'hui](docs/screenshots/today-light.png)
+
+The "Aujourd'hui" cockpit answers one question: what needs action now? Open follow-ups whose due date has arrived, and tasks due today or overdue, in one feed — each keeping its own shape.
+
+![NOD CRM — tasks](docs/screenshots/tasks-light.png)
+
+The task list stays a list: overdue, today, upcoming, one line each, Complete and Snooze within reach.
 
 ![NOD CRM Follow-Up board](docs/screenshots/board-light.png)
 
@@ -261,7 +286,7 @@ Third-party dependencies keep their own licenses; none of them was modified.
 
 ## Limitations
 
-Known and accepted in V0.2:
+Known and accepted in V0.4:
 
 - No MFA. A stolen password is enough. The data model is ready; the feature is
   not built.
@@ -280,7 +305,11 @@ Known and accepted in V0.2:
 - Organisations are a text field on the contact, not a table. The migration
   path is written down in [docs/contacts.md](docs/contacts.md).
 - Existing follow-ups still cannot be edited after creation; only the quick
-  actions change them.
+  actions change them. The same is true of tasks: complete, reopen and snooze,
+  but no edit form and no delete.
+- No pagination on `/tasks` or `/today` either; both load the workspace's
+  unfinished items, and the completed tab is capped at 100.
+- A task always has a due date. "Someday" tasks without one are not supported.
 - Quick actions need JavaScript. The login screen does not.
 - The interface is French only.
 
@@ -292,11 +321,16 @@ Directions, not commitments. Full version in [ROADMAP.md](ROADMAP.md).
 
 **V0.1 — Follow-Up.** Follow-ups, the workflow, authentication, self-hosting.
 
-**V0.2 — Contacts (current).** A real Contacts module: directory, server-side
-search, filters, sorting, pagination, photos, archiving, and an optional link
-from any follow-up.
+**V0.2 — Contacts.** A real Contacts module: directory, server-side search,
+filters, sorting, pagination, photos, archiving, and an optional link from any
+follow-up.
 
-**V0.3 — Organisations.** Promoting the organisation field to a table, plus
+**V0.4 — Tasks (current).** A second business object next to the follow-up —
+something to do, as opposed to something to move forward with someone — with
+its own page, and an "Aujourd'hui" cockpit that finally gathers both in one
+feed.
+
+**Next — Organisations.** Promoting the organisation field to a table, plus
 searching follow-ups and editing an existing one.
 
 **Later.** Business audit log, MFA, self-service password reset, real

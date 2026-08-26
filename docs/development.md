@@ -72,17 +72,24 @@ src/
   proxy.ts               optimistic session filter + security headers
   app/
     layout.tsx           HTML document, theme, metadata
-    page.tsx             redirects to /follow-ups or /login
+    page.tsx             redirects to /today or /login
     login/               login screen, login and logout actions
     (app)/               authenticated group
+      today/             the "Aujourd'hui" cockpit: follow-ups + tasks to act on
       follow-ups/
         page.tsx         the board (Server Component)
         actions.ts       Server Actions: creation and quick actions
+      tasks/
+        page.tsx         the task list (Server Component)
+        actions.ts       Server Actions: creation, complete, reopen, snooze
+      contacts/          directory, contact sheet, actions
     api/health/          database-backed health probe
   components/
     app-shell.tsx        sidebar (desktop) / top bar (mobile)
     navigation.ts        CRM modules, including the disabled ones
     follow-ups/          cards, filters, creation dialog, quick actions
+    tasks/               rows, row actions, creation dialog, follow-up picker
+    ui/                  shared: form styling, popover, badge, row actions, picker
   lib/
     auth/                passwords, sessions, DAL, rate limiting, audit log
     config.ts            app name, source URL, time zone
@@ -90,6 +97,8 @@ src/
     prisma.ts            lazily created Prisma client
     workspace.ts         workspace derived from the session — never from the client
     follow-ups/          domain, filters, view model, queries, schemas
+    tasks/               same shape, for tasks
+    today/               the cockpit feed: merges the two, changes neither
 tests/
   unit/                  fast tests, no database
   integration/           auth, authorization, isolation, validation, adversarial
@@ -155,7 +164,11 @@ than any prose:
   see of another.
 - `tests/integration/adversarial.test.ts` — rate-limit evasion, header
   spoofing, direct action calls.
+- `tests/integration/tasks.test.ts` — the task module end to end, including
+  that completing a task never completes its follow-up, and the reverse.
 - `src/lib/follow-ups/domain.test.ts` — ageing, urgency, allowed transitions.
+- `src/lib/tasks/domain.test.ts` — buckets, ordering, what is actionable today.
+- `src/lib/today/feed.test.ts` — how the cockpit merges and orders the two.
 - `src/lib/date.test.ts` — day-level arithmetic across time zones and DST.
 
 ## Conventions

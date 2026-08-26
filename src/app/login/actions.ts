@@ -81,7 +81,7 @@ export async function login(_previous: LoginState, formData: FormData): Promise<
   await purgeOldLoginAttempts();
 
   logAuthEvent("login.success", { email, ip });
-  redirect("/follow-ups");
+  redirect("/today");
 }
 
 export async function logout(): Promise<void> {

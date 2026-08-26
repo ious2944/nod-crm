@@ -1,15 +1,20 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { applyQuickAction, createFollowUp } from "@/app/(app)/follow-ups/actions";
+import { applyTaskAction, createTask, findFollowUps } from "@/app/(app)/tasks/actions";
 import { UnauthenticatedError } from "@/lib/auth/dal";
 import { initialCreateState } from "@/lib/follow-ups/create-state";
 import { searchContactOptions } from "@/lib/contacts/queries";
 import { getFollowUpBoard } from "@/lib/follow-ups/queries";
 import { prisma } from "@/lib/prisma";
+import { initialCreateTaskState } from "@/lib/tasks/create-state";
+import { getTaskList } from "@/lib/tasks/queries";
+import { getTodayFeed } from "@/lib/today/queries";
 
 import { TestRedirect } from "./cookie-jar";
 import {
   createFollowUpRecord,
+  createTaskRecord,
   createWorkspaceWithUser,
   dropCookie,
   formData,
@@ -36,14 +41,19 @@ const ALL_INTENTS = [
   "reopen",
 ] as const;
 
+/** Les trois transitions d'une tâche. Deux états, donc pas une de plus. */
+const ALL_TASK_INTENTS = ["complete", "reopen", "snooze"] as const;
+
 describe("mutations sans session", () => {
   let user: TestUser;
   let followUpId: string;
+  let taskId: string;
 
   beforeEach(async () => {
     await resetDatabase();
     user = await createWorkspaceWithUser("authz-ws");
     followUpId = await createFollowUpRecord(user.workspaceId, "Suivi protégé");
+    taskId = await createTaskRecord(user.workspaceId, { title: "Tâche protégée" });
     dropCookie();
   });
 
@@ -94,10 +104,46 @@ describe("mutations sans session", () => {
     expect(after).toEqual(before);
   });
 
+  it("refuse la création d'une tâche", async () => {
+    await expect(
+      createTask(initialCreateTaskState, formData({ title: "Injectée", dueDate: "2026-01-01" })),
+    ).rejects.toThrow(UnauthenticatedError);
+
+    expect(await prisma.task.count({ where: { title: "Injectée" } })).toBe(0);
+  });
+
+  it.each(ALL_TASK_INTENTS)("refuse l'action de tâche « %s »", async (intent) => {
+    await expect(applyTaskAction(formData({ id: taskId, intent, days: 3 }))).rejects.toThrow(
+      UnauthenticatedError,
+    );
+  });
+
+  it("laisse la tâche rigoureusement intacte", async () => {
+    const before = await prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+
+    for (const intent of ALL_TASK_INTENTS) {
+      await expect(applyTaskAction(formData({ id: taskId, intent, days: 7 }))).rejects.toThrow(
+        UnauthenticatedError,
+      );
+    }
+
+    const after = await prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    expect(after).toEqual(before);
+  });
+
+  it("refuse la recherche de suivis du formulaire de tâche", async () => {
+    await expect(findFollowUps("")).rejects.toThrow(UnauthenticatedError);
+  });
+
   it("refuse la lecture du tableau et de la liste de contacts", async () => {
     // Les lectures passent par `requireUser()` : elles redirigent vers /login.
     await expect(getFollowUpBoard("all")).rejects.toThrow(TestRedirect);
     await expect(searchContactOptions("")).rejects.toThrow(TestRedirect);
+  });
+
+  it("refuse la lecture des tâches et du cockpit", async () => {
+    await expect(getTaskList("todo")).rejects.toThrow(TestRedirect);
+    await expect(getTodayFeed()).rejects.toThrow(TestRedirect);
   });
 });
 

@@ -1,17 +1,11 @@
+import { DueBadge } from "@/components/ui/due-badge";
 import type { UrgencyLevel } from "@/lib/follow-ups/domain";
 import type { FollowUpView } from "@/lib/follow-ups/view";
 import { CardActions, QuickAction, SnoozeMenu } from "./quick-actions";
 
-/** Le vieillissement se lit d'abord à la couleur : discret → très visible. */
-const CHIP: Record<UrgencyLevel, string> = {
-  done: "bg-done-bg text-done-fg",
-  calm: "bg-calm-bg text-calm-fg",
-  soon: "bg-soon-bg text-soon-fg",
-  today: "bg-today-bg text-today-fg",
-  late: "bg-late-bg text-late-fg",
-  critical: "bg-critical-bg text-critical-fg",
-};
-
+/** Le vieillissement se lit d'abord à la couleur : discret → très visible.
+ *  La pastille est partagée avec les tâches (`DueBadge`) ; le liseré de gauche
+ *  reste propre à la carte de suivi. */
 const EDGE: Record<UrgencyLevel, string> = {
   done: "bg-done-fg/35",
   calm: "bg-border-subtle",
@@ -76,11 +70,7 @@ export function FollowUpCard({ item }: { item: FollowUpView }) {
           </div>
         </div>
 
-        <span
-          className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${CHIP[item.level]}`}
-        >
-          {item.dueLabel}
-        </span>
+        <DueBadge level={item.level} label={item.dueLabel} />
       </div>
 
       {item.description && (

@@ -89,8 +89,10 @@ try {
   await page.fill("#email", EMAIL);
   await page.fill("#password", PASSWORD);
   await page.getByRole("button", { name: "Se connecter" }).click();
-  await page.waitForURL("**/follow-ups", { timeout: 15000 });
-  check("redirection vers /follow-ups", new URL(page.url()).pathname === "/follow-ups");
+  // Depuis la V0.4, la connexion mène au cockpit « Aujourd'hui », pas à la
+  // liste des suivis.
+  await page.waitForURL("**/today", { timeout: 15000 });
+  check("redirection vers /today", new URL(page.url()).pathname === "/today");
 
   const cookie = await sessionCookie(context);
   check("cookie de session posé", Boolean(cookie));
@@ -106,6 +108,10 @@ try {
   }
 
   section("5. Parcours Follow-up");
+  await page.getByRole("link", { name: "Suivis", exact: true }).first().click();
+  await page.waitForURL("**/follow-ups", { timeout: 15000 });
+  check("la navigation mène à la liste des suivis", new URL(page.url()).pathname === "/follow-ups");
+
   const title = `E2E ${Date.now()}`;
   await page.getByRole("button", { name: "Nouveau suivi" }).click();
   await page.fill("#title", title);
@@ -181,7 +187,99 @@ try {
   await page.waitForTimeout(1200);
   check("abandonné", (await page.locator("article", { hasText: title }).count()) === 0);
 
-  section("6. Module Contacts");
+  section("6. Parcours Tâches");
+  const taskTitle = `Tâche E2E ${Date.now()}`;
+  await page.getByRole("link", { name: "Tâches", exact: true }).first().click();
+  await page.waitForURL("**/tasks", { timeout: 15000 });
+  check("la navigation mène aux tâches", new URL(page.url()).pathname === "/tasks");
+
+  // 1. Créer une tâche indépendante, due aujourd'hui (valeur par défaut).
+  await page.getByRole("button", { name: "Nouvelle tâche" }).click();
+  await page.fill("#taskTitle", taskTitle);
+  await page.getByRole("button", { name: "Créer la tâche" }).click();
+  await page.waitForSelector(`text=${taskTitle}`, { timeout: 15000 });
+  const taskRow = page.locator("article", { hasText: taskTitle });
+  check("création d'une tâche indépendante", (await taskRow.count()) === 1);
+  check("elle est due aujourd'hui", (await taskRow.innerText()).includes("Aujourd'hui"));
+
+  // 2. Elle apparaît dans le cockpit.
+  await page.getByRole("link", { name: "Aujourd'hui", exact: true }).first().click();
+  await page.waitForURL("**/today", { timeout: 15000 });
+  check(
+    "la tâche du jour est dans le feed Aujourd'hui",
+    (await page.locator("article", { hasText: taskTitle }).count()) === 1,
+  );
+
+  // 3. La terminer depuis le cockpit, 4. vérifier sa disparition.
+  await page.locator("article", { hasText: taskTitle }).getByRole("button", { name: "Terminer" }).click();
+  await page.waitForTimeout(1500);
+  check(
+    "terminée : elle quitte le feed immédiatement",
+    (await page.locator("article", { hasText: taskTitle }).count()) === 0,
+  );
+
+  await page.goto("/tasks?f=done", { waitUntil: "networkidle" });
+  check(
+    "elle est retrouvable dans « Terminées »",
+    (await page.locator("article", { hasText: taskTitle }).count()) === 1,
+  );
+
+  // 5. Créer une tâche liée à un contact — le contact vient du module Contacts,
+  //    sans qu'aucun suivi ne soit créé au passage.
+  const linkedTitle = `Tâche liée E2E ${Date.now()}`;
+  await page.goto("/tasks", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Nouvelle tâche" }).click();
+  await page.fill("#taskTitle", linkedTitle);
+  await page.getByPlaceholder("Rechercher un contact...").click();
+  await page.getByRole("option", { name: "Camille Durand" }).first().click();
+  await page.getByRole("button", { name: "Créer la tâche" }).click();
+  await page.waitForSelector(`text=${linkedTitle}`, { timeout: 15000 });
+  const linkedRow = page.locator("article", { hasText: linkedTitle });
+  check("création d'une tâche liée à un contact", (await linkedRow.count()) === 1);
+  check("le contact est affiché sur la ligne", (await linkedRow.innerText()).includes("Camille"));
+  check(
+    "le contact mène à sa fiche",
+    (await linkedRow.getByRole("link", { name: "Camille Durand" }).count()) === 1,
+  );
+
+  // 6. Reporter : la tâche quitte le feed du jour mais reste dans Tâches.
+  await linkedRow.getByRole("button", { name: "Reporter" }).click();
+  const snoozeTomorrow = page.getByRole("button", { name: "Demain", exact: true });
+  await snoozeTomorrow.waitFor({ timeout: 10000 });
+  await snoozeTomorrow.click();
+  await page.waitForTimeout(1500);
+  check("report appliqué", (await linkedRow.innerText()).includes("Demain"));
+
+  await page.goto("/today", { waitUntil: "networkidle" });
+  check(
+    "reportée à demain : hors du feed Aujourd'hui",
+    (await page.locator("article", { hasText: linkedTitle }).count()) === 0,
+  );
+  await page.goto("/tasks", { waitUntil: "networkidle" });
+  check(
+    "mais toujours présente dans Tâches",
+    (await page.locator("article", { hasText: linkedTitle }).count()) === 1,
+  );
+
+  // 7. Responsive : aucun débordement horizontal, actions atteignables.
+  for (const width of [1440, 1280, 1024, 430, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/tasks", { waitUntil: "networkidle" });
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+    );
+    check(`aucun défilement horizontal à ${width} px`, !overflow);
+    check(
+      `l'action « Terminer » reste utilisable à ${width} px`,
+      await page
+        .locator("article", { hasText: linkedTitle })
+        .getByRole("button", { name: "Terminer" })
+        .isVisible(),
+    );
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  section("7. Module Contacts");
   const contactName = `Contact E2E ${Date.now()}`;
   await page.getByRole("link", { name: "Contacts", exact: true }).first().click();
   await page.waitForURL("**/contacts", { timeout: 15000 });
@@ -219,16 +317,18 @@ try {
     (await page.locator("text=Aucun suivi pour ce contact.").count()) === 1,
   );
 
-  section("7. Déconnexion");
+  section("8. Déconnexion");
   await page.getByRole("button", { name: "Déconnexion" }).first().click();
   await page.waitForURL("**/login", { timeout: 15000 });
   check("redirection vers /login", new URL(page.url()).pathname === "/login");
   check("cookie supprimé", (await sessionCookie(context)) === undefined);
 
-  await page.goto("/follow-ups", { waitUntil: "networkidle" });
-  check("la session est bien invalidée", new URL(page.url()).pathname === "/login");
+  for (const path of ["/follow-ups", "/tasks", "/today"]) {
+    await page.goto(path, { waitUntil: "networkidle" });
+    check(`${path} est bien reprotégé`, new URL(page.url()).pathname === "/login");
+  }
 
-  section("8. Hygiène");
+  section("9. Hygiène");
   check("aucune erreur JavaScript", consoleErrors.length === 0, consoleErrors.join(" | "));
   const html = await page.content();
   check(

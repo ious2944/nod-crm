@@ -5,14 +5,15 @@ adapter.
 
 ## Schema
 
-Six tables. Everything business-related hangs off a workspace.
+Seven tables. Everything business-related hangs off a workspace.
 
 ```
 workspaces ──┬── users ──── sessions
              ├── contacts ──┐
-             └── follow_ups ┘   (contact_id, nullable)
+             ├── follow_ups ┘   (contact_id, nullable)
+             └── tasks           (contact_id and follow_up_id, both nullable)
 
-login_attempts                  (standalone, rate limiting)
+login_attempts                   (standalone, rate limiting)
 ```
 
 | Table | Holds |
@@ -23,6 +24,7 @@ login_attempts                  (standalone, rate limiting)
 | `login_attempts` | scope (`email:…` or `ip:<fingerprint>`), success flag, timestamp |
 | `contacts` | first name, last name, optional email, phone, job title, organisation, notes, photo key and MIME type, `archived_at`, `is_demo`, `workspace_id` |
 | `follow_ups` | title, description, status, ball owner, due date, nudge count, last nudge, completed at, `is_demo`, `workspace_id`, optional `contact_id` |
+| `tasks` | title, optional notes, due date, `completed_at` (the whole state machine), `is_demo`, `workspace_id`, optional `contact_id` and `follow_up_id` |
 
 Everything is a UUID primary key, `snake_case` in the database, `camelCase` in
 the Prisma client, with `created_at` / `updated_at` on the business tables.
@@ -48,6 +50,8 @@ Each one earns its place:
 | `contacts (workspace_id, archived_at, updated_at)` | the "recently modified" sort |
 | `follow_ups (workspace_id, status, due_at)` | the board's only query: open items of one workspace, sorted by due date |
 | `follow_ups (contact_id)` | resolves the contact relation |
+| `tasks (workspace_id, completed_at, due_at)` | the only task query that matters: unfinished tasks of one workspace, by due date — and the cockpit's `due_at <= end of today` on top of it |
+| `tasks (contact_id)`, `tasks (follow_up_id)` | resolve the two optional relations |
 | `sessions (user_id)`, `sessions (expires_at)` | session lookup and expiry sweeps |
 | `login_attempts (scope, created_at)` | the rate-limit counter, which runs on every login attempt |
 | `users (workspace_id)` | membership lookups |
@@ -56,13 +60,21 @@ Each one earns its place:
 
 | Relation | On delete |
 | --- | --- |
-| `workspace` → `users`, `contacts`, `follow_ups` | `CASCADE` — deleting a workspace removes everything in it |
+| `workspace` → `users`, `contacts`, `follow_ups`, `tasks` | `CASCADE` — deleting a workspace removes everything in it |
 | `user` → `sessions` | `CASCADE` — deleting a user logs them out everywhere |
-| `contact` → `follow_ups` | `SET NULL` — deleting a contact keeps the follow-up, unlinked |
+| `contact` → `follow_ups`, `tasks` | `SET NULL` — deleting a contact keeps them, unlinked |
+| `follow_up` → `tasks` | `SET NULL` — deleting a follow-up keeps the task, unlinked |
 
-That last one is deliberate. A follow-up records something you were waiting
-for; losing it because a contact was tidied away would be data loss disguised
-as cleanup.
+Those `SET NULL`s are deliberate. A follow-up records something you were
+waiting for and a task records something you had to do; losing either because
+a contact was tidied away would be data loss disguised as cleanup.
+
+They are also why `tasks.contact_id` and `tasks.follow_up_id` are plain
+single-column foreign keys rather than composite `(id, workspace_id)` ones: a
+composite key would have let PostgreSQL enforce workspace coherence itself, but
+it would have made `SET NULL` impossible, since `workspace_id` is `NOT NULL`.
+The coherence check therefore lives in the Server Action, which re-reads both
+ids scoped to the session's workspace before writing — see `docs/tasks.md`.
 
 ## Migrations
 
@@ -97,6 +109,7 @@ migration means the new application never starts, which is the correct outcome.
 | `20260822110939_add_auth_users_sessions` | users, sessions, login_attempts |
 | `20260822122616_align_contacts_index` | contacts index aligned with the query's sort |
 | `20260824080401_contacts_module` | contacts gain phone, job title, notes, photo key and MIME type, `archived_at`; indexes realigned on the three list sorts |
+| `20260826194558_tasks_module` | `tasks`, with its three indexes and its three foreign keys. Purely additive: one new table, no existing column touched |
 
 All four are additive. None destroys data. The V0.2 migration adds nullable
 columns only: existing contacts keep working, with `archived_at IS NULL`
@@ -136,8 +149,10 @@ npm run db:seed
 ```
 
 Four fictional contacts (Alice Martin / Acme Corp, Bob Dupont / Example
-Company…) and seven follow-ups, every row flagged `is_demo` and badged in the
-interface. Re-running deletes the previous demo rows and recreates them; real
+Company…), seven follow-ups and six tasks, every row flagged `is_demo` and
+badged in the interface. The tasks deliberately cover every display case:
+overdue, today, tomorrow, later, completed, with and without a contact, with
+and without a linked follow-up, short and very long titles. Re-running deletes the previous demo rows and recreates them; real
 rows are never touched.
 
 The seed refuses to run when `NODE_ENV=production` unless `ALLOW_DEMO_SEED=1`
@@ -147,7 +162,8 @@ CLI.
 ## Volume and pagination
 
 `getFollowUpBoard` loads **every** open follow-up in the workspace, without
-pagination. That is a known limit, not an oversight:
+pagination, and `getTaskList` does the same with unfinished tasks. That is a
+known limit, not an oversight:
 
 | Open follow-ups | Effect |
 | --- | --- |

@@ -18,18 +18,20 @@ loss would be expensive.
 | --- | --- | --- |
 | `GET /login` | public | proxy rate limit, security headers |
 | `login` Server Action | public | Zod, Argon2id, dual rate limiting, single generic failure message |
-| `GET /`, `/follow-ups` | authenticated | proxy filter + `requireUser()` |
+| `GET /`, `/today`, `/follow-ups`, `/tasks`, `/contacts` | authenticated | proxy filter + `requireUser()` |
 | `createFollowUp` action | authenticated | `requireActor()`, then Zod, then workspace scoping |
 | `applyQuickAction` action | authenticated | same, plus object ownership **and** a transition guard |
-| `?f=` URL parameter | public | allow-list, silent fallback to `all` |
+| `createTask` action | authenticated | `requireActor()`, then Zod, then workspace scoping — including a re-check of `contactId` and `followUpId` against that workspace |
+| `applyTaskAction` action | authenticated | same, plus object ownership **and** a state guard (complete / reopen / snooze only) |
+| `?f=` URL parameter | public | allow-list, silent fallback (`all` for follow-ups, `todo` for tasks) |
 | `GET /api/health` | loopback | no version, no hostname, no error detail; blocked at the proxy |
 | PostgreSQL | **none** | no published port, private Docker network |
 | Application port | **loopback** | never `0.0.0.0`, no firewall rule needed |
 
 ### What an attacker would want
 
-1. **Read the follow-ups** — needs a valid session; blocked by authentication
-   checked in the data access layer.
+1. **Read the follow-ups or the tasks** — needs a valid session; blocked by
+   authentication checked in the data access layer.
 2. **Guess a password** — Argon2id, application rate limiting, proxy rate
    limiting, optionally Fail2ban.
 3. **Enumerate accounts** — one generic failure message, and a constant-cost
@@ -348,7 +350,7 @@ An honest list of what is *not* covered.
 | `style-src 'unsafe-inline'` | style injection is possible | a Next.js constraint; `script-src` stays strict |
 | Dependency on an npm `overrides` entry | needs watching on upgrade | re-evaluate at each Prisma release |
 | Backups sit on the same host | one hardware failure takes both | **fix this**: copy off-site ([backup-restore.md](backup-restore.md)) |
-| No pagination | thousands of open follow-ups load at once | acceptable below ~2,000 ([database.md](database.md)) |
+| No pagination | thousands of open follow-ups or tasks load at once | acceptable below ~2,000 ([database.md](database.md)) |
 | Quick actions require JavaScript | a JS-less browser cannot act on a follow-up | the login screen remains a plain HTML form |
 | Fail2ban cannot see failed logins | a rejected password still answers 200 | compensated by application-level limiting |
 | Large image (~2.8 GB, full Debian base) | disk, and a wider software surface | slim broke Prisma migrations; revisit with slim + `openssl` if disk gets tight |

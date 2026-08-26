@@ -8,6 +8,8 @@ Screenshots are intended to show the real product as it exists today — no mock
 
 | File | Content | Status |
 | --- | --- | --- |
+| `today-light.png` | `/today` cockpit: follow-ups and tasks needing action now | ✅ Available |
+| `tasks-light.png` | `/tasks` list with its three urgency sections | ✅ Available |
 | `board-light.png` | `/follow-ups` main board with demo follow-ups | ✅ Available |
 | `board-dark.png` | Main board in dark mode | ⏳ To add |
 | `quick-actions.png` | Follow-up card with quick actions and snooze popover | ⏳ To add |
@@ -33,11 +35,11 @@ A stale screenshot should be treated as a documentation bug.
 
 The primary screenshot used in the project README is:
 
-`board-light.png`
+`today-light.png`
 
-It represents the main Follow-Up experience and should remain the best overview of the current application.
+Since V0.4 it is the cockpit, not the board, that gives the best overview of the application: it is the home page, and the only screen that shows both business objects side by side. `board-light.png` and `tasks-light.png` follow it.
 
 It is displayed from the root `README.md` with:
 
 ```markdown
-![NOD CRM Follow-Up board](docs/screenshots/board-light.png)
+![NOD CRM — cockpit Aujourd'hui](docs/screenshots/today-light.png)

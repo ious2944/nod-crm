@@ -30,7 +30,7 @@ Shipped and in use:
 
 ---
 
-## V0.2 — Contacts *(current)*
+## V0.2 — Contacts
 
 Shipped:
 
@@ -43,7 +43,27 @@ Shipped:
 
 ---
 
-## V0.3 — Organisations and follow-up editing
+## V0.4 — Tasks *(current)*
+
+Shipped:
+
+- **Tasks**: a title, a due date, two states (to do / done). Nothing else — no
+  priority, no status machine, no workflow to configure.
+- A **task page** (`/tasks`) ordered by urgency — overdue, today, upcoming —
+  with Complete and Snooze on each row, and completed tasks one tab away.
+- An **optional contact** and an **optional linked follow-up**, both for
+  context. Neither creates any synchronisation: completing a task never
+  completes a follow-up, and the reverse is just as true.
+- The **"Aujourd'hui" cockpit** (`/today`): one feed with the open follow-ups
+  whose due date has arrived and the unfinished tasks due today or overdue.
+- Workspace isolation extended to tasks and to both of their links, with
+  integration tests for read, write, complete, snooze and cross-workspace
+  linking.
+- Design decisions and the exact boundary rules: [docs/tasks.md](docs/tasks.md).
+
+---
+
+## Next — Organisations and follow-up editing
 
 The gaps that show up fastest in daily use:
 
@@ -67,6 +87,9 @@ The gaps that show up fastest in daily use:
 Worth building eventually, in no particular order:
 
 - **Contact history and duplicate merging** — the page itself shipped in V0.2.
+- **Tasks on the contact sheet** — a person's open tasks next to their
+  follow-ups, and a task count in the directory. Deliberately left out of V0.4
+  to keep the module small.
 - **Follow-up history** — every nudge, snooze and hand-off, visible on the item.
 - **Business audit log** — who completed what, and when.
 - **MFA (TOTP), then passkeys.** The data model already accommodates it: a
@@ -79,7 +102,8 @@ Worth building eventually, in no particular order:
 - **Trigram search index** (`pg_trgm`) for contacts, once a workspace is large
   enough that the sequential scan shows.
 - **Public API and webhooks**, if and when something concrete needs them.
-- **Recurring follow-ups** ("nudge every 15 days while the ball is theirs").
+- **Recurring follow-ups** ("nudge every 15 days while the ball is theirs"),
+  and recurring tasks, which raise exactly the same questions.
 - **Notes** on a follow-up, timestamped.
 - **Tags**.
 - **Email reminders**. Note that this means NOD CRM starts sending mail, with

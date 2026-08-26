@@ -45,7 +45,10 @@ async function signedInPage(options = {}) {
   await page.fill("#email", EMAIL);
   await page.fill("#password", PASSWORD);
   await page.getByRole("button", { name: "Se connecter" }).click();
-  await page.waitForURL("**/follow-ups", { timeout: 15000 });
+  // La connexion mène au cockpit depuis la V0.4 ; ce parcours-ci porte sur les
+  // cartes de suivi, donc on rejoint la liste des suivis.
+  await page.waitForURL("**/today", { timeout: 15000 });
+  await page.goto("/follow-ups", { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
   return page;
 }
@@ -89,6 +92,11 @@ try {
 
   section("2. Empilement et interception — le défaut d'origine");
   const target = await createFollowUp(page, 10);
+  // L'échéance est lue, pas supposée : `createFollowUp` calcule sa date en UTC
+  // alors que l'application compte les jours dans son fuseau. Les deux
+  // diffèrent d'un jour en fin de soirée UTC — ce qui faisait échouer la
+  // vérification « sans appliquer de report » selon l'heure du run.
+  const targetDueDays = Number(await dueLabel(page, target));
   const card = page.locator("article", { hasText: target });
   await card.getByRole("button", { name: "Reporter" }).click();
   await page.waitForTimeout(400);
@@ -144,7 +152,7 @@ try {
   await page.waitForTimeout(400);
   check("un clic ailleurs referme le panneau",
     (await page.getByRole("button", { name: "+1 j", exact: true }).count()) === 0);
-  check("sans appliquer de report", Number(await dueLabel(page, target)) === 10);
+  check("sans appliquer de report", Number(await dueLabel(page, target)) === targetDueDays);
 
   section("5. Carte en bas de fenêtre : bascule vers le haut");
   const cards = page.locator("article");

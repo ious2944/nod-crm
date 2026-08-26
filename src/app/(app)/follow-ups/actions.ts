@@ -20,6 +20,20 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { getWorkspaceIdForAction } from "@/lib/workspace";
 
+/**
+ * Les pages qui montrent des suivis. Depuis la V0.4, le cockpit « Aujourd'hui »
+ * en fait partie : relancer ou terminer un suivi depuis le cockpit doit le
+ * retirer du feed sans rechargement manuel.
+ *
+ * `/tasks` n'y figure pas, et c'est volontaire : **aucune action sur un suivi
+ * ne modifie une tâche.**
+ */
+const FOLLOW_UP_PATHS = ["/today", "/follow-ups"] as const;
+
+function revalidateFollowUpPages(): void {
+  for (const path of FOLLOW_UP_PATHS) revalidatePath(path);
+}
+
 export async function createFollowUp(
   _previous: CreateFollowUpState,
   formData: FormData,
@@ -86,7 +100,7 @@ export async function createFollowUp(
     },
   });
 
-  revalidatePath("/follow-ups");
+  revalidateFollowUpPages();
   return { status: "success", message: "Suivi créé." };
 }
 
@@ -137,7 +151,7 @@ export async function applyQuickAction(formData: FormData): Promise<void> {
     throw new FollowUpConflictError();
   }
 
-  revalidatePath("/follow-ups");
+  revalidateFollowUpPages();
 }
 
 /** Effet de chaque transition. Séparé de l'écriture pour rester lisible. */

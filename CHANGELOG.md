@@ -7,7 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-**NOD CRM v0.2 — Contacts.**
+**NOD CRM v0.4 — Tasks.**
+
+### Added
+
+- **Tasks module** — a second business object next to the follow-up, and the
+  distinction is the whole point: **a task is something to do, a follow-up is
+  something to move forward with someone.** A task has a title, a due date,
+  optional notes, and exactly two states (`completed_at IS NULL` or not). No
+  priority, no status machine, no workflow to configure.
+- **`/tasks`** — the list, ordered by urgency: overdue, then today, then
+  upcoming, as compact rows rather than cards. Completed tasks leave the main
+  list and sit behind a "Terminées" tab (capped at the last 100). Each row
+  carries the title, the due date, the contact and the linked follow-up, with
+  Complete as the primary action and Snooze (Demain / +3 j / +1 sem.) as the
+  secondary one.
+- **`/today` — the "Aujourd'hui" cockpit** — one feed with everything that
+  needs action now: open follow-ups whose due date has arrived (the V0.3 rule,
+  unchanged) and unfinished tasks due today or overdue. A task enters the feed
+  when `completed_at IS NULL AND due_at <= end of the current day` in
+  `APP_TIME_ZONE`; completing or snoozing from the cockpit refreshes it
+  immediately. It is the application's home page and where login now lands.
+- **Optional links** — a task may reference a contact, a follow-up, both, or
+  neither. The contact is context and links to their sheet; it does not give
+  the task a ball or a nudge count. **No state is ever synchronised**:
+  completing a task never completes the follow-up it cites, and completing a
+  follow-up never completes the task. Deleting either link target keeps the
+  task and clears the link.
+- **`docs/tasks.md`** — the module's design decisions: the two states, the
+  actionable-today rule, why nothing synchronises, how the workspace boundary
+  is enforced, and what was left out on purpose.
+
+### Changed
+
+- **Navigation** now reads Aujourd'hui / Suivis / Tâches / Contacts. The
+  follow-up page keeps everything it had — the four counters, the five filters,
+  the full list — but is now titled **Suivis**: the daily cockpit it used to
+  double as has become a page of its own at `/today`, which is the only way a
+  single feed can mix follow-ups and tasks without turning the list into a
+  second dashboard. On mobile the top bar moved to two rows, because four
+  modules no longer fit on one line under 400 px.
+- **The four V0.3 counters are untouched** — Ouverts, Chez moi, Chez eux, À
+  relancer still count follow-ups and only follow-ups, and still live on the
+  Suivis page. The cockpit's own headline is explicitly the count of actionable
+  items of the day, follow-ups and tasks together; the two meanings are never
+  mixed silently.
+- Tasks reuse the follow-up due-date vocabulary and the existing ageing tokens
+  (`J+4`, `Aujourd'hui`, `Demain`, `Dans 5 j`). **V0.4 adds no colour**, so
+  dark mode follows without a line of new palette.
+- Shared UI extracted rather than duplicated, with the behaviour unchanged:
+  the due-date badge (`ui/due-badge`), the one-mutation-at-a-time row actions
+  (`ui/row-actions`), and the search-then-pick field (`ui/search-picker`) that
+  the contact picker now uses too.
+- The demo seed adds six tasks covering every display case: overdue, today,
+  tomorrow, later, completed, with and without a contact, with and without a
+  linked follow-up, short and very long titles.
+
+### Security
+
+- Every task read and write is scoped to the workspace derived from the
+  session. No function in `src/lib/tasks/queries.ts` even accepts a
+  `workspaceId` argument, so no code path can cross the boundary by accident.
+- `contact_id` and `follow_up_id` are re-checked against the session's
+  workspace before any write: linking a task to another workspace's contact or
+  follow-up fails closed, and an archived contact is refused like an unknown
+  one. A composite `(id, workspace_id)` foreign key would have enforced this in
+  PostgreSQL but would have ruled out the `ON DELETE SET NULL` that keeps a
+  task alive when its contact or follow-up disappears — so the check lives in
+  the action, and the tests cover both directions.
+- Task transitions are validated server-side (complete, reopen, snooze only)
+  and applied with a conditional `updateMany` whose `WHERE` repeats the state
+  read a moment earlier, so two simultaneous clicks cannot both win.
+- The create schema enumerates its fields: an enriched form cannot set
+  `workspace_id`, `completed_at` or `is_demo`.
+
+
+**NOD CRM v0.2 — Contacts.** Still unreleased too: v0.2 and v0.4 will ship
+together, since no tag was cut in between.
 
 ### Added
 
