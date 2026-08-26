@@ -86,7 +86,7 @@ export async function createFollowUp(
     },
   });
 
-  revalidatePath("/follow-ups");
+  revalidateFollowUpViews();
   return { status: "success", message: "Suivi créé." };
 }
 
@@ -137,7 +137,18 @@ export async function applyQuickAction(formData: FormData): Promise<void> {
     throw new FollowUpConflictError();
   }
 
+  revalidateFollowUpViews();
+}
+
+/**
+ * Un suivi se lit depuis plusieurs écrans : le tableau Follow-up et, depuis la
+ * V0.3, le cockpit « Aujourd'hui ». Une mutation doit les rafraîchir tous les
+ * deux — sinon une relance faite depuis le cockpit laisse le tableau afficher
+ * l'ancienne échéance, et inversement.
+ */
+function revalidateFollowUpViews(): void {
   revalidatePath("/follow-ups");
+  revalidatePath("/today");
 }
 
 /** Effet de chaque transition. Séparé de l'écriture pour rester lisible. */

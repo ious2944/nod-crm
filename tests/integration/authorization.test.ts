@@ -4,6 +4,7 @@ import { applyQuickAction, createFollowUp } from "@/app/(app)/follow-ups/actions
 import { UnauthenticatedError } from "@/lib/auth/dal";
 import { initialCreateState } from "@/lib/follow-ups/create-state";
 import { searchContactOptions } from "@/lib/contacts/queries";
+import { getCockpit } from "@/lib/cockpit/queries";
 import { getFollowUpBoard } from "@/lib/follow-ups/queries";
 import { prisma } from "@/lib/prisma";
 
@@ -94,10 +95,11 @@ describe("mutations sans session", () => {
     expect(after).toEqual(before);
   });
 
-  it("refuse la lecture du tableau et de la liste de contacts", async () => {
+  it("refuse la lecture du tableau, du cockpit et de la liste de contacts", async () => {
     // Les lectures passent par `requireUser()` : elles redirigent vers /login.
     await expect(getFollowUpBoard("all")).rejects.toThrow(TestRedirect);
     await expect(searchContactOptions("")).rejects.toThrow(TestRedirect);
+    await expect(getCockpit("all")).rejects.toThrow(TestRedirect);
   });
 });
 

@@ -1,25 +1,7 @@
-import type { UrgencyLevel } from "@/lib/follow-ups/domain";
 import type { FollowUpView } from "@/lib/follow-ups/view";
+import { BallBadge } from "./ball-badge";
 import { CardActions, QuickAction, SnoozeMenu } from "./quick-actions";
-
-/** Le vieillissement se lit d'abord à la couleur : discret → très visible. */
-const CHIP: Record<UrgencyLevel, string> = {
-  done: "bg-done-bg text-done-fg",
-  calm: "bg-calm-bg text-calm-fg",
-  soon: "bg-soon-bg text-soon-fg",
-  today: "bg-today-bg text-today-fg",
-  late: "bg-late-bg text-late-fg",
-  critical: "bg-critical-bg text-critical-fg",
-};
-
-const EDGE: Record<UrgencyLevel, string> = {
-  done: "bg-done-fg/35",
-  calm: "bg-border-subtle",
-  soon: "bg-soon-fg/50",
-  today: "bg-today-fg",
-  late: "bg-late-fg",
-  critical: "bg-critical-fg",
-};
+import { URGENCY_CHIP, URGENCY_EDGE } from "./urgency-styles";
 
 export function FollowUpCard({ item }: { item: FollowUpView }) {
   const isOpen = item.status === "OPEN";
@@ -33,7 +15,7 @@ export function FollowUpCard({ item }: { item: FollowUpView }) {
     >
       {/* Arrondi porté par le liseré lui-même : la carte n'a plus besoin
           d'`overflow-hidden`, qui découpait les menus ouverts depuis ses actions. */}
-      <span aria-hidden className={`absolute inset-y-0 left-0 w-1 rounded-l-xl ${EDGE[item.level]}`} />
+      <span aria-hidden className={`absolute inset-y-0 left-0 w-1 rounded-l-xl ${URGENCY_EDGE[item.level]}`} />
 
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div className="min-w-0 flex-1">
@@ -66,18 +48,12 @@ export function FollowUpCard({ item }: { item: FollowUpView }) {
               <span className="italic">Sans contact</span>
             )}
             {item.organizationName && <span>· {item.organizationName}</span>}
-            <span
-              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
-                item.ballOwner === "ME" ? "bg-accent-soft text-accent" : "bg-surface-muted text-ink"
-              }`}
-            >
-              🏓 {item.ballLabel}
-            </span>
+            <BallBadge ballOwner={item.ballOwner} label={item.ballLabel} />
           </div>
         </div>
 
         <span
-          className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${CHIP[item.level]}`}
+          className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${URGENCY_CHIP[item.level]}`}
         >
           {item.dueLabel}
         </span>

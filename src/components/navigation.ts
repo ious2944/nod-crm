@@ -3,7 +3,9 @@
  *
  * Les entrées `available: false` sont affichées désactivées : elles annoncent la
  * suite (Organisations, Dashboard) sans faire croire qu'un module existe déjà.
- * En V0.2, Contacts rejoint Follow-up parmi les modules réellement développés.
+ * En V0.2, Contacts rejoint Follow-up parmi les modules réellement développés ;
+ * en V0.3, le cockpit « Aujourd'hui » prend la tête de la navigation — c'est
+ * l'écran par lequel on entre dans l'application.
  */
 export interface NavItem {
   label: string;
@@ -20,7 +22,10 @@ export interface NavSection {
 export const NAV_SECTIONS: NavSection[] = [
   {
     title: null,
-    items: [{ label: "Dashboard", available: false, icon: "◎" }],
+    items: [
+      { label: "Aujourd'hui", href: "/today", available: true, icon: "◉" },
+      { label: "Dashboard", available: false, icon: "◎" },
+    ],
   },
   {
     title: "CRM",

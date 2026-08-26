@@ -30,7 +30,7 @@ Shipped and in use:
 
 ---
 
-## V0.2 — Contacts *(current)*
+## V0.2 — Contacts
 
 Shipped:
 
@@ -43,7 +43,22 @@ Shipped:
 
 ---
 
-## V0.3 — Organisations and follow-up editing
+## V0.3 — Cockpit "Aujourd'hui" *(current)*
+
+Shipped:
+
+- A cockpit at `/today`, the landing page of an open session: four attention
+  counters, one priority feed, next seven days, and what is waiting on them.
+- Prioritisation that mixes late, today, stalled and upcoming into one list
+  instead of several screens.
+- A stagnation signal derived from `updated_at` — no new column. Its limits are
+  written down in [docs/cockpit.md](docs/cockpit.md).
+- Acting from the cockpit through the existing follow-up actions, not a second
+  implementation of them.
+
+---
+
+## V0.4 — Organisations and follow-up editing
 
 The gaps that show up fastest in daily use:
 
@@ -68,6 +83,8 @@ Worth building eventually, in no particular order:
 
 - **Contact history and duplicate merging** — the page itself shipped in V0.2.
 - **Follow-up history** — every nudge, snooze and hand-off, visible on the item.
+  It would also make the cockpit's stagnation figure exact rather than a lower
+  bound; see [docs/cockpit.md](docs/cockpit.md).
 - **Business audit log** — who completed what, and when.
 - **MFA (TOTP), then passkeys.** The data model already accommodates it: a
   server-side session can represent a half-authenticated state.

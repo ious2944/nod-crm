@@ -81,7 +81,9 @@ export async function login(_previous: LoginState, formData: FormData): Promise<
   await purgeOldLoginAttempts();
 
   logAuthEvent("login.success", { email, ip });
-  redirect("/follow-ups");
+  // On entre dans le CRM par le cockpit : ce qu'il y a à faire aujourd'hui,
+  // pas la liste complète des suivis.
+  redirect("/today");
 }
 
 export async function logout(): Promise<void> {
