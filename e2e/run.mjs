@@ -89,8 +89,9 @@ try {
   await page.fill("#email", EMAIL);
   await page.fill("#password", PASSWORD);
   await page.getByRole("button", { name: "Se connecter" }).click();
-  await page.waitForURL("**/follow-ups", { timeout: 15000 });
-  check("redirection vers /follow-ups", new URL(page.url()).pathname === "/follow-ups");
+  // Depuis la V0.3, la connexion aboutit sur le cockpit « Aujourd'hui ».
+  await page.waitForURL("**/today", { timeout: 15000 });
+  check("redirection vers /today", new URL(page.url()).pathname === "/today");
 
   const cookie = await sessionCookie(context);
   check("cookie de session posé", Boolean(cookie));
@@ -105,7 +106,18 @@ try {
     console.log("  · cookie Secure/__Host- non vérifiable en HTTP local");
   }
 
-  section("5. Parcours Follow-up");
+  section("5. Cockpit « Aujourd'hui »");
+  check(
+    "le cockpit salue l'utilisateur",
+    (await page.getByRole("heading", { level: 1 }).textContent())?.startsWith("Bonjour") === true,
+  );
+  check(
+    "les quatre indicateurs d'attention sont là",
+    (await page.getByRole("link", { name: /En retard|Aujourd'hui|À venir|Chez eux/ }).count()) >= 4,
+  );
+
+  section("6. Parcours Follow-up");
+  await page.goto("/follow-ups", { waitUntil: "networkidle" });
   const title = `E2E ${Date.now()}`;
   await page.getByRole("button", { name: "Nouveau suivi" }).click();
   await page.fill("#title", title);
@@ -181,7 +193,7 @@ try {
   await page.waitForTimeout(1200);
   check("abandonné", (await page.locator("article", { hasText: title }).count()) === 0);
 
-  section("6. Module Contacts");
+  section("7. Module Contacts");
   const contactName = `Contact E2E ${Date.now()}`;
   await page.getByRole("link", { name: "Contacts", exact: true }).first().click();
   await page.waitForURL("**/contacts", { timeout: 15000 });
@@ -219,7 +231,7 @@ try {
     (await page.locator("text=Aucun suivi pour ce contact.").count()) === 1,
   );
 
-  section("7. Déconnexion");
+  section("8. Déconnexion");
   await page.getByRole("button", { name: "Déconnexion" }).first().click();
   await page.waitForURL("**/login", { timeout: 15000 });
   check("redirection vers /login", new URL(page.url()).pathname === "/login");
@@ -228,7 +240,7 @@ try {
   await page.goto("/follow-ups", { waitUntil: "networkidle" });
   check("la session est bien invalidée", new URL(page.url()).pathname === "/login");
 
-  section("8. Hygiène");
+  section("9. Hygiène");
   check("aucune erreur JavaScript", consoleErrors.length === 0, consoleErrors.join(" | "));
   const html = await page.content();
   check(

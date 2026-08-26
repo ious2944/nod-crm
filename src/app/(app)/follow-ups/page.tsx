@@ -34,7 +34,9 @@ export default async function FollowUpsPage({ searchParams }: PageProps<"/follow
     <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Aujourd&apos;hui</h1>
+          {/* Le titre « Aujourd'hui » appartient désormais au cockpit
+              (`/today`) : ce tableau, lui, est la liste complète du module. */}
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Follow-up</h1>
           <AttentionHeadline count={board.stats.needsAttention} />
         </div>
         <NewFollowUpDialog defaultDueDate={addDaysToKey(today, DEFAULT_DUE_IN_DAYS)} />

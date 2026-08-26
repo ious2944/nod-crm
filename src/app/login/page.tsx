@@ -11,7 +11,7 @@ export const metadata = {
 export default async function LoginPage() {
   // Déjà connecté : inutile de proposer l'écran de connexion.
   if (await getCurrentUser()) {
-    redirect("/follow-ups");
+    redirect("/today");
   }
 
   return (

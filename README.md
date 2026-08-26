@@ -41,10 +41,18 @@ theirs**. Everything on screen exists to make the next action obvious.
 
 ---
 
-## Features (V0.2)
+## Features (V0.3)
 
 Only what actually exists today:
 
+- **Cockpit "Aujourd'hui"** — the landing page at `/today`. Four attention
+  counters (late, today, next seven days, waiting on them), one priority feed
+  listing what needs doing now instead of spreading it over several screens,
+  the coming week, and what is going cold. Quick actions work straight from the
+  feed. No charts, no KPIs. See [docs/cockpit.md](docs/cockpit.md).
+- **Stagnation signal** — a follow-up whose ball is with the other party and
+  which has not moved for a week is flagged, even when its due date is still
+  far off.
 - **Contacts** — a dedicated directory at `/contacts`, with creation, viewing
   and editing. Each contact can store first and last name, organisation, job
   title, email, phone, free-form notes and an optional photo. A contact exists
@@ -68,7 +76,8 @@ Only what actually exists today:
 - **Status** — open, completed, abandoned.
 - **Quick actions** — Nudge, Received, Ball sent, Snooze (+1 d / +3 d / +1 w),
   Complete, Abandon, Reopen.
-- **Filters** — All / To nudge / My court / Their court / Completed.
+- **Filters** — All / To nudge / My court / Their court / Completed on the
+  board; the cockpit's four counters double as filters of its feed.
 - **Authentication** — email and password, Argon2id, server-side sessions with
   absolute and idle expiry, rate limiting.
 - **Admin CLI** — create workspaces and users, reset passwords, disable
@@ -270,8 +279,14 @@ Known and accepted in V0.2:
 - Multi-workspace isolation is enforced everywhere, but there is no UI to
   create or switch workspaces beyond the CLI.
 - "Nudge" records the nudge. It does not send an email — NOD CRM sends nothing.
-- No pagination on the **Follow-up board**: it loads every open follow-up.
-  Comfortable below roughly 2,000 open items. The Contacts list *is* paginated.
+- No pagination on the **Follow-up board** or the **cockpit**: both load every
+  open follow-up. Comfortable below roughly 2,000 open items. The Contacts list
+  *is* paginated.
+- The cockpit's "sans mouvement depuis N j" is derived from `updated_at`, so it
+  dates the last recorded action on the follow-up, not the moment the ball
+  actually changed hands. It understates the wait rather than overstating it;
+  the exact figure needs the follow-up history, which is not built. See
+  [docs/cockpit.md](docs/cockpit.md).
 - Contact search is `ILIKE`, so it is a sequential scan. Fine at the volumes
   NOD CRM targets; a `pg_trgm` index is the next step, not shipped yet.
 - Contact photos are files on a volume, not rows. `nod-crm-backup.sh` archives
@@ -292,11 +307,15 @@ Directions, not commitments. Full version in [ROADMAP.md](ROADMAP.md).
 
 **V0.1 — Follow-Up.** Follow-ups, the workflow, authentication, self-hosting.
 
-**V0.2 — Contacts (current).** A real Contacts module: directory, server-side
-search, filters, sorting, pagination, photos, archiving, and an optional link
-from any follow-up.
+**V0.2 — Contacts.** A real Contacts module: directory, server-side search,
+filters, sorting, pagination, photos, archiving, and an optional link from any
+follow-up.
 
-**V0.3 — Organisations.** Promoting the organisation field to a table, plus
+**V0.3 — Cockpit "Aujourd'hui" (current).** A landing page that prioritises the
+day's work: attention counters, one priority feed, the coming week, what is
+going cold, and a stagnation signal.
+
+**V0.4 — Organisations.** Promoting the organisation field to a table, plus
 searching follow-ups and editing an existing one.
 
 **Later.** Business audit log, MFA, self-service password reset, real
