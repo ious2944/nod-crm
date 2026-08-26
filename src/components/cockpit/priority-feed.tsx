@@ -10,9 +10,12 @@ import { FollowUpRow } from "./follow-up-row";
  * Le feed « À traiter ».
  *
  * C'est le cœur du cockpit, et le principe retenu de Pipedrive Pulse : au lieu
- * de faire parcourir plusieurs écrans, on mélange dans une même liste ce qui est
- * réellement prioritaire — retards, journée, sujets qui refroidissent, échéances
- * proches — dans cet ordre. L'utilisateur descend la liste, il ne la trie pas.
+ * de faire parcourir plusieurs écrans, on mélange dans une même liste ce qui
+ * appelle une action aujourd'hui — retards, journée, sujets qui refroidissent —
+ * dans cet ordre. L'utilisateur descend la liste, il ne la trie pas.
+ *
+ * Ce qui est simplement prévu cette semaine n'y figure pas : « Prochainement »
+ * couvre déjà cette fenêtre, sur le même écran.
  */
 const EMPTY: Record<CockpitFilter, string> = {
   all: "Rien à traiter pour l'instant. Tout est à jour.",

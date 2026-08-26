@@ -104,7 +104,7 @@ export interface CockpitSignals {
  * PostgreSQL à chaque `UPDATE` de la ligne : relance, balle rendue, report,
  * clôture. Il date donc le dernier geste enregistré sur le suivi — ni plus, ni
  * moins. C'est une borne *basse* de l'attente réelle : un suivi confié il y a
- * trente jours puis reporté hier affiche « sans mouvement depuis 1 jour ».
+ * trente jours puis reporté hier affiche « sans mouvement depuis 1 j ».
  *
  * On sous-estime donc parfois, on ne surestime jamais. C'est le compromis
  * assumé pour ne pas ajouter de colonne (voir `docs/cockpit.md`).
@@ -150,8 +150,10 @@ export function stagnationLabel(idleDays: number): string | null {
  * Classement d'un suivi dans le feed.
  *
  * L'ordre des tests EST l'ordre de priorité voulu : les retards d'abord, puis
- * la journée, puis ce qui refroidit, puis ce qui arrive. Un suivi clos ne
- * revient jamais (`null`).
+ * la journée, puis ce qui refroidit, puis ce qui arrive. Seuls les trois
+ * premiers composent le feed par défaut (`isActionableNow`) ; les deux autres
+ * servent au classement sous un filtre explicite. Un suivi clos ne revient
+ * jamais (`null`).
  */
 export function feedReason(signals: CockpitSignals): FeedReason | null {
   if (signals.status !== "OPEN") return null;
