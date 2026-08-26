@@ -49,4 +49,4 @@ Since V0.3, the best overview of the application is the **Aujourd'hui** cockpit
 It is displayed from the root `README.md` with:
 
 ```markdown
-![NOD CRM Follow-Up board](docs/screenshots/board-light.png)
+![NOD CRM follow-up list](docs/screenshots/board-light.png)
