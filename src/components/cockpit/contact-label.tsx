@@ -18,7 +18,7 @@ export function ContactLabel({
   size = "default",
 }: {
   contact: ContactRef;
-  /** `compact` : sans avatar, pour les listes denses. */
+  /** `compact` : sans avatar ni organisation, pour les listes denses. */
   size?: "default" | "compact";
 }) {
   const name = contact.href ? (
@@ -33,7 +33,12 @@ export function ContactLabel({
   );
 
   return (
-    <span className="inline-flex min-w-0 items-center gap-1.5 text-[13px]">
+    // `max-w-full` n'est pas décoratif : sans lui, cette boîte `inline-flex`
+    // se dimensionne sur son contenu et déborde son parent au lieu de laisser
+    // ses enfants se tronquer. Dans la colonne de droite, le nom passait
+    // par-dessus le bouton « Relancer » et la page gagnait une barre de
+    // défilement horizontale.
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 text-[13px]">
       {size === "default" && contact.id && (
         <span
           aria-hidden
@@ -52,8 +57,12 @@ export function ContactLabel({
       )}
 
       {/* Ligne « entreprise » — affichée uniquement si la donnée existe :
-          aucune organisation fictive n'est inventée pour remplir la place. */}
-      {contact.organizationName && (
+          aucune organisation fictive n'est inventée pour remplir la place.
+          Écartée des listes denses : dans une colonne de 360 px, elle poussait
+          le nom du contact à se tronquer (« Thomas Le… · Mairie de Bor… »),
+          alors que c'est le nom qui identifie la ligne. Il reste affiché sur
+          les lignes du feed, qui ont la largeur pour les deux. */}
+      {size === "default" && contact.organizationName && (
         <span className="truncate text-muted">
           <span aria-hidden> · </span>
           {contact.organizationName}

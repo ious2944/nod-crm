@@ -24,6 +24,13 @@ export const UPCOMING_WINDOW_DAYS = 7;
  */
 export const STAGNATION_DAYS = 7;
 
+/**
+ * Espace insécable entre le nombre et son unité — la règle typographique
+ * française, et accessoirement ce qui empêche « 26 » et « j » d'atterrir sur
+ * deux lignes différentes dans une colonne étroite.
+ */
+const NON_BREAKING_SPACE = " ";
+
 /** Le feed reste lisible : au-delà, on renvoie vers la liste complète. */
 export const FEED_LIMIT = 12;
 
@@ -45,6 +52,23 @@ const REASON_RANK: Record<FeedReason, number> = {
   // qu'un suivi ouvert lointain reste classable lorsqu'un filtre le rappelle.
   later: 4,
 };
+
+/**
+ * Les motifs qui appellent une action *aujourd'hui*, et eux seuls, composent le
+ * feed par défaut.
+ *
+ * `upcoming` en est sorti après revue : la section « Prochainement » affiche
+ * exactement la même fenêtre de sept jours, sur le même écran, dans le même
+ * ordre. Sur un jeu réaliste, un quart du feed était donc une relecture de la
+ * colonne d'à côté — et cette relecture occupait le bas du feed, là où l'œil
+ * arrive en dernier, pour des suivis qui ne demandent justement rien
+ * maintenant. Ils restent atteignables d'un clic par l'indicateur « À venir ».
+ */
+const ACTIONABLE_NOW: readonly FeedReason[] = ["late", "today", "stagnant"];
+
+export function isActionableNow(reason: FeedReason): boolean {
+  return ACTIONABLE_NOW.includes(reason);
+}
 
 const REASON_LABEL: Record<FeedReason, string> = {
   late: "En retard",
@@ -104,17 +128,22 @@ export function isStagnant(signals: CockpitSignals): boolean {
   );
 }
 
-/** Ancienneté du dernier mouvement, en clair. Toujours affichable. */
+/**
+ * Ancienneté du dernier mouvement, en clair. Toujours affichable.
+ *
+ * Même abréviation que `stagnationLabel` : les deux se côtoient dans la même
+ * liste, et « 4 jours » à côté de « 26 j » se lisait comme deux unités
+ * différentes — en plus de faire passer la ligne sur deux lignes.
+ */
 export function idleLabel(idleDays: number): string {
   if (idleDays <= 0) return "Mouvement aujourd'hui";
-  if (idleDays === 1) return "Sans mouvement depuis 1 jour";
-  return `Sans mouvement depuis ${idleDays} jours`;
+  return `Sans mouvement depuis ${idleDays}${NON_BREAKING_SPACE}j`;
 }
 
 /** Étiquette d'alerte, affichée seulement quand le seuil est franchi. */
 export function stagnationLabel(idleDays: number): string | null {
   if (idleDays < STAGNATION_DAYS) return null;
-  return `Sans mouvement depuis ${idleDays} j`;
+  return `Sans mouvement depuis ${idleDays}${NON_BREAKING_SPACE}j`;
 }
 
 /**

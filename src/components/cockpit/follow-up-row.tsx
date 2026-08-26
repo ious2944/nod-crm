@@ -15,8 +15,17 @@ import { FollowUpActionRow } from "./follow-up-action-row";
  * discrète (« Ajouter une note », un lien GED) sans toucher à la structure.
  */
 export function FollowUpRow({ item }: { item: CockpitItem }) {
+  const isCritical = item.level === "critical";
+
   return (
-    <article className="relative rounded-xl border border-border-subtle bg-surface p-3 pl-4 transition-shadow hover:shadow-sm sm:p-3.5 sm:pl-5">
+    // Le liseré coloré ne suffisait pas à distinguer un J+15 d'un « Dans 6 j »
+    // dans une pile de lignes identiques : le niveau critique reprend le
+    // traitement de bordure que la carte du tableau utilise déjà.
+    <article
+      className={`relative rounded-xl border bg-surface p-3 pl-4 transition-shadow hover:shadow-sm sm:pl-5 ${
+        isCritical ? "border-critical-fg/40" : "border-border-subtle"
+      }`}
+    >
       <span
         aria-hidden
         className={`absolute inset-y-0 left-0 w-1 rounded-l-xl ${URGENCY_EDGE[item.level]}`}
@@ -38,19 +47,24 @@ export function FollowUpRow({ item }: { item: CockpitItem }) {
         )}
       </div>
 
-      <h3 className="mt-1 text-[15px] font-semibold leading-snug text-ink">{item.title}</h3>
+      <h3 className="mt-0.5 text-[15px] font-semibold leading-snug text-ink">{item.title}</h3>
 
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-        <BallBadge ballOwner={item.ballOwner} label={item.ballLabel} />
-        {item.overdueDays >= 1 && <span>En retard de {item.overdueDays} j</span>}
-        {item.stagnationLabel && (
-          <span className="font-medium text-late-fg">⚠ {item.stagnationLabel}</span>
-        )}
-        {item.nudgeLabel && <span>{item.nudgeLabel}</span>}
-      </div>
+      {/* Contexte et actions partagent une ligne dès qu'il y a la place : sur
+          une pile de dix suivis, la ligne d'actions isolée transformait le feed
+          en succession de grosses cartes. */}
+      <div className="mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+          <BallBadge ballOwner={item.ballOwner} label={item.ballLabel} />
+          {item.overdueDays >= 1 && <span>En retard de {item.overdueDays} j</span>}
+          {item.stagnationLabel && (
+            <span className="font-medium text-late-fg">⚠ {item.stagnationLabel}</span>
+          )}
+          {item.nudgeLabel && <span>{item.nudgeLabel}</span>}
+        </div>
 
-      <div className="mt-2.5">
-        <FollowUpActionRow item={item} />
+        <div className="shrink-0">
+          <FollowUpActionRow item={item} />
+        </div>
       </div>
     </article>
   );

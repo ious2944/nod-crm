@@ -54,8 +54,18 @@ lands in the first one that matches:
 2. **today** — the day's work;
 3. **stagnant** — the ball is with them and nothing has moved (see below);
 4. **upcoming** — due within 7 days, nearest first;
-5. **later** — everything else. Never shown in the default feed; it exists so
-   that a follow-up still sorts when an explicit filter calls it back.
+5. **later** — everything else.
+
+**Only the first three appear in the default feed** (`isActionableNow`). The
+last two exist so that a follow-up still sorts when an explicit filter calls it
+back — the "À venir" counter, for instance.
+
+`upcoming` was dropped from the default feed during the V0.3 UX review: the
+"Prochainement" section shows exactly the same seven-day window, on the same
+screen, in the same order. On a realistic data set a quarter of the feed was a
+re-reading of the column next to it, sitting at the *bottom* of the feed — last
+place the eye reaches — for follow-ups that need nothing today. The rule the
+feed now follows is one sentence: **it lists what to do now, and nothing else.**
 
 Ties are broken by id, so the order never depends on what PostgreSQL returned
 first. The feed is capped at 12 rows and links to the full board past that.

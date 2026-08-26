@@ -19,11 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   one is also a filter of the feed (`/today?f=late`), and shares its predicate
   with the counter, so a counter can never announce a number the click
   contradicts.
-- **Priority feed** — one list that mixes what actually matters, in order:
-  biggest overdue first, then the day's work, then follow-ups that have stopped
-  moving, then what is due within the week. Nudge, received, ball sent and
-  complete are available on every row, through the existing Follow-up Server
-  Action — the cockpit adds no second business logic.
+- **Priority feed** — one list of what needs doing now, in order: biggest
+  overdue first, then the day's work, then follow-ups that have stopped moving.
+  What is merely due this week is *not* repeated here — "Prochainement" owns
+  that window. Nudge, received, ball sent and complete are available on every
+  row, through the existing Follow-up Server Action — the cockpit adds no
+  second business logic.
 - **Stagnation signal** — `⚠ Sans mouvement depuis N j` on a follow-up whose
   ball is with the other party and which has not moved for a week. Computed
   from `updated_at`; **no migration, no new column**. What that number does and
@@ -41,6 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Login and `/` now redirect to `/today` instead of `/follow-ups`.
+- The sidebar entry for the board reads **"Suivis"**, not "Follow-up": next to
+  "Aujourd'hui", what has to be understood at a glance is the relation between
+  the two — the day on one side, the full list on the other. The module keeps
+  its name under the brand at the top of the sidebar.
+- The mobile top bar wraps instead of overflowing. With a third module in it,
+  its contents no longer fit 390 px and "Déconnexion" was pushed off-screen.
 - The follow-up board's heading is "Follow-up"; "Aujourd'hui" now names the
   cockpit.
 - Urgency colours and the ball badge moved to

@@ -75,13 +75,16 @@ describe("stagnation", () => {
   it("ne se déclenche qu'au seuil, pas avant", () => {
     expect(isStagnant(signals({ idleDays: STAGNATION_DAYS - 1 }))).toBe(false);
     expect(stagnationLabel(STAGNATION_DAYS - 1)).toBeNull();
-    expect(stagnationLabel(14)).toBe("Sans mouvement depuis 14 j");
+    expect(stagnationLabel(14)).toBe("Sans mouvement depuis 14 j");
   });
 
   it("sait dire l'ancienneté même sous le seuil", () => {
     expect(idleLabel(0)).toBe("Mouvement aujourd'hui");
-    expect(idleLabel(1)).toBe("Sans mouvement depuis 1 jour");
-    expect(idleLabel(3)).toBe("Sans mouvement depuis 3 jours");
+    expect(idleLabel(1)).toBe("Sans mouvement depuis 1 j");
+    expect(idleLabel(3)).toBe("Sans mouvement depuis 3 j");
+    // Même unité que l'alerte de stagnation : les deux cohabitent dans la
+    // section « En attente chez eux ».
+    expect(idleLabel(26)).toBe(stagnationLabel(26));
   });
 });
 
@@ -141,10 +144,20 @@ describe("ordre du feed", () => {
     ]);
   });
 
-  it("ne garde dans le feed par défaut que ce qui mérite un regard", () => {
-    const feed = items.filter((item) => belongsToFeed("all", item)).map((item) => item.id);
-    expect(feed).not.toContain("g");
-    expect(feed).toHaveLength(6);
+  it("ne garde dans le feed par défaut que ce qui appelle une action aujourd'hui", () => {
+    const feed = items
+      .filter((item) => belongsToFeed("all", item))
+      .sort(compareFeed)
+      .map((item) => item.id);
+
+    // Retards, journée et stagnation. Ni « e »/« f » (échéances proches, que
+    // la section « Prochainement » affiche déjà), ni « g » (lointain).
+    expect(feed).toEqual(["b", "a", "c", "d"]);
+  });
+
+  it("laisse « À venir » et « Chez eux » rattraper ce que le feed écarte", () => {
+    const upcoming = items.filter((item) => belongsToFeed("upcoming", item));
+    expect(upcoming.map((item) => item.id).sort()).toEqual(["d", "e", "f"]);
   });
 
   it("range l'attente la plus longue en premier", () => {
@@ -319,7 +332,7 @@ describe("toCockpitItem", () => {
     const stale = { updatedAt: startOfDay("2026-05-01", PARIS) };
 
     expect(toCockpitItem(record({ ...stale }), NOW, PARIS).stagnationLabel).toBe(
-      "Sans mouvement depuis 40 j",
+      "Sans mouvement depuis 40 j",
     );
     expect(
       toCockpitItem(record({ ...stale, ballOwner: "ME" }), NOW, PARIS).stagnationLabel,

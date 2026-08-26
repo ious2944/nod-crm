@@ -161,10 +161,15 @@ describe("cockpit — groupes et compteurs", () => {
     expect(cockpit.counters.late).toBe(2);
     expect(cockpit.counters.today).toBe(1);
     expect(cockpit.counters.upcoming).toBe(2);
+
+    // Le feed s'arrête à ce qui appelle une action aujourd'hui : les deux
+    // échéances proches sont servies par « Prochainement », pas répétées ici.
     expect(cockpit.feed.items.map((item) => item.title)).toEqual([
       "Très en retard",
       "Un peu en retard",
       "Aujourd'hui",
+    ]);
+    expect(cockpit.upcoming.items.map((item) => item.title)).toEqual([
       "Demain",
       "Dans 5 jours",
     ]);
@@ -239,7 +244,9 @@ describe("cockpit — stagnation", () => {
     expect(item.title).toBe("Devis en attente");
     expect(item.reason).toBe("stagnant");
     expect(item.idleDays).toBe(STAGNATION_DAYS + 7);
-    expect(item.stagnationLabel).toBe(`Sans mouvement depuis ${STAGNATION_DAYS + 7} j`);
+    expect(item.stagnationLabel).toBe(
+      `Sans mouvement depuis ${STAGNATION_DAYS + 7} j`,
+    );
   });
 
   it("n'alerte pas sur un suivi dont la balle est chez moi", async () => {
@@ -269,10 +276,17 @@ describe("cockpit — stagnation", () => {
     // qui réécrit `updated_at`, donc le cockpit n'a rien de spécial à faire.
     await applyQuickAction(formData({ id, intent: "nudge" }));
 
+    // Le suivi quitte « À traiter » : il ne stagne plus, et sa nouvelle
+    // échéance (+3 j) le range dans « Prochainement ». C'est le comportement
+    // attendu — une ligne traitée doit disparaître du plan de travail.
     const after = await getCockpit("all");
-    expect(after.feed.items[0].idleDays).toBe(0);
-    expect(after.feed.items[0].stagnationLabel).toBeNull();
-    expect(after.feed.items[0].nudgeLabel).toBe("Relancé 1 fois");
+    expect(after.feed.items).toEqual([]);
+    expect(after.upcoming.items.map((item) => item.title)).toEqual(["Relance à faire"]);
+
+    const [item] = after.upcoming.items;
+    expect(item.idleDays).toBe(0);
+    expect(item.stagnationLabel).toBeNull();
+    expect(item.nudgeLabel).toBe("Relancé 1 fois");
   });
 
   it("trie « en attente chez eux » de la plus longue attente à la plus courte", async () => {

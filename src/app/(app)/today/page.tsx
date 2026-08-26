@@ -58,10 +58,15 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
         <AttentionSummary counters={cockpit.counters} filter={filter} />
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] lg:gap-7">
+      {/* `grid-cols-1` explicite : sans lui, la colonne unique du mobile est une
+          piste `auto`, dimensionnée sur le contenu le plus large — la page
+          gagnait 50 px de défilement horizontal. Deux colonnes seulement à
+          partir de `xl` : à 1024 px la colonne de droite tombait sous 280 px et
+          n'affichait plus que des libellés tronqués. */}
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] xl:gap-7">
         <PriorityFeed section={cockpit.feed} filter={filter} />
 
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           <UpcomingFollowUps section={cockpit.upcoming} />
           <WaitingFollowUps section={cockpit.waiting} />
         </div>

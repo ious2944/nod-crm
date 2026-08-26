@@ -47,9 +47,9 @@ Only what actually exists today:
 
 - **Cockpit "Aujourd'hui"** — the landing page at `/today`. Four attention
   counters (late, today, next seven days, waiting on them), one priority feed
-  that mixes what actually matters instead of spreading it over several
-  screens, the coming week, and what is going cold. Quick actions work straight
-  from the feed. No charts, no KPIs. See [docs/cockpit.md](docs/cockpit.md).
+  listing what needs doing now instead of spreading it over several screens,
+  the coming week, and what is going cold. Quick actions work straight from the
+  feed. No charts, no KPIs. See [docs/cockpit.md](docs/cockpit.md).
 - **Stagnation signal** — a follow-up whose ball is with the other party and
   which has not moved for a week is flagged, even when its due date is still
   far off.

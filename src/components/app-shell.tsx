@@ -105,9 +105,16 @@ export function AppShell({
   return (
     <div className="flex min-h-dvh flex-col md:flex-row">
       {/* Barre supérieure — mobile et tablette */}
-      <header className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-border-subtle bg-surface/90 px-4 py-3 backdrop-blur md:hidden">
+      {/* La barre passe à la ligne plutôt que de déborder : avec trois modules
+          plus « Déconnexion », son contenu dépasse 390 px de large. Même choix
+          que les filtres du tableau — un défilement latéral sans indice
+          visible cache des entrées de navigation. */}
+      <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border-subtle bg-surface/90 px-4 py-3 backdrop-blur md:hidden">
         <Brand appName={appName} compact />
-        <nav aria-label="Modules" className="flex items-center gap-1.5">
+        <nav
+          aria-label="Modules"
+          className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1.5"
+        >
           {NAV_SECTIONS.flatMap((section) => section.items)
             .filter((item) => item.available && item.href)
             .map((item) => (

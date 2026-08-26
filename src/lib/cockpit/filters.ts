@@ -8,7 +8,7 @@
  */
 
 import type { CockpitSignals, FeedReason } from "./domain";
-import { UPCOMING_WINDOW_DAYS } from "./domain";
+import { isActionableNow, UPCOMING_WINDOW_DAYS } from "./domain";
 
 export const COCKPIT_FILTERS = [
   { key: "all", label: "Tout" },
@@ -63,7 +63,7 @@ export function matchesCockpitFilter(
 }
 
 /**
- * Le feed par défaut mélange les groupes utiles et écarte le lointain ; un
+ * Le feed par défaut ne garde que ce qui appelle une action aujourd'hui ; un
  * filtre explicite, lui, montre tout ce que son compteur a compté.
  */
 export function belongsToFeed(
@@ -71,6 +71,6 @@ export function belongsToFeed(
   item: CockpitSignals & { reason: FeedReason | null },
 ): boolean {
   if (item.reason === null) return false;
-  if (filter === "all") return item.reason !== "later";
+  if (filter === "all") return isActionableNow(item.reason);
   return matchesCockpitFilter(filter, item);
 }

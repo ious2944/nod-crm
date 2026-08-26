@@ -36,6 +36,10 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     title: "Pilotage",
-    items: [{ label: "Follow-up", href: "/follow-ups", available: true, icon: "🏓" }],
+    // « Suivis » plutôt que « Follow-up » : à côté d'« Aujourd'hui », ce qui
+    // doit se comprendre d'un coup d'œil c'est la relation entre les deux
+    // entrées — la journée d'un côté, la liste complète de l'autre. Le nom du
+    // module reste affiché sous la marque, en tête de barre latérale.
+    items: [{ label: "Suivis", href: "/follow-ups", available: true, icon: "🏓" }],
   },
 ];
