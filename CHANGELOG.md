@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**NOD CRM v0.5 — Organisations.**
+
+### Added
+
+- **Organisations module** — a first-class business object for the companies and
+  structures you work with. Simple and intentional: name (required), website,
+  email, phone, notes. No "mini Salesforce" — one screen to understand an
+  account at a glance.
+- **`/organizations`** — the list, with live search (name, website, email),
+  an "Afficher archivées" checkbox, and pagination. Card-style rows show the
+  domain, contact count, and the `⋮` menu (edit, archive/restore). Empty-state
+  messages distinguish "no results" from "no match for this filter".
+- **`/organizations/[id]`** — the organisation sheet, the centre of V0.5. It
+  answers three questions at once: _who is this company?_ (identity panel),
+  _who are my contacts there?_ (contact list with links), _what needs attention?_
+  (open follow-ups and open tasks, ordered by urgency). Navigation links back to
+  the list.
+- **`Contact → Organisation` foreign key** (`organization_id` nullable). The
+  migration is fully additive: the existing `organization_name` text column is
+  kept as-is; the backfill matches contacts to organisations by exact name per
+  workspace. No existing row is removed or changed beyond the FK being set.
+- **Organisation picker in the contact form** — the free-text `organization_name`
+  input is replaced by a `SearchPicker` component backed by a server-side search
+  of the `organizations` table. Selecting an organisation sets `organization_id`
+  and syncs `organization_name` automatically. Contacts with only the text field
+  still display correctly.
+- **Clickable organisation link on the contact sheet** — when a contact is
+  linked to an organisation via FK, the subtitle line (`Org · Job title`) becomes
+  a link to the organisation's sheet.
+- **`docs/organizations.md`** — design decisions: why `organization_name` is
+  kept, how the applicative workspace check replaces the impossible composite FK,
+  what the migration does step by step, and what was deliberately left out.
+
+### Changed
+
+- **Navigation** — the "Organisations" entry is now live (`available: true`,
+  `href: /organizations`). It was previously a disabled placeholder since V0.1.
+- The demo seed creates four organisations (Acme Corp, Example Company, Globex,
+  Initech) and links the demo contacts to them via `organization_id`.
+- `resetDatabase()` in the integration test fixtures now includes `organizations`
+  in the `TRUNCATE … CASCADE` statement.
+
+### Security
+
+- Every organisation read and write is scoped to the `workspace_id` derived from
+  the session. No query function accepts a `workspaceId` parameter — the session
+  is the only source.
+- `Contact → Organisation` links are validated applicatively before any write:
+  the referenced organisation must exist in the same workspace and must not be
+  archived. PostgreSQL `ON DELETE SET NULL` handles deletion gracefully.
+- `updateMany` with `workspaceId` in the `WHERE` clause is used for archive and
+  restore, so a foreign `id` silently affects 0 rows (fail-closed, no disclosure).
+- The detail page (`/organizations/[id]`) calls `notFound()` for any id that is
+  not found in the current workspace — it does not distinguish "does not exist"
+  from "belongs to another workspace".
+- New integration tests cover: cross-workspace read, write, archive, picker leak,
+  and contact linking with a foreign organisation id.
+
+
 **NOD CRM v0.4 — Tasks.**
 
 ### Added

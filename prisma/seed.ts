@@ -40,15 +40,53 @@ function daysAgo(days: number): Date {
 }
 
 /**
+ * Organisations fictives de démonstration (V0.5).
+ *
+ * Chaque organisation est rattachée aux contacts qui la référençaient via le
+ * champ texte libre `organizationName`. Les deux champs coexistent pour garantir
+ * la rétrocompatibilité avec les contacts antérieurs à V0.5.
+ */
+const ORGANIZATIONS = [
+  {
+    key: "acme",
+    name: "Acme Corp",
+    website: "https://www.acme.example.com",
+    email: "contact@acme.example.com",
+    phone: "+33 1 23 45 67 89",
+  },
+  {
+    key: "example-co",
+    name: "Example Company",
+    website: "https://www.example.com",
+    email: null,
+    phone: null,
+  },
+  {
+    key: "globex",
+    name: "Globex",
+    website: "https://globex.example.com",
+    email: null,
+    phone: "+33 4 56 78 90 12",
+  },
+  {
+    key: "initech",
+    name: "Initech",
+    website: null,
+    email: "hello@initech.example.com",
+    phone: null,
+  },
+];
+
+/**
  * Personnages entièrement fictifs, sur des organisations d'exemple. Aucune
  * personne réelle, aucun client, aucune adresse : ce jeu est destiné à être
  * publié et lu par n'importe qui.
  */
 const CONTACTS = [
-  { key: "alice", firstName: "Alice", lastName: "Martin", organizationName: "Acme Corp" },
-  { key: "bob", firstName: "Bob", lastName: "Dupont", organizationName: "Example Company" },
-  { key: "carla", firstName: "Carla", lastName: "Nguyen", organizationName: "Globex" },
-  { key: "david", firstName: "David", lastName: "Okoye", organizationName: "Initech" },
+  { key: "alice", firstName: "Alice", lastName: "Martin", organizationKey: "acme", organizationName: "Acme Corp" },
+  { key: "bob", firstName: "Bob", lastName: "Dupont", organizationKey: "example-co", organizationName: "Example Company" },
+  { key: "carla", firstName: "Carla", lastName: "Nguyen", organizationKey: "globex", organizationName: "Globex" },
+  { key: "david", firstName: "David", lastName: "Okoye", organizationKey: "initech", organizationName: "Initech" },
 ];
 
 async function main() {
@@ -72,15 +110,38 @@ async function main() {
   await prisma.task.deleteMany({ where: { workspaceId: workspace.id, isDemo: true } });
   await prisma.followUp.deleteMany({ where: { workspaceId: workspace.id, isDemo: true } });
   await prisma.contact.deleteMany({ where: { workspaceId: workspace.id, isDemo: true } });
+  // Les organisations de démonstration n'ont pas de colonne isDemo : on les
+  // identifie par le nom et le workspace, et on les recrée idempotement.
+  await prisma.organization.deleteMany({
+    where: { workspaceId: workspace.id, name: { in: ORGANIZATIONS.map((o) => o.name) } },
+  });
+
+  // Créer les organisations, puis les contacts liés.
+  const organizations = new Map<string, string>();
+  for (const org of ORGANIZATIONS) {
+    const created = await prisma.organization.create({
+      data: {
+        workspaceId: workspace.id,
+        name: org.name,
+        website: org.website,
+        email: org.email,
+        phone: org.phone,
+      },
+      select: { id: true },
+    });
+    organizations.set(org.key, created.id);
+  }
 
   const contacts = new Map<string, string>();
   for (const contact of CONTACTS) {
+    const organizationId = organizations.get(contact.organizationKey) ?? null;
     const created = await prisma.contact.create({
       data: {
         workspaceId: workspace.id,
         firstName: contact.firstName,
         lastName: contact.lastName,
         organizationName: contact.organizationName,
+        organizationId,
         isDemo: true,
       },
       select: { id: true },
@@ -246,7 +307,7 @@ async function main() {
   }
 
   console.log(
-    `Seed terminé : ${CONTACTS.length} contacts, ${followUps.length} suivis et ${tasks.length} tâches de démonstration.`,
+    `Seed terminé : ${ORGANIZATIONS.length} organisations, ${CONTACTS.length} contacts, ${followUps.length} suivis et ${tasks.length} tâches de démonstration.`,
   );
   // Aucun identifiant n'est seedé : les comptes se créent uniquement à la main.
   const userCount = await prisma.user.count({ where: { workspaceId: workspace.id } });

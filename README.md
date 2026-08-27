@@ -17,7 +17,9 @@ close it. That is the whole product. There are no pipelines, no scoring, no
 forty-field contact forms — and there is no plan to add them.
 
 Since V0.4 it also answers the smaller question next to it — *what do I have to
-do?* — with tasks. The two are deliberately different objects:
+do?* — with tasks. Since V0.5 it adds a third dimension: *who are these people,
+and what do I need to do with their organisation?* The three objects are
+deliberately separate:
 
 > **A task is something to do. A follow-up is something to move forward with
 > someone.**
@@ -25,8 +27,8 @@ do?* — with tasks. The two are deliberately different objects:
 The metaphor is table tennis: 🏓 the ball is either **on your side** or **on
 theirs**. Everything on screen exists to make the next action obvious.
 
-> ⚠️ **V0.4.** Three modules — Follow-Up, Contacts and Tasks. They work and are
-> used in production, but it is a young project — read
+> ⚠️ **V0.5.** Four modules — Follow-Up, Contacts, Tasks and Organisations. They
+> work and are used in production, but it is a young project — read
 > [Limitations](#limitations) before you commit to it. The user interface is
 > currently in French only; the documentation is in English and
 > internationalisation is on the roadmap.
@@ -48,14 +50,19 @@ theirs**. Everything on screen exists to make the next action obvious.
 
 ---
 
-## Features (V0.4)
+## Features (V0.5)
 
 Only what actually exists today:
 
+- **Organisations** — a dedicated module at `/organizations`, with creation,
+  editing and archiving. Each organisation can store name, website, email, phone
+  and notes. The organisation sheet shows all linked contacts, open follow-ups
+  and open tasks at a glance.
 - **Contacts** — a dedicated directory at `/contacts`, with creation, viewing
-  and editing. Each contact can store first and last name, organisation, job
-  title, email, phone, free-form notes and an optional photo. A contact exists
-  independently and does not need to be linked to a follow-up.
+  and editing. Each contact can store first and last name, organisation (linked
+  via a picker to the Organisations module), job title, email, phone, free-form
+  notes and an optional photo. A contact exists independently and does not need
+  to be linked to a follow-up.
 - **Contact search and filters** — one search box across name, email, phone,
   job title and organisation, executed by PostgreSQL; filters by organisation
   and follow-up state; four sort orders; server-side pagination. The list also

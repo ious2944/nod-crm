@@ -1,6 +1,5 @@
 // NOD CRM — schéma
-// Périmètre : Workspace / Contact / FollowUp / Task.
-// Les autres modules (organisations, opportunités…) viendront plus tard.
+// Périmètre : Workspace / Organization / Contact / FollowUp / Task.
 
 generator client {
   provider = "prisma-client"
@@ -29,10 +28,11 @@ model Workspace {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  contacts  Contact[]
-  followUps FollowUp[]
-  tasks     Task[]
-  users     User[]
+  contacts      Contact[]
+  followUps     FollowUp[]
+  organizations Organization[]
+  tasks         Task[]
+  users         User[]
 
   @@map("workspaces")
 }
@@ -97,27 +97,63 @@ model LoginAttempt {
   @@map("login_attempts")
 }
 
+/// Référentiel des entreprises, sociétés et associations (V0.5).
+///
+/// Une organisation est un contexte au-dessus du contact. Elle n'impose rien :
+/// un contact peut n'en avoir aucune, et une organisation peut exister sans
+/// contact rattaché.
+///
+/// **Isolation.** `workspace_id` est obligatoire et jamais lu depuis une entrée
+/// client : toute requête le dérive de la session, ce qui rend structurellement
+/// impossible de lire ou modifier une organisation d'un autre workspace.
+///
+/// **Archivage.** Comme pour les contacts : aucune suppression destructive.
+/// Une organisation archivée n'apparaît plus dans la liste ni dans le sélecteur,
+/// mais les contacts rattachés restent valides et conservent leur lien.
+model Organization {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  name        String
+  website     String?
+  phone       String?
+  email       String?
+  notes       String?
+  archivedAt  DateTime? @map("archived_at")
+  isDemo      Boolean   @default(false) @map("is_demo")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contacts  Contact[]
+
+  @@index([workspaceId, archivedAt, name])
+  @@map("organizations")
+}
+
 /// Référentiel central des personnes (V0.2).
 ///
 /// Un contact existe indépendamment de tout suivi : c'est lui le référentiel,
 /// pas le Follow-Up. La relation `follow_ups.contact_id` reste facultative.
 ///
-/// **Organisation.** Le rattachement est un simple champ texte
-/// (`organization_name`) et non une clé étrangère. C'est un choix assumé pour
-/// la V0.2 : créer une table `organizations` complète aurait imposé un module
-/// de gestion (création, fusion, doublons, renommage) qui n'est pas au
-/// programme. La migration future est préparée sans être développée — voir
-/// `docs/contacts.md` : ajouter `organizations`, y insérer les valeurs
-/// distinctes de `organization_name`, ajouter `organization_id` nullable, et
-/// ne retirer la colonne texte qu'une fois la reprise faite.
+/// **Organisation (V0.5).** `organization_id` est une FK nullable vers la table
+/// `organizations`. Le champ texte `organization_name` est conservé pour la
+/// rétrocompatibilité : les contacts antérieurs à la migration restent valides,
+/// et les affichages l'utilisent en dernier recours. Conformément au plan de
+/// migration documenté dans `docs/contacts.md`, `organization_name` ne sera
+/// retiré que dans une version ultérieure, une fois que tous les contacts
+/// auront été backfillés et que les lectures auront été migrées.
 model Contact {
   id               String    @id @default(uuid()) @db.Uuid
   workspaceId      String    @map("workspace_id") @db.Uuid
+  organizationId   String?   @map("organization_id") @db.Uuid
   firstName        String    @map("first_name")
   lastName         String    @map("last_name")
   email            String?
   phone            String?
   jobTitle         String?   @map("job_title")
+  /// Conservé pour rétrocompatibilité. Lorsque `organization_id` est renseigné,
+  /// `organization_name` reflète le nom au moment du rattachement et peut dériver.
+  /// Il sert de valeur d'affichage de secours si l'organisation est supprimée.
   organizationName String?   @map("organization_name")
   notes            String?
   /// Clé opaque dans le magasin d'objets (`src/lib/storage`), jamais un chemin
@@ -132,9 +168,10 @@ model Contact {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  followUps FollowUp[]
-  tasks     Task[]
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  followUps    FollowUp[]
+  tasks        Task[]
 
   // Les trois index suivent les trois tris proposés par la liste Contacts, et
   // commencent tous par le couple réellement filtré (`workspace_id`,
@@ -143,6 +180,7 @@ model Contact {
   @@index([workspaceId, archivedAt, firstName, lastName])
   @@index([workspaceId, archivedAt, createdAt])
   @@index([workspaceId, archivedAt, updatedAt])
+  @@index([organizationId])
   @@map("contacts")
 }
 

@@ -42,11 +42,15 @@ const CONTACT_FIELDS = {
   phone: true,
   jobTitle: true,
   organizationName: true,
+  organizationId: true,
   notes: true,
   photoKey: true,
   archivedAt: true,
   createdAt: true,
   updatedAt: true,
+  organization: {
+    select: { id: true, name: true, archivedAt: true },
+  },
 } as const;
 
 const FOLLOW_UP_CONTACT_SELECTION = {
@@ -78,6 +82,8 @@ export interface ContactDetail {
   phone: string | null;
   jobTitle: string | null;
   organizationName: string | null;
+  /** Identifiant de l'organisation liée (V0.5), pour la navigation. */
+  organizationId: string | null;
   notes: string | null;
   archived: boolean;
   createdAt: string;
@@ -212,12 +218,18 @@ export async function listContactsPage(
     const count = counts.get(record.id) ?? { open: 0, closed: 0 };
     const photoUrl = contactPhotoUrl(record.id, record.photoKey);
 
+    // Si un organization_id est renseigné, son nom fait foi ; sinon on retombe
+    // sur le champ texte historique (contacts antérieurs à V0.5).
+    const resolvedOrgName =
+      record.organization?.name ?? record.organizationName ?? null;
+
     return {
       id: record.id,
-      displayName: contactDisplayName(record),
-      initials: contactInitials(record),
+      displayName: contactDisplayName({ ...record, organizationName: resolvedOrgName }),
+      initials: contactInitials({ ...record, organizationName: resolvedOrgName }),
       photoUrl,
-      organizationName: record.organizationName,
+      organizationName: resolvedOrgName,
+      organizationId: record.organizationId ?? null,
       jobTitle: record.jobTitle,
       email: record.email,
       phone: record.phone,
@@ -232,7 +244,8 @@ export async function listContactsPage(
         email: record.email,
         phone: record.phone,
         jobTitle: record.jobTitle,
-        organizationName: record.organizationName,
+        organizationName: resolvedOrgName,
+        organizationId: record.organizationId ?? null,
         notes: record.notes,
         photoUrl,
       },
@@ -302,17 +315,22 @@ export async function getContactDetail(id: string): Promise<ContactDetail | null
 
   const now = new Date();
 
+  // Si un organization_id est renseigné, son nom fait foi pour l'affichage.
+  const resolvedOrgName =
+    record.organization?.name ?? record.organizationName ?? null;
+
   return {
     id: record.id,
     firstName: record.firstName,
     lastName: record.lastName,
-    displayName: contactDisplayName(record),
-    initials: contactInitials(record),
+    displayName: contactDisplayName({ ...record, organizationName: resolvedOrgName }),
+    initials: contactInitials({ ...record, organizationName: resolvedOrgName }),
     photoUrl: contactPhotoUrl(record.id, record.photoKey),
     email: record.email,
     phone: record.phone,
     jobTitle: record.jobTitle,
-    organizationName: record.organizationName,
+    organizationName: resolvedOrgName,
+    organizationId: record.organizationId ?? null,
     notes: record.notes,
     archived: record.archivedAt !== null,
     createdAt: record.createdAt.toISOString(),

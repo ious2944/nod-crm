@@ -68,6 +68,28 @@ export async function createContact(
 
   const photo = upload.status === "stored" ? upload.photo : null;
 
+  // Vérification de cohérence workspace pour organization_id (V0.5).
+  // Une clé étrangère composite (id, workspace_id) imposerait cela côté SQL,
+  // mais elle interdirait le SET NULL à la suppression. On valide applicativement.
+  const organizationId = parsed.data.organizationId ?? null;
+  if (organizationId) {
+    const org = await prisma.organization.findFirst({
+      where: { id: organizationId, workspaceId, archivedAt: null },
+      select: { id: true, name: true },
+    });
+    if (!org) {
+      return {
+        status: "error",
+        message: "Organisation introuvable ou archivée.",
+        fieldErrors: { organizationId: "Organisation introuvable ou archivée." },
+      };
+    }
+    // Sync du nom texte pour la rétrocompatibilité.
+    if (!parsed.data.organizationName) {
+      parsed.data.organizationName = org.name;
+    }
+  }
+
   try {
     const contact = await prisma.contact.create({
       data: {
@@ -81,6 +103,7 @@ export async function createContact(
         phone: parsed.data.phone,
         jobTitle: parsed.data.jobTitle,
         organizationName: parsed.data.organizationName,
+        organizationId,
         notes: parsed.data.notes,
         photoKey: photo?.key ?? null,
         photoMimeType: photo?.mimeType ?? null,
@@ -129,6 +152,26 @@ export async function updateContact(
     return { status: "error", message: "Ce contact n'existe pas." };
   }
 
+  // Vérification de cohérence workspace pour organization_id (V0.5).
+  const organizationId = fields.organizationId ?? null;
+  let resolvedOrgName = fields.organizationName;
+  if (organizationId) {
+    const org = await prisma.organization.findFirst({
+      where: { id: organizationId, workspaceId, archivedAt: null },
+      select: { id: true, name: true },
+    });
+    if (!org) {
+      return {
+        status: "error",
+        message: "Organisation introuvable ou archivée.",
+        fieldErrors: { organizationId: "Organisation introuvable ou archivée." },
+      };
+    }
+    if (!resolvedOrgName) {
+      resolvedOrgName = org.name;
+    }
+  }
+
   const upload = await storePhotoUpload(formData.get("photo"));
   if (upload.status === "rejected") {
     return {
@@ -150,7 +193,8 @@ export async function updateContact(
         email: fields.email,
         phone: fields.phone,
         jobTitle: fields.jobTitle,
-        organizationName: fields.organizationName,
+        organizationName: resolvedOrgName,
+        organizationId,
         notes: fields.notes,
         // Trois cas : nouvelle photo, retrait explicite, ou on n'y touche pas.
         ...(photo
@@ -174,6 +218,10 @@ export async function updateContact(
   revalidatePath("/contacts");
   revalidatePath(`/contacts/${existing.id}`);
   revalidatePath("/follow-ups");
+  revalidatePath("/organizations");
+  if (organizationId) {
+    revalidatePath(`/organizations/${organizationId}`);
+  }
 
   return { status: "success", message: "Contact mis à jour.", contactId: existing.id };
 }

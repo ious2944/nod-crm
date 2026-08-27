@@ -38,7 +38,7 @@ export const NAV_SECTIONS: NavSection[] = [
     title: "CRM",
     items: [
       { label: "Contacts", href: "/contacts", available: true, icon: "◍" },
-      { label: "Organisations", available: false, icon: "▤" },
+      { label: "Organisations", href: "/organizations", available: true, icon: "▤" },
     ],
   },
 ];
