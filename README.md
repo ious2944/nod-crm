@@ -52,9 +52,9 @@ theirs**. Everything on screen exists to make the next action obvious.
 
 ---
 
-## Features (V0.6)
+## Features (V0.7)
 
-Only what actually exists today:
+Only what actually exists today. V0.7 is a visual-only release — design system, navigation and card surfaces were refreshed; all features below shipped in earlier versions and are unchanged in behaviour.
 
 - **Follow-up search** — a search bar on `/follow-ups` filters by subject and
   description. Server-side, preserved in the URL (`?q=`), works alongside all
@@ -116,13 +116,15 @@ Only what actually exists today:
 
 Not built yet, and deliberately shown as disabled in the navigation: Dashboard.
 
+**V0.7 — Lumina Enterprise visual refresh.** The design system was updated in V0.7: Electric Indigo primary colour (`#6366F1`), unified sidebar navigation, sticky page headers, consistent card elevation (`shadow-card`), harmonised dialogs and form focus rings, and full dark-mode support. No behaviour or data model changed.
+
 ---
 
 ## Screenshots
 
 ![NOD CRM — cockpit Aujourd'hui](docs/screenshots/today-light.png)
 
-The "Aujourd'hui" cockpit (V0.3, extended in V0.4) answers one question: what needs action now? It greets you by name, shows four follow-up attention indicators, a priority follow-up feed, and — added in V0.4 — a task section for anything due today or overdue. Follow-ups and tasks each keep their own shape; neither replaces the other.
+The "Aujourd'hui" cockpit answers one question: what needs action now? It shows four follow-up attention indicators, a priority follow-up feed (late + today + stagnant), and tasks due today or overdue. Follow-ups and tasks each keep their own shape; neither replaces the other.
 
 ![NOD CRM — tasks](docs/screenshots/tasks-light.png)
 
@@ -130,7 +132,7 @@ The task list stays a list: overdue, today, upcoming, one line each, Complete an
 
 ![NOD CRM Follow-Up board](docs/screenshots/board-light.png)
 
-The Follow-Up board keeps the next action visible: what needs your attention, what's on your side, and what's on theirs.
+The Follow-Up board keeps the next action visible: what needs your attention, what's on your side, and what's on theirs. Stat tiles across the top give an instant overview; pill tabs filter by ball ownership.
 
 ---
 
@@ -174,9 +176,10 @@ Then open <http://localhost:3000> and sign in.
 docker compose exec app npx tsx prisma/seed.ts
 ```
 
-Four fictional contacts and seven follow-ups, all flagged `is_demo` and badged
-in the interface. Re-running replaces them and never touches real rows. The
-seed refuses to run in production unless you set `ALLOW_DEMO_SEED=1`.
+Four fictional organisations, four contacts, seven follow-ups and six tasks, all
+flagged `is_demo` and badged in the interface. Re-running replaces them and
+never touches real rows. The seed refuses to run in production unless you set
+`ALLOW_DEMO_SEED=1`.
 
 ### Migrations
 
@@ -303,7 +306,7 @@ Third-party dependencies keep their own licenses; none of them was modified.
 
 ## Limitations
 
-Known and accepted in V0.6:
+Known and accepted in V0.7:
 
 - No MFA. A stolen password is enough. The data model is ready; the feature is
   not built.
@@ -351,15 +354,18 @@ feed.
 **V0.5 — Organisations.** Promoting the organisation field to a first-class
 table with its own list, detail page, and a contact picker.
 
-**V0.6 — Follow-up Search & Editing (current).** Searching follow-ups by
-subject and description; editing subject, description, due date and contact
-after creation.
+**V0.6 — Follow-up Search & Editing.** Searching follow-ups by subject and
+description; editing subject, description, due date and contact after creation.
+
+**V0.7 — Lumina Enterprise UI Refresh (current).** Visual-only release: Electric
+Indigo design system, unified sidebar, sticky page headers, card elevation,
+consistent dialogs, responsive refinements, full dark-mode support.
 
 **Next — CSV import/export.** Bulk import and export of contacts and
 follow-ups; full-text search improvements (`pg_trgm` index).
 
 **Later.** Business audit log, MFA, self-service password reset, real
-multi-user workspaces, CSV import/export, public API, integrations.
+multi-user workspaces, public API, integrations.
 
 Deliberately out of scope for a long time: pipelines, deal scoring, marketing
 automation, and anything that turns NOD CRM into a generalist CRM.
