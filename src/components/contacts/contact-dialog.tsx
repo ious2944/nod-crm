@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useId, useState } from "react";
+import { createPortal } from "react-dom";
 import { useFormStatus } from "react-dom";
 
 import { createContact, updateContact } from "@/app/(app)/contacts/actions";
@@ -83,12 +84,12 @@ export function ContactDialog({
   const errors = state.fieldErrors ?? {};
   const showPhoto = Boolean(contact?.photoUrl) && !removePhoto;
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-40 overflow-y-auto bg-black/50"
     >
       <button
         type="button"
@@ -98,7 +99,8 @@ export function ContactDialog({
         onClick={onClose}
       />
 
-      <div className="nod-rise relative max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-border-subtle bg-surface p-5 shadow-dialog sm:rounded-2xl">
+      <div className="pointer-events-none flex min-h-full items-end justify-center p-0 sm:items-center sm:p-4">
+      <div className="pointer-events-auto nod-rise relative w-full max-w-lg rounded-t-2xl border border-border-subtle bg-surface p-5 shadow-dialog sm:rounded-2xl">
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <h2 id={titleId} className="text-lg font-semibold">
@@ -276,7 +278,9 @@ export function ContactDialog({
           </div>
         </form>
       </div>
-    </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 

@@ -47,6 +47,22 @@ are unchanged.
   (prefers-color-scheme: dark)` block updated with matching dark-mode token
   values. No class-based dark-mode toggle was added.
 
+### Fixed
+
+- **Dialog viewport clipping** — all six dialog components (Nouveau suivi,
+  Modifier suivi, Nouvelle tâche, Contact, Organisation, ConfirmDialog) were
+  rendered as DOM children of the page's sticky `<header>`. Chrome's
+  `backdrop-filter` implementation makes that element a new containing block for
+  `position: fixed` descendants, so `fixed inset-0` was anchored to the ~65 px
+  header rather than the viewport. Dialogs appeared 200 px or more above the top
+  of the screen, hiding the form title and first fields. Fixed by rendering all
+  dialogs via `createPortal(…, document.body)`, which places them as direct
+  children of `<body>` where `position: fixed` is correctly viewport-relative.
+  The overlay architecture was also updated to `overflow-y-auto` + `min-h-full`
+  inner wrapper so that very tall forms remain fully scrollable on any viewport
+  height without clipping. All six dialogs, seven viewports (1440 × 900 down to
+  320 × 568), light and dark mode: no clip, no horizontal overflow.
+
 ---
 
 **NOD CRM v0.6 — Follow-up Search & Editing.**
