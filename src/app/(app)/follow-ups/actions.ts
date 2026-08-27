@@ -15,7 +15,8 @@ import {
   RECEIVED_SNOOZE_DAYS,
   type FollowUpIntent,
 } from "@/lib/follow-ups/domain";
-import { createFollowUpSchema, quickActionSchema } from "@/lib/follow-ups/schemas";
+import { createFollowUpSchema, quickActionSchema, updateFollowUpSchema } from "@/lib/follow-ups/schemas";
+import type { EditFollowUpState } from "@/lib/follow-ups/edit-state";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { getWorkspaceIdForAction } from "@/lib/workspace";
@@ -152,6 +153,75 @@ export async function applyQuickAction(formData: FormData): Promise<void> {
   }
 
   revalidateFollowUpPages();
+}
+
+/**
+ * Modifie les champs éditables d'un suivi existant.
+ *
+ * Champs concernés : sujet, description, échéance, contact.
+ * La balle, le statut et les compteurs de relance sont hors-périmètre :
+ * ils appartiennent aux actions rapides et leur logique ne doit pas être
+ * contournée par un formulaire générique.
+ *
+ * L'appartenance du suivi au workspace est vérifiée dans le `where` du
+ * `updateMany` : si l'id ne correspond pas à un suivi du workspace courant,
+ * `count` vaut 0 et on retourne une erreur.
+ */
+export async function updateFollowUp(
+  _previous: EditFollowUpState,
+  formData: FormData,
+): Promise<EditFollowUpState> {
+  const workspaceId = await getWorkspaceIdForAction();
+
+  const parsed = updateFollowUpSchema.safeParse(Object.fromEntries(formData));
+
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      const key = String(issue.path[0] ?? "form");
+      fieldErrors[key] ??= issue.message;
+    }
+    return { status: "error", message: "Le formulaire est incomplet.", fieldErrors };
+  }
+
+  const { id, title, description, dueDate, contactId } = parsed.data;
+
+  // Résoudre le contact : vide = pas de contact, sinon vérifier l'appartenance
+  // au workspace et que le contact n'est pas archivé.
+  let resolvedContactId: string | null = null;
+
+  if (contactId) {
+    const contact = await prisma.contact.findFirst({
+      where: { id: contactId, workspaceId, archivedAt: null },
+      select: { id: true },
+    });
+
+    if (!contact) {
+      return {
+        status: "error",
+        message: "Ce contact n'existe pas ou a été archivé.",
+        fieldErrors: { contactId: "Contact introuvable." },
+      };
+    }
+    resolvedContactId = contact.id;
+  }
+
+  const { count } = await prisma.followUp.updateMany({
+    where: { id, workspaceId },
+    data: {
+      title,
+      description,
+      dueAt: startOfDay(dueDate, APP_TIME_ZONE),
+      contactId: resolvedContactId,
+    },
+  });
+
+  if (count !== 1) {
+    return { status: "error", message: "Suivi introuvable." };
+  }
+
+  revalidateFollowUpPages();
+  return { status: "success", message: "Suivi mis à jour." };
 }
 
 /** Effet de chaque transition. Séparé de l'écriture pour rester lisible. */

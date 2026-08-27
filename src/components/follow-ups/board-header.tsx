@@ -1,7 +1,11 @@
 import Link from "next/link";
 
 import { attentionHeadline } from "@/lib/follow-ups/domain";
-import { FOLLOW_UP_FILTERS, type FollowUpFilter } from "@/lib/follow-ups/filters";
+import {
+  buildFollowUpHref,
+  FOLLOW_UP_FILTERS,
+  type FollowUpFilter,
+} from "@/lib/follow-ups/filters";
 import type { FollowUpStats } from "@/lib/follow-ups/queries";
 
 const TILES = [
@@ -14,9 +18,11 @@ const TILES = [
 export function StatTiles({
   stats,
   filter,
+  query = "",
 }: {
   stats: FollowUpStats;
   filter: FollowUpFilter;
+  query?: string;
 }) {
   return (
     <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
@@ -28,7 +34,7 @@ export function StatTiles({
         return (
           <Link
             key={tile.key}
-            href={`/follow-ups?f=${tile.key}`}
+            href={buildFollowUpHref({ filter, query }, { filter: tile.key })}
             aria-current={active ? "true" : undefined}
             className={`rounded-xl border bg-surface px-3.5 py-3 transition-colors hover:border-border-strong ${
               active ? "border-accent" : "border-border-subtle"
@@ -52,7 +58,13 @@ export function StatTiles({
 // Les filtres passent à la ligne plutôt que de défiler horizontalement : sous
 // 768 px, « Chez eux » et « Terminés » sortaient de l'écran sans aucun indice
 // qu'un défilement latéral existait.
-export function FilterTabs({ filter }: { filter: FollowUpFilter }) {
+export function FilterTabs({
+  filter,
+  query = "",
+}: {
+  filter: FollowUpFilter;
+  query?: string;
+}) {
   return (
     <nav aria-label="Filtres" className="-mx-1 flex flex-wrap gap-1 px-1 pb-1">
       {FOLLOW_UP_FILTERS.map((item) => {
@@ -60,7 +72,7 @@ export function FilterTabs({ filter }: { filter: FollowUpFilter }) {
         return (
           <Link
             key={item.key}
-            href={`/follow-ups?f=${item.key}`}
+            href={buildFollowUpHref({ filter, query }, { filter: item.key })}
             aria-current={active ? "page" : undefined}
             className={`shrink-0 rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
               active
