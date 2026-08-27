@@ -50,6 +50,10 @@ next-env.d.ts
 # outils locaux
 /.claude/settings.local.json
 
+# scripts et captures de test locaux (générés par les diagnostics visuels)
+/test-*.mjs
+/test-screenshots*/
+
 # secrets — jamais versionnés. `.env.prod` est conservé ici même si le dépôt
 # public n'en produit aucun : ceux qui déploient en gardent un, et une règle
 # d'ignore qui ne coûte rien vaut mieux qu'un secret poussé par mégarde.

@@ -123,6 +123,7 @@ Not built yet, and deliberately shown as disabled in the navigation: Dashboard.
 
 ## Screenshots
 
+<<<<<<< HEAD
 ### Aujourd'hui
 
 ![NOD CRM — cockpit Aujourd'hui](docs/screenshots/today-light.png)
@@ -142,6 +143,11 @@ The Follow-up board keeps the next action visible, with attention indicators, se
 The task view keeps independent work simple: overdue, today and upcoming tasks, with completion and snooze actions immediately available.
 
 All screenshots use fictional demo data only. See [docs/screenshots/README.md](docs/screenshots/README.md).
+=======
+The screenshot set is currently being refreshed for V0.7. The repository still contains an older Follow-up board capture; it should not be treated as a representation of the current Lumina Enterprise interface.
+
+Screenshot contributions must use fictional demo data only. See [docs/screenshots/README.md](docs/screenshots/README.md).
+>>>>>>> origin/main
 
 ---
 
