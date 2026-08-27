@@ -83,6 +83,15 @@ export async function listPrivacyTreatments() {
   });
 }
 
+export async function listArchivedPrivacyTreatments() {
+  const workspaceId = await getWorkspaceIdForPage();
+  return prisma.privacyTreatment.findMany({
+    where: { workspaceId, archivedAt: { not: null } },
+    select: { id: true, name: true, archivedAt: true },
+    orderBy: { archivedAt: "desc" },
+  });
+}
+
 export async function listPrivacyProcessors() {
   const workspaceId = await getWorkspaceIdForPage();
   return prisma.privacyProcessor.findMany({
@@ -93,6 +102,15 @@ export async function listPrivacyProcessors() {
       },
     },
     orderBy: { name: "asc" },
+  });
+}
+
+export async function listArchivedPrivacyProcessors() {
+  const workspaceId = await getWorkspaceIdForPage();
+  return prisma.privacyProcessor.findMany({
+    where: { workspaceId, archivedAt: { not: null } },
+    select: { id: true, name: true, service: true, archivedAt: true },
+    orderBy: { archivedAt: "desc" },
   });
 }
 
