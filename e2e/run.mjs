@@ -421,7 +421,6 @@ try {
   // 9g. Ouvrir le contact — l'org est cliquable
   await page.getByRole("link", { name: contactName }).click();
   await page.waitForURL("**/contacts/**", { timeout: 15000 });
-  const contactDetailUrl = page.url();
   check("la fiche contact s'ouvre depuis la fiche org", new URL(page.url()).pathname.startsWith("/contacts/"));
   // Le lien vers la fiche organisation existe
   const orgLink = page.getByRole("link", { name: orgNameRenamed });

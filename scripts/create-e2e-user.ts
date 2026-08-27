@@ -41,7 +41,7 @@ async function main() {
   } else {
     await prisma.user.update({
       where: { id: existing.id },
-      data: { passwordHash, workspaceId: workspace.id, disabledAt: null },
+      data: { passwordHash, workspaceId: workspace.id, isActive: true },
     });
     console.log(`User updated: ${existing.id}`);
   }
