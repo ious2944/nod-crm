@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 /**
  * Confirmation d'une action peu banale (archivage) — V0.7 Lumina Enterprise.
@@ -35,12 +36,12 @@ export function ConfirmDialog({
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div
       role="alertdialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/50"
     >
       <button
         type="button"
@@ -50,7 +51,8 @@ export function ConfirmDialog({
         onClick={onCancel}
       />
 
-      <div className="nod-rise relative w-full max-w-md rounded-t-2xl border border-border-subtle bg-surface p-6 shadow-dialog sm:rounded-2xl">
+      <div className="pointer-events-none flex min-h-full items-end justify-center p-0 sm:items-center sm:p-4">
+      <div className="pointer-events-auto nod-rise relative w-full max-w-md rounded-t-2xl border border-border-subtle bg-surface p-6 shadow-dialog sm:rounded-2xl">
         <h2 id={titleId} className="text-base font-semibold text-ink">
           {title}
         </h2>
@@ -75,6 +77,8 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+      </div>
+    </div>,
+    document.body
   );
 }
