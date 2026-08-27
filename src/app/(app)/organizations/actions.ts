@@ -157,14 +157,12 @@ async function setArchivedAt(formData: FormData, archivedAt: Date | null): Promi
     throw new Error("Organisation introuvable.");
   }
 
-  const { count } = await prisma.organization.updateMany({
+  // updateMany avec workspaceId dans le WHERE : si l'id appartient à un autre
+  // workspace, 0 lignes sont mises à jour — aucune erreur, aucune divulgation.
+  await prisma.organization.updateMany({
     where: { id: parsed.data, workspaceId },
     data: { archivedAt },
   });
-
-  if (count !== 1) {
-    throw new Error("Organisation introuvable.");
-  }
 
   revalidatePath("/organizations");
   revalidatePath(`/organizations/${parsed.data}`);

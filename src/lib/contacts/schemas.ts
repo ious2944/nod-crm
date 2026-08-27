@@ -90,10 +90,15 @@ const IDENTITY_MESSAGE =
   "Renseigne au moins un prénom, un nom, un email ou une organisation.";
 
 function requireIdentity(
-  value: Record<(typeof IDENTIFYING_FIELDS)[number], string | null>,
+  value: Record<(typeof IDENTIFYING_FIELDS)[number], string | null> & {
+    organizationId?: string | null;
+  },
   ctx: z.RefinementCtx,
 ): void {
   if (IDENTIFYING_FIELDS.some((field) => value[field])) return;
+  // Le sélecteur d'organisation (V0.5) poste `organizationId`, pas `organizationName`.
+  // Un contact rattaché uniquement via l'UUID de l'org reste identifiable.
+  if (value.organizationId) return;
 
   ctx.addIssue({ code: "custom", path: ["firstName"], message: IDENTITY_MESSAGE });
 }
