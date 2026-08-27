@@ -106,8 +106,7 @@ Only what actually exists today:
 - **Demo data** — a seed of fictional contacts, follow-ups and tasks, flagged
   in the UI so it can never be confused with real data.
 
-Not built yet, and deliberately shown as disabled in the navigation: Dashboard,
-Organisations.
+Not built yet, and deliberately shown as disabled in the navigation: Dashboard.
 
 ---
 
@@ -296,7 +295,7 @@ Third-party dependencies keep their own licenses; none of them was modified.
 
 ## Limitations
 
-Known and accepted in V0.4:
+Known and accepted in V0.5:
 
 - No MFA. A stolen password is enough. The data model is ready; the feature is
   not built.
@@ -312,8 +311,6 @@ Known and accepted in V0.4:
 - Contact photos are files on a volume, not rows. `nod-crm-backup.sh` archives
   them alongside the database dump, but restoring them is a manual step — see
   [docs/backup-restore.md](docs/backup-restore.md).
-- Organisations are a text field on the contact, not a table. The migration
-  path is written down in [docs/contacts.md](docs/contacts.md).
 - Existing follow-ups still cannot be edited after creation; only the quick
   actions change them. The same is true of tasks: complete, reopen and snooze,
   but no edit form and no delete.
@@ -335,13 +332,16 @@ Directions, not commitments. Full version in [ROADMAP.md](ROADMAP.md).
 filters, sorting, pagination, photos, archiving, and an optional link from any
 follow-up.
 
-**V0.4 — Tasks (current).** A second business object next to the follow-up —
+**V0.4 — Tasks.** A second business object next to the follow-up —
 something to do, as opposed to something to move forward with someone — with
 its own page, and an "Aujourd'hui" cockpit that finally gathers both in one
 feed.
 
-**Next — Organisations.** Promoting the organisation field to a table, plus
-searching follow-ups and editing an existing one.
+**V0.5 — Organisations (current).** Promoting the organisation field to a
+first-class table with its own list, detail page, and a contact picker.
+
+**Next — Follow-up editing and search.** Searching follow-ups, editing an
+existing one after creation, and CSV import/export.
 
 **Later.** Business audit log, MFA, self-service password reset, real
 multi-user workspaces, CSV import/export, public API, integrations.
