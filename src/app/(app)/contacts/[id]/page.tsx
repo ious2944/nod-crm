@@ -8,7 +8,6 @@ import { ContactFollowUps } from "@/components/contacts/contact-follow-ups";
 import { NewFollowUpDialog } from "@/components/follow-ups/new-follow-up-dialog";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { getContactDetail } from "@/lib/contacts/queries";
-import { contactSubtitle } from "@/lib/contacts/view";
 import { addDaysToKey, dayKey } from "@/lib/date";
 
 export const metadata = {
@@ -31,11 +30,18 @@ export default async function ContactPage({ params }: PageProps<"/contacts/[id]"
     notFound();
   }
 
-  const subtitle = contactSubtitle(contact.organizationName, contact.jobTitle);
   const openFollowUps = contact.followUps.filter(
     (followUp) => followUp.status === "OPEN",
   ).length;
   const today = dayKey(new Date(), APP_TIME_ZONE);
+
+  // Ligne secondaire : l'organisation est un lien cliquable si elle est liée.
+  const orgPart: { linked: boolean; href: string; label: string } | null = contact.organizationName
+    ? contact.organizationId
+      ? { linked: true, href: `/organizations/${contact.organizationId}`, label: contact.organizationName }
+      : { linked: false, href: "", label: contact.organizationName }
+    : null;
+  const jobTitlePart = contact.jobTitle ?? null;
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
@@ -58,7 +64,22 @@ export default async function ContactPage({ params }: PageProps<"/contacts/[id]"
 
         <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-semibold tracking-tight">{contact.displayName}</h1>
-          {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
+          {(orgPart || jobTitlePart) && (
+            <p className="mt-1 text-sm text-muted">
+              {orgPart && orgPart.linked ? (
+                <Link
+                  href={orgPart.href}
+                  className="underline-offset-2 hover:text-ink hover:underline"
+                >
+                  {orgPart.label}
+                </Link>
+              ) : orgPart ? (
+                <span>{orgPart.label}</span>
+              ) : null}
+              {orgPart && jobTitlePart && <span> · </span>}
+              {jobTitlePart && <span>{jobTitlePart}</span>}
+            </p>
+          )}
 
           <dl className="mt-3 space-y-1 text-sm">
             {contact.email && (
@@ -99,6 +120,7 @@ export default async function ContactPage({ params }: PageProps<"/contacts/[id]"
             phone: contact.phone,
             jobTitle: contact.jobTitle,
             organizationName: contact.organizationName,
+            organizationId: contact.organizationId,
             notes: contact.notes,
             photoUrl: contact.photoUrl,
           }}

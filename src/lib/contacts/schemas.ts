@@ -65,6 +65,16 @@ const identityFields = {
   jobTitle: optionalText(CONTACT_LIMITS.jobTitle),
   organizationName: optionalText(CONTACT_LIMITS.organizationName),
   notes: optionalText(CONTACT_LIMITS.notes),
+  /**
+   * Identifiant UUID de l'organisation liée (V0.5).
+   *
+   * Vide (`""`) = pas de rattachement : on le transforme en `null` pour que la
+   * couche données n'ait pas à distinguer chaîne vide et absence.
+   */
+  organizationId: z
+    .string()
+    .optional()
+    .transform((value) => (value && z.uuid().safeParse(value).success ? value : null)),
 };
 
 /**
@@ -80,10 +90,15 @@ const IDENTITY_MESSAGE =
   "Renseigne au moins un prénom, un nom, un email ou une organisation.";
 
 function requireIdentity(
-  value: Record<(typeof IDENTIFYING_FIELDS)[number], string | null>,
+  value: Record<(typeof IDENTIFYING_FIELDS)[number], string | null> & {
+    organizationId?: string | null;
+  },
   ctx: z.RefinementCtx,
 ): void {
   if (IDENTIFYING_FIELDS.some((field) => value[field])) return;
+  // Le sélecteur d'organisation (V0.5) poste `organizationId`, pas `organizationName`.
+  // Un contact rattaché uniquement via l'UUID de l'org reste identifiable.
+  if (value.organizationId) return;
 
   ctx.addIssue({ code: "custom", path: ["firstName"], message: IDENTITY_MESSAGE });
 }

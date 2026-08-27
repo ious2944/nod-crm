@@ -4,6 +4,7 @@ import { useActionState, useEffect, useId, useState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { createContact, updateContact } from "@/app/(app)/contacts/actions";
+import { OrganizationPicker } from "@/components/organizations/organization-picker";
 import { FIELD, FieldError, LABEL } from "@/components/ui/form";
 import {
   initialContactFormState,
@@ -187,21 +188,14 @@ export function ContactDialog({
             )}
           </div>
 
-          <fieldset className="grid gap-3 sm:grid-cols-2">
+          <fieldset className="grid gap-3">
             <legend className="sr-only">Informations professionnelles</legend>
-            <div>
-              <label className={LABEL} htmlFor="organizationName">
-                Organisation
-              </label>
-              <input
-                id="organizationName"
-                name="organizationName"
-                maxLength={CONTACT_LIMITS.organizationName}
-                defaultValue={contact?.organizationName ?? ""}
-                className={`mt-1 ${FIELD}`}
-              />
-              <FieldError message={errors.organizationName} />
-            </div>
+            {/* Sélecteur d'organisation V0.5 — remplace le champ texte libre */}
+            <OrganizationPicker
+              organizationId={contact?.organizationId ?? null}
+              organizationName={contact?.organizationName ?? null}
+            />
+            <FieldError message={errors.organizationId} />
             <div>
               <label className={LABEL} htmlFor="jobTitle">
                 Fonction

@@ -21,6 +21,8 @@ export interface ContactListItem {
   initials: string;
   photoUrl: string | null;
   organizationName: string | null;
+  /** Identifiant de l'organisation liée (V0.5), pour le lien de navigation. */
+  organizationId: string | null;
   jobTitle: string | null;
   email: string | null;
   phone: string | null;
@@ -106,6 +108,8 @@ export interface ContactFormValues {
   phone: string | null;
   jobTitle: string | null;
   organizationName: string | null;
+  /** Identifiant de l'organisation liée (V0.5). `null` si non rattaché. */
+  organizationId: string | null;
   notes: string | null;
   photoUrl: string | null;
 }

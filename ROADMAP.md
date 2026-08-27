@@ -43,7 +43,7 @@ Shipped:
 
 ---
 
-## V0.4 — Tasks *(current)*
+## V0.4 — Tasks
 
 Shipped:
 
@@ -63,13 +63,29 @@ Shipped:
 
 ---
 
-## Next — Organisations and follow-up editing
+## V0.5 — Organisations *(current)*
+
+Shipped:
+
+- **Organisations** promoted from a text field to a first-class table. Name is
+  required; website, email, phone, notes are optional.
+- **`/organizations`** — live search, archive filter, pagination.
+- **`/organizations/[id]`** — the organisation sheet: identity, contacts (with
+  links), open follow-ups and open tasks. The central piece of the module.
+- **`Contact → Organisation` FK** — nullable, additive migration, backward
+  compatibility with pre-V0.5 contacts preserved via the `organization_name`
+  text column.
+- **Organisation picker** in the contact form, backed by a server-side search.
+- **Clickable org link** on the contact sheet when the contact is linked via FK.
+- Workspace isolation extended to organisations, with integration tests covering
+  all cross-workspace access vectors.
+- Design decisions: [docs/organizations.md](docs/organizations.md).
+
+---
+
+## Next — Follow-up editing and search
 
 The gaps that show up fastest in daily use:
-
-- **Organisations** promoted from a text field to a table, with the contacts
-  hanging off it. The migration path is already written down in
-  [docs/contacts.md](docs/contacts.md).
 - **Search** across follow-ups (contacts already have it).
 - **Editing an existing follow-up** — today only the quick actions can change
   one after creation.

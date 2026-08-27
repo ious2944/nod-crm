@@ -2,9 +2,17 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { applyQuickAction, createFollowUp } from "@/app/(app)/follow-ups/actions";
 import { applyTaskAction, createTask, findFollowUps } from "@/app/(app)/tasks/actions";
+import {
+  archiveOrganization,
+  findOrganizations,
+  updateOrganization,
+} from "@/app/(app)/organizations/actions";
 import { initialCreateState } from "@/lib/follow-ups/create-state";
 import { searchContactOptions } from "@/lib/contacts/queries";
 import { getFollowUpBoard } from "@/lib/follow-ups/queries";
+import { getOrganizationDetail, listOrganizationsPage, searchOrganizationOptions } from "@/lib/organizations/queries";
+import { DEFAULT_ORG_LIST_PARAMS } from "@/lib/organizations/filters";
+import { initialOrganizationFormState } from "@/lib/organizations/form-state";
 import { prisma } from "@/lib/prisma";
 import { initialCreateTaskState } from "@/lib/tasks/create-state";
 import { getTaskList } from "@/lib/tasks/queries";
@@ -13,6 +21,7 @@ import { getTodayFeed } from "@/lib/today/queries";
 import {
   createContactRecord,
   createFollowUpRecord,
+  createOrganizationRecord,
   createTaskRecord,
   createWorkspaceWithUser,
   formData,
@@ -37,6 +46,7 @@ describe("isolation des workspaces", () => {
   let bobFollowUpId: string;
   let bobContactId: string;
   let bobTaskId: string;
+  let bobOrganizationId: string;
 
   beforeEach(async () => {
     await resetDatabase();
@@ -49,6 +59,7 @@ describe("isolation des workspaces", () => {
       title: "Tâche de Bob",
       dueInDays: -1,
     });
+    bobOrganizationId = await createOrganizationRecord(bob.workspaceId, { name: "Org de Bob" });
 
     await createFollowUpRecord(alice.workspaceId, "Sujet d'Alice");
     await signIn(alice);
@@ -244,5 +255,49 @@ describe("isolation des workspaces", () => {
     ).rejects.toThrow(/invalide/i);
 
     expect(await prisma.task.count()).toBe(1);
+  });
+
+  // ── Isolation Organisations (V0.5) ─────────────────────────────────────────
+
+  it("ne montre à Alice que ses propres organisations dans la liste", async () => {
+    await createOrganizationRecord(alice.workspaceId, { name: "Org Alice" });
+
+    const page = await listOrganizationsPage(DEFAULT_ORG_LIST_PARAMS);
+
+    expect(page.items.map((item) => item.name)).toEqual(["Org Alice"]);
+    expect(page.items.map((item) => item.id)).not.toContain(bobOrganizationId);
+  });
+
+  it("ne montre pas l'organisation de Bob dans le sélecteur d'Alice", async () => {
+    await createOrganizationRecord(alice.workspaceId, { name: "Org Alice" });
+
+    const options = await searchOrganizationOptions("");
+    const actionOptions = await findOrganizations("");
+
+    expect(options.map((o) => o.id)).not.toContain(bobOrganizationId);
+    expect(actionOptions.map((o) => o.id)).not.toContain(bobOrganizationId);
+  });
+
+  it("refuse à Alice de lire la fiche de l'organisation de Bob", async () => {
+    const detail = await getOrganizationDetail(bobOrganizationId);
+    expect(detail).toBeNull();
+  });
+
+  it("refuse à Alice de modifier l'organisation de Bob", async () => {
+    const result = await updateOrganization(
+      initialOrganizationFormState,
+      formData({ id: bobOrganizationId, name: "Détournée par Alice" }),
+    );
+
+    expect(result.status).toBe("error");
+    const org = await prisma.organization.findUniqueOrThrow({ where: { id: bobOrganizationId } });
+    expect(org.name).toBe("Org de Bob");
+  });
+
+  it("refuse à Alice d'archiver l'organisation de Bob", async () => {
+    await archiveOrganization(formData({ id: bobOrganizationId }));
+
+    const org = await prisma.organization.findUniqueOrThrow({ where: { id: bobOrganizationId } });
+    expect(org.archivedAt).toBeNull();
   });
 });

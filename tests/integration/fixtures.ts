@@ -16,7 +16,7 @@ export interface TestUser {
 export async function resetDatabase(): Promise<void> {
   // Un seul TRUNCATE en cascade : plus rapide et insensible à l'ordre des FK.
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "login_attempts", "sessions", "users", "tasks", "follow_ups", "contacts", "workspaces" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "login_attempts", "sessions", "users", "tasks", "follow_ups", "contacts", "organizations", "workspaces" RESTART IDENTITY CASCADE',
   );
   cookieJar.reset();
 }
@@ -118,6 +118,7 @@ export async function createContactRecord(
     phone: string | null;
     jobTitle: string | null;
     organizationName: string | null;
+    organizationId: string | null;
     notes: string | null;
     archivedAt: Date | null;
   }> = {},
@@ -127,6 +128,25 @@ export async function createContactRecord(
     select: { id: true },
   });
   return contact.id;
+}
+
+/** Crée une organisation directement en base, pour tester l'accès inter-workspace. */
+export async function createOrganizationRecord(
+  workspaceId: string,
+  overrides: Partial<{
+    name: string;
+    website: string | null;
+    email: string | null;
+    phone: string | null;
+    notes: string | null;
+    archivedAt: Date | null;
+  }> = {},
+): Promise<string> {
+  const org = await prisma.organization.create({
+    data: { workspaceId, name: "Organisation de test", ...overrides },
+    select: { id: true },
+  });
+  return org.id;
 }
 
 /** Construit un `FormData` en y joignant un fichier — pour tester l'upload. */

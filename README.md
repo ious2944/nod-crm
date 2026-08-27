@@ -17,7 +17,9 @@ close it. That is the whole product. There are no pipelines, no scoring, no
 forty-field contact forms — and there is no plan to add them.
 
 Since V0.4 it also answers the smaller question next to it — *what do I have to
-do?* — with tasks. The two are deliberately different objects:
+do?* — with tasks. Since V0.5 it adds a third dimension: *who are these people,
+and what do I need to do with their organisation?* The three objects are
+deliberately separate:
 
 > **A task is something to do. A follow-up is something to move forward with
 > someone.**
@@ -25,8 +27,8 @@ do?* — with tasks. The two are deliberately different objects:
 The metaphor is table tennis: 🏓 the ball is either **on your side** or **on
 theirs**. Everything on screen exists to make the next action obvious.
 
-> ⚠️ **V0.4.** Three modules — Follow-Up, Contacts and Tasks. They work and are
-> used in production, but it is a young project — read
+> ⚠️ **V0.5.** Four modules — Follow-Up, Contacts, Tasks and Organisations. They
+> work and are used in production, but it is a young project — read
 > [Limitations](#limitations) before you commit to it. The user interface is
 > currently in French only; the documentation is in English and
 > internationalisation is on the roadmap.
@@ -48,14 +50,19 @@ theirs**. Everything on screen exists to make the next action obvious.
 
 ---
 
-## Features (V0.4)
+## Features (V0.5)
 
 Only what actually exists today:
 
+- **Organisations** — a dedicated module at `/organizations`, with creation,
+  editing and archiving. Each organisation can store name, website, email, phone
+  and notes. The organisation sheet shows all linked contacts, open follow-ups
+  and open tasks at a glance.
 - **Contacts** — a dedicated directory at `/contacts`, with creation, viewing
-  and editing. Each contact can store first and last name, organisation, job
-  title, email, phone, free-form notes and an optional photo. A contact exists
-  independently and does not need to be linked to a follow-up.
+  and editing. Each contact can store first and last name, organisation (linked
+  via a picker to the Organisations module), job title, email, phone, free-form
+  notes and an optional photo. A contact exists independently and does not need
+  to be linked to a follow-up.
 - **Contact search and filters** — one search box across name, email, phone,
   job title and organisation, executed by PostgreSQL; filters by organisation
   and follow-up state; four sort orders; server-side pagination. The list also
@@ -99,8 +106,7 @@ Only what actually exists today:
 - **Demo data** — a seed of fictional contacts, follow-ups and tasks, flagged
   in the UI so it can never be confused with real data.
 
-Not built yet, and deliberately shown as disabled in the navigation: Dashboard,
-Organisations.
+Not built yet, and deliberately shown as disabled in the navigation: Dashboard.
 
 ---
 
@@ -289,7 +295,7 @@ Third-party dependencies keep their own licenses; none of them was modified.
 
 ## Limitations
 
-Known and accepted in V0.4:
+Known and accepted in V0.5:
 
 - No MFA. A stolen password is enough. The data model is ready; the feature is
   not built.
@@ -305,8 +311,6 @@ Known and accepted in V0.4:
 - Contact photos are files on a volume, not rows. `nod-crm-backup.sh` archives
   them alongside the database dump, but restoring them is a manual step — see
   [docs/backup-restore.md](docs/backup-restore.md).
-- Organisations are a text field on the contact, not a table. The migration
-  path is written down in [docs/contacts.md](docs/contacts.md).
 - Existing follow-ups still cannot be edited after creation; only the quick
   actions change them. The same is true of tasks: complete, reopen and snooze,
   but no edit form and no delete.
@@ -328,13 +332,16 @@ Directions, not commitments. Full version in [ROADMAP.md](ROADMAP.md).
 filters, sorting, pagination, photos, archiving, and an optional link from any
 follow-up.
 
-**V0.4 — Tasks (current).** A second business object next to the follow-up —
+**V0.4 — Tasks.** A second business object next to the follow-up —
 something to do, as opposed to something to move forward with someone — with
 its own page, and an "Aujourd'hui" cockpit that finally gathers both in one
 feed.
 
-**Next — Organisations.** Promoting the organisation field to a table, plus
-searching follow-ups and editing an existing one.
+**V0.5 — Organisations (current).** Promoting the organisation field to a
+first-class table with its own list, detail page, and a contact picker.
+
+**Next — Follow-up editing and search.** Searching follow-ups, editing an
+existing one after creation, and CSV import/export.
 
 **Later.** Business audit log, MFA, self-service password reset, real
 multi-user workspaces, CSV import/export, public API, integrations.
