@@ -1,5 +1,5 @@
 // NOD CRM — schéma
-// Périmètre : Workspace / Organization / Contact / FollowUp / Task.
+// Périmètre : Workspace / Organization / Contact / FollowUp / Task / RGPD Essentials.
 
 generator client {
   provider = "prisma-client"
@@ -28,11 +28,15 @@ model Workspace {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  contacts      Contact[]
-  followUps     FollowUp[]
-  organizations Organization[]
-  tasks         Task[]
-  users         User[]
+  contacts          Contact[]
+  followUps         FollowUp[]
+  organizations     Organization[]
+  tasks             Task[]
+  users             User[]
+  privacyTreatments PrivacyTreatment[]
+  privacyProcessors PrivacyProcessor[]
+  privacyRequests   PrivacyRequest[]
+  privacyIncidents  PrivacyIncident[]
 
   @@map("workspaces")
 }
@@ -98,18 +102,6 @@ model LoginAttempt {
 }
 
 /// Référentiel des entreprises, sociétés et associations (V0.5).
-///
-/// Une organisation est un contexte au-dessus du contact. Elle n'impose rien :
-/// un contact peut n'en avoir aucune, et une organisation peut exister sans
-/// contact rattaché.
-///
-/// **Isolation.** `workspace_id` est obligatoire et jamais lu depuis une entrée
-/// client : toute requête le dérive de la session, ce qui rend structurellement
-/// impossible de lire ou modifier une organisation d'un autre workspace.
-///
-/// **Archivage.** Comme pour les contacts : aucune suppression destructive.
-/// Une organisation archivée n'apparaît plus dans la liste ni dans le sélecteur,
-/// mais les contacts rattachés restent valides et conservent leur lien.
 model Organization {
   id          String    @id @default(uuid()) @db.Uuid
   workspaceId String    @map("workspace_id") @db.Uuid
@@ -131,17 +123,6 @@ model Organization {
 }
 
 /// Référentiel central des personnes (V0.2).
-///
-/// Un contact existe indépendamment de tout suivi : c'est lui le référentiel,
-/// pas le Follow-Up. La relation `follow_ups.contact_id` reste facultative.
-///
-/// **Organisation (V0.5).** `organization_id` est une FK nullable vers la table
-/// `organizations`. Le champ texte `organization_name` est conservé pour la
-/// rétrocompatibilité : les contacts antérieurs à la migration restent valides,
-/// et les affichages l'utilisent en dernier recours. Conformément au plan de
-/// migration documenté dans `docs/contacts.md`, `organization_name` ne sera
-/// retiré que dans une version ultérieure, une fois que tous les contacts
-/// auront été backfillés et que les lectures auront été migrées.
 model Contact {
   id               String    @id @default(uuid()) @db.Uuid
   workspaceId      String    @map("workspace_id") @db.Uuid
@@ -151,32 +132,21 @@ model Contact {
   email            String?
   phone            String?
   jobTitle         String?   @map("job_title")
-  /// Conservé pour rétrocompatibilité. Lorsque `organization_id` est renseigné,
-  /// `organization_name` reflète le nom au moment du rattachement et peut dériver.
-  /// Il sert de valeur d'affichage de secours si l'organisation est supprimée.
   organizationName String?   @map("organization_name")
   notes            String?
-  /// Clé opaque dans le magasin d'objets (`src/lib/storage`), jamais un chemin
-  /// choisi par l'utilisateur. L'image elle-même n'est PAS stockée en base.
   photoKey         String?   @map("photo_key")
-  /// Type MIME **constaté** à l'upload (octets d'en-tête), pas celui annoncé.
   photoMimeType    String?   @map("photo_mime_type")
-  /// Archivage logique : aucune suppression destructive, et les suivis liés
-  /// sont conservés tels quels.
   archivedAt       DateTime? @map("archived_at")
   isDemo           Boolean   @default(false) @map("is_demo")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  followUps    FollowUp[]
-  tasks        Task[]
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  organization    Organization?    @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  followUps       FollowUp[]
+  tasks           Task[]
+  privacyRequests PrivacyRequest[]
 
-  // Les trois index suivent les trois tris proposés par la liste Contacts, et
-  // commencent tous par le couple réellement filtré (`workspace_id`,
-  // `archived_at`) : sans `archived_at` en tête, PostgreSQL filtrait les
-  // archivés après avoir trié.
   @@index([workspaceId, archivedAt, firstName, lastName])
   @@index([workspaceId, archivedAt, createdAt])
   @@index([workspaceId, archivedAt, updatedAt])
@@ -185,21 +155,20 @@ model Contact {
 }
 
 model FollowUp {
-  id          String         @id @default(uuid()) @db.Uuid
-  workspaceId String         @map("workspace_id") @db.Uuid
-  contactId   String?        @map("contact_id") @db.Uuid
-  title       String
-  description String?
-  status      FollowUpStatus @default(OPEN)
-  ballOwner   BallOwner      @default(THEM) @map("ball_owner")
-  dueAt       DateTime       @map("due_at")
-  // Une « relance » n'envoie rien en V0.1 : elle est simplement matérialisée ici.
-  nudgeCount  Int            @default(0) @map("nudge_count")
-  lastNudgedAt DateTime?     @map("last_nudged_at")
-  isDemo      Boolean        @default(false) @map("is_demo")
-  createdAt   DateTime       @default(now()) @map("created_at")
-  updatedAt   DateTime       @updatedAt @map("updated_at")
-  completedAt DateTime?      @map("completed_at")
+  id           String         @id @default(uuid()) @db.Uuid
+  workspaceId  String         @map("workspace_id") @db.Uuid
+  contactId    String?        @map("contact_id") @db.Uuid
+  title        String
+  description  String?
+  status       FollowUpStatus @default(OPEN)
+  ballOwner    BallOwner      @default(THEM) @map("ball_owner")
+  dueAt        DateTime       @map("due_at")
+  nudgeCount   Int            @default(0) @map("nudge_count")
+  lastNudgedAt DateTime?      @map("last_nudged_at")
+  isDemo       Boolean        @default(false) @map("is_demo")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+  completedAt  DateTime?      @map("completed_at")
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
@@ -210,24 +179,7 @@ model FollowUp {
   @@map("follow_ups")
 }
 
-/// Une tâche (V0.4) : **quelque chose à faire**.
-///
-/// À ne pas confondre avec un suivi, qui est **quelque chose à faire avancer
-/// avec quelqu'un**. C'est toute la distinction du module : une tâche n'a ni
-/// balle, ni relance, ni interlocuteur obligatoire. Elle peut rester seule,
-/// citer un contact pour le contexte, ou pointer un suivi — sans qu'aucun de
-/// ces liens ne synchronise les états (terminer l'un ne termine jamais
-/// l'autre).
-///
-/// **États.** Deux, et pas un de plus : `completed_at IS NULL` (à faire) ou
-/// non (terminée). Ni priorité, ni statut intermédiaire, ni workflow.
-///
-/// **Cloisonnement.** `workspace_id` est obligatoire ; `contact_id` et
-/// `follow_up_id` sont facultatifs et vérifiés côté serveur contre le
-/// workspace de la session avant écriture — exactement comme
-/// `follow_ups.contact_id`. PostgreSQL ne peut pas l'imposer seul ici : une
-/// clé étrangère composite (id, workspace_id) interdirait le `SET NULL` à la
-/// suppression, dont dépend la conservation des tâches d'un contact supprimé.
+/// Une tâche (V0.4) : quelque chose à faire.
 model Task {
   id          String    @id @default(uuid()) @db.Uuid
   workspaceId String    @map("workspace_id") @db.Uuid
@@ -245,10 +197,140 @@ model Task {
   contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
   followUp  FollowUp? @relation(fields: [followUpId], references: [id], onDelete: SetNull)
 
-  // L'index suit la seule lecture qui compte : les tâches non terminées d'un
-  // workspace, de la plus en retard à la plus lointaine.
   @@index([workspaceId, completedAt, dueAt])
   @@index([contactId])
   @@index([followUpId])
   @@map("tasks")
+}
+
+/// V0.8 — entrée du registre des traitements RGPD.
+model PrivacyTreatment {
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @map("workspace_id") @db.Uuid
+  name              String
+  purpose           String
+  description       String?
+  owner             String?
+  dataSubjects      String?   @map("data_subjects")
+  dataCategories    String?   @map("data_categories")
+  legalBasis        String    @default("TO_DETERMINE") @map("legal_basis")
+  retentionPeriod   String?   @map("retention_period")
+  recipients        String?
+  transferOutsideEea String   @default("UNKNOWN") @map("transfer_outside_eea")
+  securityMeasures  String?   @map("security_measures")
+  lastReviewedAt    DateTime? @map("last_reviewed_at")
+  nextReviewAt      DateTime? @map("next_review_at")
+  status            String    @default("ACTIVE")
+  archivedAt        DateTime? @map("archived_at")
+  isDemo            Boolean   @default(false) @map("is_demo")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  workspace  Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  processors PrivacyTreatmentProcessor[]
+
+  @@index([workspaceId, archivedAt, name])
+  @@index([workspaceId, nextReviewAt])
+  @@map("privacy_treatments")
+}
+
+/// V0.8 — prestataire / sous-traitant intervenant sur des données personnelles.
+model PrivacyProcessor {
+  id                 String    @id @default(uuid()) @db.Uuid
+  workspaceId        String    @map("workspace_id") @db.Uuid
+  name               String
+  service            String
+  category           String?
+  dataCategories     String?   @map("data_categories")
+  purpose            String?
+  country            String?
+  eeaStatus          String    @default("UNKNOWN") @map("eea_status")
+  dpaStatus          String    @default("TO_REVIEW") @map("dpa_status")
+  dpaUrl             String?   @map("dpa_url")
+  subprocessorsStatus String   @default("UNKNOWN") @map("subprocessors_status")
+  notes              String?
+  lastReviewedAt     DateTime? @map("last_reviewed_at")
+  nextReviewAt       DateTime? @map("next_review_at")
+  archivedAt         DateTime? @map("archived_at")
+  isDemo             Boolean   @default(false) @map("is_demo")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  workspace  Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  treatments PrivacyTreatmentProcessor[]
+
+  @@index([workspaceId, archivedAt, name])
+  @@index([workspaceId, nextReviewAt])
+  @@map("privacy_processors")
+}
+
+/// Relation N-N entre traitements et sous-traitants. Le workspace est stocké
+/// explicitement afin que toutes les opérations restent bornées côté application.
+model PrivacyTreatmentProcessor {
+  workspaceId String @map("workspace_id") @db.Uuid
+  treatmentId String @map("treatment_id") @db.Uuid
+  processorId String @map("processor_id") @db.Uuid
+
+  treatment PrivacyTreatment @relation(fields: [treatmentId], references: [id], onDelete: Cascade)
+  processor PrivacyProcessor @relation(fields: [processorId], references: [id], onDelete: Cascade)
+
+  @@id([treatmentId, processorId])
+  @@index([workspaceId])
+  @@index([processorId])
+  @@map("privacy_treatment_processors")
+}
+
+/// V0.8 — demande d'exercice de droits reçue d'une personne concernée.
+model PrivacyRequest {
+  id             String    @id @default(uuid()) @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  contactId      String?   @map("contact_id") @db.Uuid
+  requesterName  String?   @map("requester_name")
+  requesterEmail String?   @map("requester_email")
+  requestType    String    @map("request_type")
+  receivedAt     DateTime  @map("received_at")
+  dueAt          DateTime  @map("due_at")
+  status         String    @default("RECEIVED")
+  owner          String?
+  notes          String?
+  closedAt       DateTime? @map("closed_at")
+  isDemo         Boolean   @default(false) @map("is_demo")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status, dueAt])
+  @@index([contactId])
+  @@map("privacy_requests")
+}
+
+/// V0.8 — registre interne des incidents / violations de données.
+model PrivacyIncident {
+  id                    String    @id @default(uuid()) @db.Uuid
+  workspaceId           String    @map("workspace_id") @db.Uuid
+  title                 String
+  discoveredAt          DateTime  @map("discovered_at")
+  occurredAt            DateTime? @map("occurred_at")
+  description           String
+  dataCategories        String?   @map("data_categories")
+  affectedCount         Int?      @map("affected_count")
+  consequences          String?
+  measures              String?
+  riskLevel             String    @default("TO_ASSESS") @map("risk_level")
+  authorityNotification String    @default("TO_ASSESS") @map("authority_notification")
+  notifiedAt            DateTime? @map("notified_at")
+  peopleInformed        String    @default("TO_ASSESS") @map("people_informed")
+  owner                 String?
+  status                String    @default("OPEN")
+  closedAt              DateTime? @map("closed_at")
+  isDemo                Boolean   @default(false) @map("is_demo")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status, discoveredAt])
+  @@map("privacy_incidents")
 }
