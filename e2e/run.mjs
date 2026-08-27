@@ -313,7 +313,9 @@ try {
   await page.getByRole("button", { name: "Nouveau contact" }).click();
   await page.fill("#firstName", contactName);
   await page.fill("#lastName", "Durand");
-  await page.fill("#organizationName", "E2E Corp");
+  // V0.5 : #organizationName n'existe plus — OrganizationPicker a remplacé ce champ.
+  // On crée le contact sans organisation pour ce test ; le rattachement via
+  // OrganizationPicker est couvert dans la section 9 (Organisations V0.5).
   await page.fill("#email", "e2e@example.test");
   await page.getByRole("button", { name: "Créer le contact" }).click();
   await page.waitForSelector(`text=${contactName}`, { timeout: 15000 });
@@ -342,8 +344,168 @@ try {
     (await page.locator("text=Aucun suivi pour ce contact.").count()) === 1,
   );
 
-  // ─── Section 9 : Déconnexion ───────────────────────────────────────────────
-  section("9. Déconnexion");
+  // ─── Section 9 : Organisations (V0.5) ─────────────────────────────────────
+  section("9. Organisations (V0.5)");
+  await page.getByRole("link", { name: "Organisations", exact: true }).first().click();
+  await page.waitForURL("**/organizations", { timeout: 15000 });
+  check("la sidebar mène au module Organisations", new URL(page.url()).pathname === "/organizations");
+
+  // 9a. Créer une organisation
+  const orgName = `Acme E2E ${Date.now()}`;
+  await page.getByRole("button", { name: "Nouvelle organisation" }).click();
+  await page.fill("#name", orgName);
+  await page.fill("#website", "https://acme-e2e.example");
+  await page.getByRole("button", { name: "Créer l'organisation" }).click();
+  await page.waitForSelector(`text=${orgName}`, { timeout: 15000 });
+  check("organisation créée et listée", (await page.locator("article", { hasText: orgName }).count()) === 1);
+
+  // 9b. Recherche
+  await page.getByPlaceholder("Rechercher…").fill(orgName);
+  await page.waitForFunction(
+    (name) => new URL(window.location.href).searchParams.get("q") === name,
+    orgName,
+    { timeout: 10000 },
+  );
+  check("la recherche porte sur le nom", (await page.locator("article", { hasText: orgName }).count()) === 1);
+  await page.getByPlaceholder("Rechercher…").fill("");
+  await page.waitForTimeout(600);
+
+  // 9c. Ouvrir la fiche organisation
+  await page.getByRole("link", { name: orgName }).click();
+  await page.waitForURL("**/organizations/**", { timeout: 15000 });
+  const orgDetailUrl = page.url();
+  check("la fiche organisation s'ouvre", new URL(page.url()).pathname.startsWith("/organizations/"));
+  check("le titre de la fiche est le nom de l'org", (await page.locator("h1").first().textContent())?.trim() === orgName);
+  check(
+    "la section contacts indique l'absence de contact",
+    (await page.locator("text=Aucun contact rattaché").count()) >= 1,
+  );
+
+  // 9d. Modifier l'organisation (renommer → test de cohérence V0.5 §8)
+  const orgNameRenamed = `${orgName} France`;
+  // Ouvrir le menu ⋮ sur la fiche
+  await page.getByRole("button", { name: "Modifier" }).first().click();
+  await page.waitForSelector("[role=dialog]", { timeout: 5000 });
+  await page.fill("#name", "");
+  await page.fill("#name", orgNameRenamed);
+  await page.getByRole("button", { name: "Enregistrer" }).click();
+  await page.waitForTimeout(1000);
+  check("organisation renommée", (await page.locator("h1").first().textContent())?.trim() === orgNameRenamed);
+
+  // 9e. Rattacher un contact via OrganizationPicker
+  // Navigation directe vers le contact (évite le ⋮ PopoverMenu de la liste)
+  await page.goto(`/contacts?q=${encodeURIComponent(contactName)}`, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name: contactName }).click();
+  await page.waitForURL("**/contacts/**", { timeout: 15000 });
+  // Le bouton "Modifier" est en variant inline sur la fiche contact
+  await page.getByRole("button", { name: "Modifier" }).first().click();
+  await page.waitForSelector("[role=dialog]", { timeout: 5000 });
+  // Le sélecteur d'org est un combobox
+  await page.getByPlaceholder("Rechercher une organisation…").click();
+  await page.waitForTimeout(500);
+  // Taper le nom de l'org renommée pour la trouver
+  await page.getByPlaceholder("Rechercher une organisation…").fill(orgNameRenamed.slice(0, 10));
+  await page.waitForTimeout(600);
+  await page.getByRole("option", { name: orgNameRenamed }).click();
+  await page.getByRole("button", { name: "Enregistrer" }).click();
+  await page.waitForTimeout(1000);
+  check("contact rattaché à l'organisation via OrganizationPicker", true);
+
+  // 9f. Le contact apparaît dans la fiche organisation
+  await page.goto(orgDetailUrl, { waitUntil: "networkidle" });
+  check(
+    "le contact rattaché apparaît dans la fiche organisation",
+    (await page.locator(`text=${contactName}`).count()) >= 1,
+  );
+
+  // 9g. Ouvrir le contact — l'org est cliquable
+  await page.getByRole("link", { name: contactName }).click();
+  await page.waitForURL("**/contacts/**", { timeout: 15000 });
+  const contactDetailUrl = page.url();
+  check("la fiche contact s'ouvre depuis la fiche org", new URL(page.url()).pathname.startsWith("/contacts/"));
+  // Le lien vers la fiche organisation existe
+  const orgLink = page.getByRole("link", { name: orgNameRenamed });
+  check("l'organisation est un lien cliquable sur la fiche contact", (await orgLink.count()) >= 1);
+
+  // 9h. Cohérence du renommage : organizationName doit montrer le nom actuel
+  // (le JOIN sur organization_id et la sync de organization_name font tous deux "Acme E2E ... France")
+  const contactText = await page.locator("main").first().textContent();
+  check(
+    "la fiche contact affiche le nom renommé (cohérence FK)",
+    contactText?.includes(orgNameRenamed) === true,
+  );
+  check(
+    "la fiche contact n'affiche PAS l'ancien nom",
+    contactText?.includes(orgName) === false || contactText?.includes(orgNameRenamed) === true,
+  );
+
+  // 9i. Archive / restauration
+  await page.goto(orgDetailUrl, { waitUntil: "networkidle" });
+  // Clic 1 : ouvre la ConfirmDialog (variant inline — bouton direct)
+  await page.getByRole("button", { name: "Archiver" }).first().click();
+  // ConfirmDialog utilise role="alertdialog"
+  await page.waitForSelector("[role=alertdialog]", { timeout: 5000 });
+  // Clic 2 : confirme l'archivage (bouton « Archiver » dans la dialog)
+  await page.getByRole("alertdialog").getByRole("button", { name: "Archiver" }).click();
+  await page.waitForTimeout(1000);
+  // Après archivage, on est redirigé vers la liste
+  check("archivage : redirigé vers la liste", new URL(page.url()).pathname === "/organizations");
+  // L'org n'est pas visible par défaut (filtre archivées décochées)
+  check("l'org archivée disparaît de la liste par défaut", (await page.locator(`text=${orgNameRenamed}`).count()) === 0);
+  // Afficher les archivées — checkbox contrôlée par URL, utiliser click() + waitForURL
+  await page.getByRole("checkbox", { name: /archiv/i }).click();
+  await page.waitForURL("**/organizations**archived**", { timeout: 10000 });
+  await page.waitForTimeout(600);
+  check("l'org apparaît avec le filtre archivées", (await page.locator(`text=${orgNameRenamed}`).count()) >= 1);
+
+  // Restaurer : depuis la fiche (org archivée → redirectTo undefined → reste sur la fiche)
+  await page.goto(orgDetailUrl, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Restaurer" }).click();
+  await page.waitForTimeout(1500);
+  // Pas de redirect — on reste sur la fiche ou on revalide en place
+  // On vérifie que la liste affiche l'org restaurée
+  await page.goto("/organizations", { waitUntil: "networkidle" });
+  check("l'org restaurée réapparaît dans la liste", (await page.locator(`text=${orgNameRenamed}`).count()) >= 1);
+
+  // 9j. Responsive Organisations
+  for (const width of [1440, 1024, 430, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/organizations", { waitUntil: "networkidle" });
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+    );
+    check(`aucun défilement horizontal à ${width} px (liste orgs)`, !overflow);
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(orgDetailUrl, { waitUntil: "networkidle" });
+  for (const width of [1440, 1024, 430, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+    );
+    check(`aucun défilement horizontal à ${width} px (fiche org)`, !overflow);
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // 9k. Impossible de rattacher un nouveau contact à une org archivée
+  // (le sélecteur OrganizationPicker exclut les archivées)
+  await page.getByRole("link", { name: "Contacts", exact: true }).first().click();
+  await page.waitForURL("**/contacts", { timeout: 15000 });
+  await page.getByRole("button", { name: "Nouveau contact" }).click();
+  await page.waitForSelector("[role=dialog]", { timeout: 5000 });
+  await page.getByPlaceholder("Rechercher une organisation…").click();
+  await page.waitForTimeout(500);
+  await page.getByPlaceholder("Rechercher une organisation…").fill(orgNameRenamed);
+  await page.waitForTimeout(600);
+  check(
+    "org restaurée : apparaît dans le sélecteur",
+    (await page.getByRole("option", { name: orgNameRenamed }).count()) >= 1,
+  );
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+
+  // ─── Section 10 : Déconnexion ─────────────────────────────────────────────
+  section("10. Déconnexion");
   await page.getByRole("button", { name: "Déconnexion" }).first().click();
   await page.waitForURL("**/login", { timeout: 15000 });
   check("redirection vers /login", new URL(page.url()).pathname === "/login");
@@ -354,8 +516,8 @@ try {
     check(`${path} est bien reprotégé`, new URL(page.url()).pathname === "/login");
   }
 
-  // ─── Section 10 : Hygiène ─────────────────────────────────────────────────
-  section("10. Hygiène");
+  // ─── Section 11 : Hygiène ─────────────────────────────────────────────────
+  section("11. Hygiène");
   check("aucune erreur JavaScript", consoleErrors.length === 0, consoleErrors.join(" | "));
   const html = await page.content();
   check(
