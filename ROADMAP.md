@@ -83,7 +83,7 @@ Shipped:
 
 ---
 
-## V0.6 — Follow-up Search & Editing *(current)*
+## V0.6 — Follow-up Search & Editing
 
 Shipped:
 
@@ -93,6 +93,28 @@ Shipped:
 - **Follow-up editing** — a "Modifier" button on each card opens an edit
   dialog. Editable fields: subject, description, due date, contact. Ball
   ownership and status remain the exclusive domain of the quick actions.
+
+---
+
+## V0.7 — UI Refresh / Lumina Enterprise *(current)*
+
+Shipped:
+
+- **Design system** — semantic token set (Electric Indigo `#6366F1` primary,
+  Slate palette, 8 px grid, 12 px card radius), Geist font, three shadow
+  levels (card, card-hover, dialog).
+- **Sidebar** — `w-64`, active left-bar indicator, `bg-accent-soft` active
+  state, updated footer with user label and workspace name.
+- **Sticky page headers** — translucent `bg-surface/95 backdrop-blur-sm`
+  header on every app page (Today, Follow-ups, Tasks, Contacts, Organisations).
+- **Card elevation** — consistent `shadow-card hover:shadow-card-hover` across
+  all list surfaces (follow-ups, contacts, organisations, tasks, cockpit rows).
+- **Pill filter tabs** — solid `bg-accent` active style replacing the border
+  tab pattern. Applied on Follow-ups, Tasks and Today pages.
+- **Form focus ring** — `focus:ring-2 focus:ring-accent/20` on all inputs
+  (ui/form, login-form).
+- **Contact initials avatar** — `bg-accent-soft text-accent` instead of muted.
+- Visual-only: no functional changes, no new routes, no new queries.
 
 ---
 

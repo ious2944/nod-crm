@@ -5,7 +5,7 @@ import type { OrganizationListItem } from "@/lib/organizations/view";
 import { OrganizationActions } from "./organization-actions";
 
 /**
- * Une ligne de la liste Organisations.
+ * Une ligne de la liste Organisations — V0.7 Lumina Enterprise.
  *
  * Même densité que la liste Contacts : card-style, lien sur la zone
  * d'information, menu ⋮ en dehors du lien.
@@ -14,11 +14,11 @@ export function OrganizationRow({ organization }: { organization: OrganizationLi
   const domainLabel = websiteDisplayLabel(organization.website);
 
   return (
-    <article className="flex items-start gap-3 rounded-xl border border-border-subtle bg-surface p-4 transition-shadow hover:shadow-sm sm:gap-4 sm:p-5">
+    <article className="flex items-start gap-4 rounded-xl border border-border-subtle bg-surface p-4 shadow-card transition-all hover:shadow-card-hover hover:border-border-strong sm:p-5">
       {/* Icône organisation */}
       <div
         aria-hidden
-        className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-base"
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-accent-soft text-base"
       >
         ▤
       </div>
@@ -26,7 +26,7 @@ export function OrganizationRow({ organization }: { organization: OrganizationLi
       <div className="min-w-0 flex-1">
         <Link
           href={`/organizations/${organization.id}`}
-          className="text-[15px] font-semibold leading-snug text-ink hover:underline"
+          className="text-[15px] font-semibold leading-snug text-ink hover:underline underline-offset-2"
         >
           {organization.name}
         </Link>
@@ -36,22 +36,18 @@ export function OrganizationRow({ organization }: { organization: OrganizationLi
         )}
 
         <div className="mt-1 space-y-0.5 text-[13px] text-muted">
-          {organization.email && (
-            <p className="truncate">{organization.email}</p>
-          )}
-          {organization.phone && (
-            <p className="truncate">{organization.phone}</p>
-          )}
+          {organization.email && <p className="truncate">{organization.email}</p>}
+          {organization.phone && <p className="truncate">{organization.phone}</p>}
         </div>
 
         <p
-          className={`mt-2 text-xs font-medium ${
+          className={`mt-2 text-xs font-semibold ${
             organization.contactCount > 0 ? "text-accent" : "text-muted"
           }`}
         >
           {organizationContactLabel(organization.contactCount)}
           {organization.archived && (
-            <span className="ml-2 rounded-full border border-border-strong px-1.5 py-px text-[10px] uppercase tracking-wide text-muted">
+            <span className="ml-2 rounded-full border border-border-strong px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-muted">
               archivée
             </span>
           )}

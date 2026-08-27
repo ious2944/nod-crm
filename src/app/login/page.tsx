@@ -9,31 +9,35 @@ export const metadata = {
 };
 
 export default async function LoginPage() {
-  // Déjà connecté : inutile de proposer l'écran de connexion.
   if (await getCurrentUser()) {
     redirect("/today");
   }
 
   return (
-    <div className="flex min-h-dvh items-center justify-center px-4 py-12">
+    <div className="flex min-h-dvh items-center justify-center bg-bg px-4 py-12">
       <div className="w-full max-w-sm">
-        <div className="mb-8 flex items-center gap-2.5">
+        {/* Identité */}
+        <div className="mb-8 flex items-center gap-3">
           <span
             aria-hidden
-            className="grid h-9 w-9 place-items-center rounded-lg bg-accent text-sm font-bold text-accent-contrast"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent text-sm font-bold text-accent-contrast shadow-sm"
           >
             {APP_NAME.slice(0, 1).toUpperCase()}
           </span>
           <span className="flex flex-col leading-tight">
-            <span className="text-base font-semibold tracking-tight">{APP_NAME}</span>
+            <span className="text-base font-bold tracking-tight text-ink">{APP_NAME}</span>
             <span className="text-xs text-muted">{MODULE_NAME}</span>
           </span>
         </div>
 
-        <h1 className="text-2xl font-semibold tracking-tight">Connexion</h1>
-        <p className="mt-1 text-sm text-muted">Accède à tes suivis.</p>
+        {/* Accroche */}
+        <h1 className="text-2xl font-bold tracking-tight text-ink">Connexion</h1>
+        <p className="mt-1 text-sm text-muted">Accède à tes suivis et tâches.</p>
 
-        <LoginForm />
+        {/* Formulaire */}
+        <div className="mt-8 rounded-xl border border-border-subtle bg-surface p-6 shadow-card">
+          <LoginForm />
+        </div>
       </div>
     </div>
   );

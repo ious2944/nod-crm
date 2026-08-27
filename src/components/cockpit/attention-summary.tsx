@@ -4,12 +4,10 @@ import type { AttentionCounters, AttentionKey, CockpitFilter } from "@/lib/cockp
 import { ATTENTION_KEYS } from "@/lib/cockpit/filters";
 
 /**
- * Les quatre indicateurs d'attention.
+ * Les quatre indicateurs d'attention — V0.7 Lumina Enterprise.
  *
  * Pas de graphique, pas de KPI commercial, pas de gros chiffre décoratif : quatre
- * nombres qui répondent à « où ça coince ? ». Chacun est un **filtre du feed** —
- * l'indicateur n'est donc pas seulement une information, c'est le chemin le plus
- * court vers les suivis qu'il compte.
+ * nombres qui répondent à « où ça coince ? ». Chacun est un filtre du feed.
  */
 const LABELS: Record<AttentionKey, string> = {
   late: "En retard",
@@ -18,7 +16,13 @@ const LABELS: Record<AttentionKey, string> = {
   waiting: "Chez eux",
 };
 
-/** Seul le retard change de couleur : c'est le seul chiffre qui doit accrocher. */
+const ICONS: Record<AttentionKey, string> = {
+  late: "🔴",
+  today: "📅",
+  upcoming: "🗓",
+  waiting: "⏳",
+};
+
 const TONE: Record<AttentionKey, string> = {
   late: "text-critical-fg",
   today: "text-today-fg",
@@ -34,28 +38,38 @@ export function AttentionSummary({
   filter: CockpitFilter;
 }) {
   return (
-    <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+    <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       {ATTENTION_KEYS.map((key) => {
         const value = counters[key];
         const active = filter === key;
+        const isAlert = key === "late" && value > 0;
 
         return (
           <li key={key}>
             <Link
               href={active ? "/today" : `/today?f=${key}`}
               aria-current={active ? "true" : undefined}
-              className={`flex items-baseline gap-2 rounded-xl border bg-surface px-3 py-2.5 transition-colors hover:border-border-strong ${
-                active ? "border-accent bg-accent-soft" : "border-border-subtle"
+              className={`flex items-center gap-3 rounded-xl border bg-surface p-3.5 shadow-card transition-all hover:shadow-card-hover ${
+                isAlert
+                  ? "border-critical-fg/25 hover:border-critical-fg/40"
+                  : active
+                    ? "border-accent/50 hover:border-accent"
+                    : "border-border-subtle hover:border-border-strong"
               }`}
             >
-              <span
-                className={`text-lg font-semibold tabular-nums ${
-                  value > 0 ? TONE[key] : "text-muted"
-                }`}
-              >
-                {value}
-              </span>
-              <span className="truncate text-xs font-medium text-muted">{LABELS[key]}</span>
+              <span className="text-xl">{ICONS[key]}</span>
+              <div className="min-w-0">
+                <p
+                  className={`text-xl font-bold tabular-nums leading-none ${
+                    value > 0 ? TONE[key] : "text-muted"
+                  }`}
+                >
+                  {value}
+                </p>
+                <p className="mt-0.5 truncate text-[11px] font-medium text-muted">
+                  {LABELS[key]}
+                </p>
+              </div>
             </Link>
           </li>
         );

@@ -3,13 +3,7 @@
 import { useEffect, useId, type ReactNode } from "react";
 
 /**
- * Confirmation d'une action peu banale (archivage).
- *
- * `window.confirm()` aurait suffi fonctionnellement, mais il ne permet ni
- * d'expliquer les conséquences, ni de respecter la charte, et certains
- * navigateurs le bloquent. Ici la question tient en une phrase et le détail —
- * « les suivis sont conservés » — est affiché sous elle : c'est justement ce
- * qu'un utilisateur a besoin de lire avant d'archiver.
+ * Confirmation d'une action peu banale (archivage) — V0.7 Lumina Enterprise.
  */
 export function ConfirmDialog({
   open,
@@ -46,7 +40,7 @@ export function ConfirmDialog({
       role="alertdialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
     >
       <button
         type="button"
@@ -56,17 +50,17 @@ export function ConfirmDialog({
         onClick={onCancel}
       />
 
-      <div className="nod-rise relative w-full max-w-md rounded-t-2xl border border-border-subtle bg-surface p-5 shadow-xl sm:rounded-2xl">
+      <div className="nod-rise relative w-full max-w-md rounded-t-2xl border border-border-subtle bg-surface p-6 shadow-dialog sm:rounded-2xl">
         <h2 id={titleId} className="text-base font-semibold text-ink">
           {title}
         </h2>
         {description && <div className="mt-2 text-sm text-muted">{description}</div>}
 
-        <div className="mt-5 flex items-center justify-end gap-2">
+        <div className="mt-6 flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg px-3 py-2 text-sm text-muted hover:bg-surface-muted"
+            className="rounded-lg px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-muted hover:text-ink"
           >
             Annuler
           </button>

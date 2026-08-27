@@ -27,8 +27,10 @@ deliberately separate:
 The metaphor is table tennis: 🏓 the ball is either **on your side** or **on
 theirs**. Everything on screen exists to make the next action obvious.
 
-> ⚠️ **V0.5.** Four modules — Follow-Up, Contacts, Tasks and Organisations. They
-> work and are used in production, but it is a young project — read
+> ⚠️ **V0.7.** Four modules — Follow-Up, Contacts, Tasks and Organisations — with
+> a refreshed Lumina Enterprise visual design (Electric Indigo primary, Geist
+> font, consistent card elevation, sticky page headers). They work and are used
+> in production, but it is a young project — read
 > [Limitations](#limitations) before you commit to it. The user interface is
 > currently in French only; the documentation is in English and
 > internationalisation is on the roadmap.

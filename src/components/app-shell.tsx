@@ -7,19 +7,12 @@ import type { ReactNode } from "react";
 import { logout } from "@/app/login/actions";
 import { NAV_SECTIONS, type NavItem } from "./navigation";
 
-/** Sous-titre de la marque : les deux briques métier, dans l'ordre du produit. */
-const MODULE_TAGLINE = "Suivis & Tâches";
-
-function LogoutButton({ compact = false }: { compact?: boolean }) {
+function LogoutButton() {
   return (
     <form action={logout}>
       <button
         type="submit"
-        className={
-          compact
-            ? "rounded-full px-2.5 py-1.5 text-xs font-medium text-muted hover:bg-surface-muted hover:text-ink"
-            : "rounded-md px-2 py-1 text-[11px] font-medium text-muted hover:bg-surface-muted hover:text-ink"
-        }
+        className="rounded-md px-2 py-1 text-[11px] font-medium text-muted hover:bg-surface-muted hover:text-ink transition-colors"
       >
         Déconnexion
       </button>
@@ -27,18 +20,20 @@ function LogoutButton({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function Brand({ appName, compact = false }: { appName: string; compact?: boolean }) {
+function Brand({ appName, workspaceName }: { appName: string; workspaceName: string }) {
   return (
-    <div className="flex items-center gap-2.5">
+    <div className="flex items-center gap-3">
       <span
         aria-hidden
-        className="grid h-8 w-8 place-items-center rounded-lg bg-accent text-sm font-bold text-accent-contrast"
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent text-sm font-bold text-accent-contrast shadow-sm"
       >
         {appName.slice(0, 1).toUpperCase()}
       </span>
-      <span className="flex flex-col leading-tight">
-        <span className="text-sm font-semibold tracking-tight">{appName}</span>
-        {!compact && <span className="text-[11px] text-muted">{MODULE_TAGLINE}</span>}
+      <span className="flex min-w-0 flex-col leading-tight">
+        <span className="truncate text-[13px] font-semibold tracking-tight text-ink">
+          {appName}
+        </span>
+        <span className="truncate text-[11px] text-muted">{workspaceName}</span>
       </span>
     </div>
   );
@@ -46,20 +41,20 @@ function Brand({ appName, compact = false }: { appName: string; compact?: boolea
 
 function NavEntry({ item, active }: { item: NavItem; active: boolean }) {
   const base =
-    "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors";
+    "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors";
 
   if (!item.available || !item.href) {
     return (
       <span
         aria-disabled
         title="Module à venir"
-        className={`${base} cursor-not-allowed text-muted/60`}
+        className={`${base} cursor-not-allowed text-muted/50`}
       >
-        <span aria-hidden className="w-4 text-center opacity-70">
+        <span aria-hidden className="w-4 shrink-0 text-center text-base opacity-60">
           {item.icon}
         </span>
-        <span className="flex-1">{item.label}</span>
-        <span className="rounded-full border border-border-subtle px-1.5 py-px text-[10px] uppercase tracking-wide">
+        <span className="flex-1 truncate">{item.label}</span>
+        <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-muted/70">
           bientôt
         </span>
       </span>
@@ -72,14 +67,21 @@ function NavEntry({ item, active }: { item: NavItem; active: boolean }) {
       aria-current={active ? "page" : undefined}
       className={`${base} ${
         active
-          ? "bg-accent-soft font-medium text-accent"
-          : "text-ink hover:bg-surface-muted"
+          ? "bg-accent-soft text-accent"
+          : "text-muted hover:bg-surface-muted hover:text-ink"
       }`}
     >
-      <span aria-hidden className="w-4 text-center">
+      {/* Indicateur actif — barre latérale gauche */}
+      {active && (
+        <span
+          aria-hidden
+          className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-accent"
+        />
+      )}
+      <span aria-hidden className="w-4 shrink-0 text-center text-base">
         {item.icon}
       </span>
-      <span>{item.label}</span>
+      <span className="flex-1 truncate">{item.label}</span>
     </Link>
   );
 }
@@ -92,11 +94,7 @@ export function AppShell({
   workspaceName,
 }: {
   children: ReactNode;
-  /** Nom de l'instance, résolu côté serveur (`APP_NAME`) puis passé en prop :
-   *  une variable `NEXT_PUBLIC_*` serait figée au moment du build, ce qui
-   *  interdirait de renommer une instance sans reconstruire l'image. */
   appName: string;
-  /** Lien vers le code source de CETTE instance (AGPL-3.0, article 13). */
   sourceUrl: string;
   userLabel: string;
   workspaceName: string;
@@ -107,46 +105,52 @@ export function AppShell({
 
   return (
     <div className="flex min-h-dvh flex-col md:flex-row">
-      {/* Barre supérieure — mobile et tablette.
-          Deux rangées depuis la V0.4 : à quatre modules, une seule ligne
-          débordait sous 400 px. Les pastilles passent à la ligne (`flex-wrap`)
-          plutôt que de défiler latéralement — un défilement horizontal sans
-          indice visuel cache des entrées de navigation entières. */}
-      <header className="sticky top-0 z-20 flex flex-col gap-2 border-b border-border-subtle bg-surface/90 px-4 py-3 backdrop-blur md:hidden">
+      {/* ── Mobile : barre supérieure ──────────────────────────────────────── */}
+      <header className="sticky top-0 z-20 flex flex-col gap-2 border-b border-border-subtle bg-surface/95 px-4 py-3 backdrop-blur-sm md:hidden">
         <div className="flex items-center justify-between gap-3">
-          <Brand appName={appName} compact />
-          <LogoutButton compact />
+          <Brand appName={appName} workspaceName={workspaceName} />
+          <LogoutButton />
         </div>
-        <nav aria-label="Modules" className="flex flex-wrap items-center gap-1.5">
+        <nav aria-label="Modules" className="flex flex-wrap items-center gap-1">
           {NAV_SECTIONS.flatMap((section) => section.items)
             .filter((item) => item.available && item.href)
-            .map((item) => (
-              <Link
-                key={item.label}
-                href={item.href!}
-                aria-current={isActive(item) ? "page" : undefined}
-                className={`rounded-full px-2.5 py-1.5 text-xs font-medium ${
-                  isActive(item)
-                    ? "bg-accent-soft text-accent"
-                    : "text-muted hover:bg-surface-muted"
-                }`}
-              >
-                <span aria-hidden>{item.icon}</span> {item.label}
-              </Link>
-            ))}
+            .map((item) => {
+              const active = isActive(item);
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href!}
+                  aria-current={active ? "page" : undefined}
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                    active
+                      ? "bg-accent-soft text-accent"
+                      : "text-muted hover:bg-surface-muted hover:text-ink"
+                  }`}
+                >
+                  <span aria-hidden>{item.icon}</span>{" "}
+                  {item.label}
+                </Link>
+              );
+            })}
         </nav>
       </header>
 
-      {/* Barre latérale — desktop */}
-      <aside className="hidden w-60 shrink-0 border-r border-border-subtle bg-surface md:flex md:flex-col">
-        <div className="px-4 py-5">
-          <Brand appName={appName} />
+      {/* ── Desktop : barre latérale ────────────────────────────────────────── */}
+      <aside className="hidden w-64 shrink-0 border-r border-border-subtle bg-surface md:flex md:flex-col">
+        {/* Identité de l'instance */}
+        <div className="px-5 pt-6 pb-5">
+          <Brand appName={appName} workspaceName={workspaceName} />
         </div>
-        <nav aria-label="Navigation principale" className="flex-1 space-y-5 px-2.5 pb-6">
+
+        {/* Navigation principale */}
+        <nav
+          aria-label="Navigation principale"
+          className="flex-1 space-y-5 overflow-y-auto px-3 pb-4"
+        >
           {NAV_SECTIONS.map((section, index) => (
-            <div key={section.title ?? `section-${index}`} className="space-y-1">
+            <div key={section.title ?? `section-${index}`} className="space-y-0.5">
               {section.title && (
-                <p className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted">
+                <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-muted/70">
                   {section.title}
                 </p>
               )}
@@ -156,14 +160,17 @@ export function AppShell({
             </div>
           ))}
         </nav>
-        <div className="border-t border-border-subtle px-4 py-3">
-          <p className="truncate text-xs font-medium text-ink" title={userLabel}>
-            {userLabel}
-          </p>
-          <p className="truncate text-[11px] text-muted">{workspaceName}</p>
-          <div className="mt-2 flex items-center justify-between gap-2">
-            {/* AGPL-3.0 art. 13 : les utilisateurs d'une instance modifiée
-                doivent pouvoir en récupérer le source depuis l'interface. */}
+
+        {/* Footer : utilisateur + AGPL source */}
+        <div className="border-t border-border-subtle px-4 py-4">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <p className="truncate text-xs font-semibold text-ink" title={userLabel}>
+              {userLabel}
+            </p>
+            <p className="truncate text-[11px] text-muted">{workspaceName}</p>
+          </div>
+          <div className="mt-2.5 flex items-center justify-between gap-2">
+            {/* AGPL-3.0 art. 13 */}
             <a
               href={sourceUrl}
               target="_blank"
@@ -177,6 +184,7 @@ export function AppShell({
         </div>
       </aside>
 
+      {/* ── Contenu principal ─────────────────────────────────────────────── */}
       <main className="min-w-0 flex-1">{children}</main>
     </div>
   );

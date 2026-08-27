@@ -157,7 +157,7 @@ export default async function OrganizationPage({ params }: PageProps<"/organizat
               <li key={contact.id}>
                 <Link
                   href={`/contacts/${contact.id}`}
-                  className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-surface px-4 py-3 transition-colors hover:bg-surface-muted ${
+                  className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-surface px-4 py-3 shadow-card transition-all hover:shadow-card-hover hover:border-border-strong ${
                     contact.archived
                       ? "border-border-subtle opacity-60"
                       : "border-border-subtle"
@@ -198,7 +198,7 @@ export default async function OrganizationPage({ params }: PageProps<"/organizat
               <li key={followUp.id}>
                 <Link
                   href={`/contacts/${followUp.contactId}`}
-                  className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-border-subtle bg-surface px-4 py-3 transition-colors hover:bg-surface-muted"
+                  className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-border-subtle bg-surface px-4 py-3 shadow-card transition-all hover:shadow-card-hover hover:border-border-strong"
                 >
                   <div className="min-w-0">
                     <p className="truncate font-medium text-ink">{followUp.title}</p>
@@ -234,7 +234,7 @@ export default async function OrganizationPage({ params }: PageProps<"/organizat
               <li key={task.id}>
                 <Link
                   href={`/contacts/${task.contactId}`}
-                  className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-border-subtle bg-surface px-4 py-3 transition-colors hover:bg-surface-muted"
+                  className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-border-subtle bg-surface px-4 py-3 shadow-card transition-all hover:shadow-card-hover hover:border-border-strong"
                 >
                   <div className="min-w-0">
                     <p className="truncate font-medium text-ink">{task.title}</p>

@@ -5,25 +5,19 @@ import type { TaskView } from "@/lib/tasks/view";
 import { TaskAction, TaskActions, TaskSnoozeMenu } from "./task-actions";
 
 /**
- * Une tâche, sur une ligne.
+ * Une tâche, sur une ligne — V0.7 Lumina Enterprise.
  *
- * Volontairement pas une carte : une tâche porte un titre, une échéance et au
- * plus deux liens de contexte. Une grosse carte donnerait à cet objet une
- * importance visuelle qu'il n'a pas, et allongerait la liste pour rien.
- *
- * Sur écran étroit la ligne se replie en colonne (titre, contexte, puis
- * actions) : rien ne déborde, et les boutons restent atteignables au pouce.
- * Le titre est tronqué plutôt que renvoyé à la ligne — c'est l'échéance et les
- * actions qui doivent rester visibles, pas la fin d'un titre de 200 signes.
+ * Volontairement pas une carte imposante : une tâche porte un titre, une
+ * échéance et au plus deux liens de contexte.
  */
 export function TaskRow({ item }: { item: TaskView }) {
   return (
     <article
-      className={`flex flex-col gap-2.5 rounded-xl border border-border-subtle bg-surface p-3 transition-shadow hover:shadow-sm sm:flex-row sm:items-center sm:gap-3 sm:p-3.5 ${
-        item.completed ? "opacity-75" : ""
+      className={`flex flex-col gap-2.5 rounded-xl border border-border-subtle bg-surface p-3.5 shadow-card transition-all hover:shadow-card-hover hover:border-border-strong sm:flex-row sm:items-center sm:gap-3 ${
+        item.completed ? "opacity-70" : ""
       }`}
     >
-      <div className="flex min-w-0 flex-1 items-start gap-2.5">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
         <span
           aria-hidden
           className={`mt-0.5 shrink-0 text-sm ${item.completed ? "text-done-fg" : "text-muted"}`}
@@ -32,8 +26,6 @@ export function TaskRow({ item }: { item: TaskView }) {
         </span>
 
         <div className="min-w-0 flex-1">
-          {/* Le badge est hors du titre tronqué : sinon un titre long le
-              coupait en deux, et « DÉ… » ne veut plus rien dire. */}
           <div className="flex min-w-0 items-center gap-2">
             <h3
               title={item.title}
@@ -72,14 +64,6 @@ export function TaskRow({ item }: { item: TaskView }) {
   );
 }
 
-/**
- * Contexte de la tâche : le contact, puis le suivi lié.
- *
- * Le contact est un simple repère — cliquable vers sa fiche, comme partout
- * ailleurs. Il ne fait PAS de la tâche un suivi : il n'y a ni balle, ni
- * relance ici. Le suivi lié, lui, se lit mais ne se synchronise pas : terminer
- * cette tâche ne terminera jamais le suivi cité.
- */
 function TaskMeta({ item }: { item: TaskView }) {
   if (!item.contactName && !item.followUpLabel && !item.notes) return null;
 

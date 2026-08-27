@@ -10,25 +10,20 @@ import { createContext, useContext, useState, useTransition, type ReactNode } fr
  * règle de comportement, pas de l'habillage :
  *
  * **Une seule mutation à la fois.** Pendant qu'une action est en vol, *toutes*
- * les autres actions de la même ligne sont désactivées. Sans cela, un
- * utilisateur pressé enchaîne deux gestes avant le premier retour, et le second
- * est refusé par la garde de transition côté serveur sans que rien ne
- * l'explique à l'écran.
+ * les autres actions de la même ligne sont désactivées.
  *
- * Conséquence assumée : ces boutons exigent JavaScript. L'application en dépend
- * déjà (dialogue de création, panneau de report) ; seul l'écran de connexion
- * reste un formulaire HTML classique, et c'est celui qui compte.
+ * V0.7 : styles mis à jour pour le design system Lumina Enterprise.
  */
 
 export type ActionVariant = "primary" | "default" | "ghost";
 
 export const ACTION_VARIANTS: Record<ActionVariant, string> = {
   primary:
-    "border-accent bg-accent text-accent-contrast hover:bg-accent-hover disabled:opacity-60",
+    "border-accent bg-accent text-accent-contrast hover:bg-accent-hover disabled:opacity-50",
   default:
-    "border-border-strong bg-surface text-ink hover:bg-surface-muted disabled:opacity-60",
+    "border-border-strong bg-surface text-ink hover:bg-surface-muted disabled:opacity-50",
   ghost:
-    "border-transparent bg-transparent text-muted hover:bg-surface-muted hover:text-ink disabled:opacity-60",
+    "border-transparent bg-transparent text-muted hover:bg-surface-muted hover:text-ink disabled:opacity-50",
 };
 
 export const ACTION_BASE =
@@ -55,9 +50,7 @@ export function RowActions({
   className = "flex flex-wrap items-center gap-2",
   children,
 }: {
-  /** Server Action appelée par chaque bouton de la ligne. */
   action: (formData: FormData) => Promise<void>;
-  /** Ce qu'on dit à l'utilisateur si le serveur refuse. Le détail reste serveur. */
   conflictMessage: string;
   className?: string;
   children: ReactNode;
@@ -79,9 +72,6 @@ export function RowActions({
   return (
     <RowActionsContext.Provider value={{ busy: pending, run }}>
       <div className={className}>{children}</div>
-      {/* `aria-live` : le message est annoncé sans déplacer le focus. */}
-      {/* `basis-full` : dans une ligne en `flex-wrap`, le message occupe sa
-          propre ligne au lieu de comprimer les boutons. */}
       <p
         role="status"
         aria-live="polite"
@@ -93,7 +83,6 @@ export function RowActions({
   );
 }
 
-/** Construit le `FormData` attendu par les actions rapides. */
 export function actionFormData(fields: Record<string, string | number>): FormData {
   const formData = new FormData();
   for (const [key, value] of Object.entries(fields)) {

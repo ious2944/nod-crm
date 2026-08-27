@@ -25,7 +25,7 @@ export function CompactFollowUpRow({
     // Pas de `flex-wrap` : une ligne reste une ligne. Avec le retour à la
     // ligne, l'action tombait sous le texte pour certaines lignes seulement,
     // et la liste perdait son alignement — donc sa lisibilité en diagonale.
-    <article className="flex items-start gap-2.5 rounded-lg border border-border-subtle bg-surface px-3 py-2">
+    <article className="flex items-start gap-2.5 rounded-lg border border-border-subtle bg-surface px-3 py-2 shadow-card transition-shadow hover:shadow-card-hover hover:border-border-strong">
       <span
         className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${
           URGENCY_CHIP[item.level]

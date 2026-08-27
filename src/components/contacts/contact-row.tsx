@@ -5,26 +5,21 @@ import { ContactActions } from "./contact-actions";
 import { ContactAvatar } from "./contact-avatar";
 
 /**
- * Une ligne de la liste Contacts.
+ * Une ligne de la liste Contacts — V0.7 Lumina Enterprise.
  *
- * Priorité à la lisibilité : un avatar, un nom, et seulement les informations
- * qu'on cherche du regard. Pas de tableau, pas de colonnes — l'œil descend une
- * liste, il ne balaie pas une grille.
- *
- * Le lien couvre la zone d'information mais **pas** le menu `⋮` : un `<button>`
- * dans un `<a>` serait invalide et le clic ouvrirait la fiche au lieu du menu.
+ * Card-style : avatar, nom, informations contextuelles, menu ⋮ en dehors du lien.
  */
 export function ContactRow({ contact }: { contact: ContactListItem }) {
   const subtitle = contactSubtitle(contact.organizationName, contact.jobTitle);
 
   return (
-    <article className="flex items-start gap-3 rounded-xl border border-border-subtle bg-surface p-4 transition-shadow hover:shadow-sm sm:gap-4 sm:p-5">
+    <article className="flex items-start gap-4 rounded-xl border border-border-subtle bg-surface p-4 shadow-card transition-all hover:shadow-card-hover hover:border-border-strong sm:p-5">
       <ContactAvatar initials={contact.initials} photoUrl={contact.photoUrl} />
 
       <div className="min-w-0 flex-1">
         <Link
           href={`/contacts/${contact.id}`}
-          className="text-[15px] font-semibold leading-snug text-ink hover:underline"
+          className="text-[15px] font-semibold leading-snug text-ink hover:underline underline-offset-2"
         >
           {contact.displayName}
         </Link>
@@ -37,7 +32,7 @@ export function ContactRow({ contact }: { contact: ContactListItem }) {
         </div>
 
         <p
-          className={`mt-2 text-xs font-medium ${
+          className={`mt-2 text-xs font-semibold ${
             contact.openFollowUps > 0 ? "text-accent" : "text-muted"
           }`}
         >

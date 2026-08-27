@@ -22,8 +22,10 @@ export function FollowUpRow({ item }: { item: CockpitItem }) {
     // dans une pile de lignes identiques : le niveau critique reprend le
     // traitement de bordure que la carte du tableau utilise déjà.
     <article
-      className={`relative rounded-xl border bg-surface p-3 pl-4 transition-shadow hover:shadow-sm sm:pl-5 ${
-        isCritical ? "border-critical-fg/40" : "border-border-subtle"
+      className={`relative rounded-xl border bg-surface p-3 pl-4 shadow-card transition-all hover:shadow-card-hover sm:pl-5 ${
+        isCritical
+          ? "border-critical-fg/40 hover:border-critical-fg/60"
+          : "border-border-subtle hover:border-border-strong"
       }`}
     >
       <span
