@@ -15,9 +15,9 @@ function dateValue(value: Date) {
   return value.toISOString().slice(0, 10);
 }
 
-function deadlineLabel(dueAt: Date, status: string) {
+function deadlineLabel(dueAt: Date, status: string, now: Date) {
   if (status === "COMPLETED" || status === "REFUSED") return "Clôturée";
-  const days = Math.ceil((dueAt.getTime() - Date.now()) / DAY);
+  const days = Math.ceil((dueAt.getTime() - now.getTime()) / DAY);
   if (days < 0) return `En retard de ${Math.abs(days)} j`;
   if (days === 0) return "Échéance aujourd’hui";
   return `Échéance dans ${days} j`;
@@ -25,6 +25,7 @@ function deadlineLabel(dueAt: Date, status: string) {
 
 export default async function PrivacyRequestsPage() {
   await connection();
+  const now = new Date();
   const [items, contacts] = await Promise.all([listPrivacyRequests(), listPrivacyContactOptions()]);
 
   return (
@@ -37,7 +38,7 @@ export default async function PrivacyRequestsPage() {
       <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 sm:px-6 sm:py-8">
         <details className="rounded-xl border border-border-subtle bg-surface p-4 shadow-card">
           <summary className="cursor-pointer font-semibold text-ink">+ Enregistrer une demande</summary>
-          <RequestForm action={createPrivacyRequest} contacts={contacts} />
+          <RequestForm action={createPrivacyRequest} contacts={contacts} now={now} />
         </details>
 
         {items.length === 0 ? (
@@ -51,6 +52,8 @@ export default async function PrivacyRequestsPage() {
               const identity = item.contact
                 ? `${item.contact.firstName} ${item.contact.lastName}`.trim()
                 : item.requesterName || item.requesterEmail || "Personne non renseignée";
+              const isLate =
+                item.dueAt < now && item.status !== "COMPLETED" && item.status !== "REFUSED";
               return (
                 <li key={item.id} className="rounded-xl border border-border-subtle bg-surface p-4 shadow-card">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -60,12 +63,12 @@ export default async function PrivacyRequestsPage() {
                     </div>
                     <div className="text-right">
                       <span className="rounded-full bg-accent-soft px-2 py-1 text-xs font-semibold text-accent">{labelFor(REQUEST_STATUSES, item.status)}</span>
-                      <p className={`mt-2 text-xs font-semibold ${item.dueAt < new Date() && item.status !== "COMPLETED" && item.status !== "REFUSED" ? "text-danger" : "text-muted"}`}>{deadlineLabel(item.dueAt, item.status)}</p>
+                      <p className={`mt-2 text-xs font-semibold ${isLate ? "text-critical-fg" : "text-muted"}`}>{deadlineLabel(item.dueAt, item.status, now)}</p>
                     </div>
                   </div>
                   <details className="mt-4 border-t border-border-subtle pt-3">
                     <summary className="cursor-pointer text-sm font-semibold text-accent">Modifier</summary>
-                    <RequestForm action={updatePrivacyRequest} contacts={contacts} item={item} />
+                    <RequestForm action={updatePrivacyRequest} contacts={contacts} item={item} now={now} />
                   </details>
                 </li>
               );
@@ -81,13 +84,15 @@ function RequestForm({
   action,
   contacts,
   item,
+  now,
 }: {
   action: (formData: FormData) => Promise<void>;
   contacts: Awaited<ReturnType<typeof listPrivacyContactOptions>>;
   item?: Awaited<ReturnType<typeof listPrivacyRequests>>[number];
+  now: Date;
 }) {
-  const defaultReceived = item?.receivedAt ?? new Date();
-  const defaultDue = item?.dueAt ?? new Date(Date.now() + 30 * DAY);
+  const defaultReceived = item?.receivedAt ?? now;
+  const defaultDue = item?.dueAt ?? new Date(now.getTime() + 30 * DAY);
   return (
     <form action={action} className="mt-4 grid gap-4 sm:grid-cols-2">
       {item && <input type="hidden" name="id" value={item.id} />}
