@@ -9,6 +9,7 @@ import {
   processorSchema,
   requestSchema,
   treatmentSchema,
+  updateRequestSchema,
 } from "@/lib/privacy/schemas";
 import { getWorkspaceIdForAction } from "@/lib/workspace";
 
@@ -143,7 +144,8 @@ export async function archiveTreatment(formData: FormData) {
 export async function createProcessor(formData: FormData) {
   const workspaceId = await getWorkspaceIdForAction();
   const parsed = processorSchema.parse(Object.fromEntries(formData));
-  await prisma.privacyProcessor.create({ data: { workspaceId, ...parsed, id: undefined } });
+  const { id: _ignored, ...data } = parsed;
+  await prisma.privacyProcessor.create({ data: { workspaceId, ...data } });
   revalidatePrivacy("/rgpd/processors", "/rgpd/treatments");
 }
 
@@ -191,7 +193,7 @@ export async function createPrivacyRequest(formData: FormData) {
 
 export async function updatePrivacyRequest(formData: FormData) {
   const workspaceId = await getWorkspaceIdForAction();
-  const parsed = requestSchema.extend({ id: privacyIdSchema }).parse(Object.fromEntries(formData));
+  const parsed = updateRequestSchema.parse(Object.fromEntries(formData));
   const contactId = await assertContact(workspaceId, parsed.contactId || undefined);
   const closed = parsed.status === "COMPLETED" || parsed.status === "REFUSED";
 
