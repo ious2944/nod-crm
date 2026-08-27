@@ -6,8 +6,8 @@ import { getPrivacyDashboard } from "@/lib/privacy/queries";
 export const metadata = { title: "RGPD — NOD CRM" };
 
 const SEVERITY = {
-  urgent: "border-danger/30 bg-danger/5",
-  warning: "border-warning/30 bg-warning/5",
+  urgent: "border-critical-fg/30 bg-critical-bg",
+  warning: "border-today-fg/30 bg-today-bg",
   info: "border-border-strong bg-surface",
 } as const;
 
