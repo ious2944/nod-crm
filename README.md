@@ -5,152 +5,144 @@
 [![License](https://img.shields.io/github/license/ious2944/nod-crm)](LICENSE)
 ![Self-hosted](https://img.shields.io/badge/self--hosted-Docker-informational)
 
-**Open-source self-hosted CRM focused on follow-ups.**
+**Open-source, self-hosted CRM focused on follow-ups and the next action.**
 
-Most CRMs answer "who are my customers?". NOD CRM answers a smaller, more
-urgent question:
+Most CRMs answer “who are my customers?”. NOD CRM starts with a smaller, more urgent question:
 
 > **Who should I follow up with today?**
 
-You create a follow-up, you wait, you nudge, the ball goes back to them, you
-close it. That is the whole product. There are no pipelines, no scoring, no
-forty-field contact forms — and there is no plan to add them.
+A follow-up moves back and forth like a table-tennis ball: it is either **on your side** or **on theirs**. Tasks cover work that simply needs doing. Contacts and Organisations provide the context around both. The `Aujourd'hui` cockpit brings the work that needs attention now into one place.
 
-Since V0.4 it also answers the smaller question next to it — *what do I have to
-do?* — with tasks. Since V0.5 it adds a third dimension: *who are these people,
-and what do I need to do with their organisation?* The three objects are
-deliberately separate:
+> **V0.7 — Lumina Enterprise UI Refresh.** The current release keeps the V0.6 feature set and gives it a consistent visual system: Electric Indigo, Geist, clearer surface hierarchy, sticky page headers, responsive layouts, dark mode and viewport-safe dialogs. V0.7 does not add new business logic.
 
-> **A task is something to do. A follow-up is something to move forward with
-> someone.**
-
-The metaphor is table tennis: 🏓 the ball is either **on your side** or **on
-theirs**. Everything on screen exists to make the next action obvious.
-
-> ⚠️ **V0.7.** Four modules — Follow-Up, Contacts, Tasks and Organisations — with
-> a refreshed Lumina Enterprise visual design (Electric Indigo primary, Geist
-> font, consistent card elevation, sticky page headers). They work and are used
-> in production, but it is a young project — read
-> [Limitations](#limitations) before you commit to it. The user interface is
-> currently in French only; the documentation is in English and
-> internationalisation is on the roadmap.
+NOD CRM is a young project used in production. Read [Limitations](#limitations) before adopting it. The interface is currently French-only; the documentation is in English.
 
 ---
 
-## Philosophy
+## What NOD CRM is
 
-- **Simplicity.** A feature is not accepted because another CRM has it. It has
-  to solve a real problem without making the product harder to understand.
-- **Self-hosting.** One database, one application, no queue, no cache, no
-  third-party service. It runs on the smallest VPS you have.
-- **Ownership of your data.** Self-hosting means administrators decide where
-  application data lives and who can reach it.
-- **Follow-up workflows.** The next action is the product. Everything else is
-  supporting cast.
-- **No hidden telemetry.** NOD CRM sends nothing anywhere. No analytics, no
-  phone-home, no opt-out needed because there is nothing to opt out of.
+NOD CRM deliberately avoids the generalist-CRM model. There are no sales pipelines, deal scoring, forecasting or marketing automation.
+
+Its four business areas stay intentionally distinct:
+
+- **Follow-ups** — something to move forward with someone.
+- **Tasks** — something to do.
+- **Contacts** — the people involved.
+- **Organisations** — the structures those people belong to.
+
+The product is organised around the next useful action rather than around collecting more fields.
 
 ---
 
-## Features (V0.6)
+## Aujourd'hui
 
-Only what actually exists today:
+`/today` is the cockpit and the natural starting point for a session. It answers one question: **what needs attention now?**
 
-- **Follow-up search** — a search bar on `/follow-ups` filters by subject and
-  description. Server-side, preserved in the URL (`?q=`), works alongside all
-  existing filters.
-- **Follow-up editing** — a "Modifier" button on each card opens an edit dialog.
-  Editable fields: subject, description, due date, linked contact. Ball ownership
-  and status remain the exclusive domain of the quick actions.
-- **Organisations** — a dedicated module at `/organizations`, with creation,
-  editing and archiving. Each organisation can store name, website, email, phone
-  and notes. The organisation sheet shows all linked contacts, open follow-ups
-  and open tasks at a glance.
-- **Contacts** — a dedicated directory at `/contacts`, with creation, viewing
-  and editing. Each contact can store first and last name, organisation (linked
-  via a picker to the Organisations module), job title, email, phone, free-form
-  notes and an optional photo. A contact exists independently and does not need
-  to be linked to a follow-up.
-- **Contact search and filters** — one search box across name, email, phone,
-  job title and organisation, executed by PostgreSQL; filters by organisation
-  and follow-up state; four sort orders; server-side pagination. The list also
-  shows the number of active follow-ups for each contact.
-- **Contact sheet** — everything about a person on one page, including their
-  linked follow-ups and a button to create a new follow-up with that contact
-  already selected.
-- **Archiving** — contacts are archived rather than destroyed and can be
-  restored. Archiving a contact never deletes or detaches its existing
-  follow-ups; historical follow-ups keep the contact and mark it as archived.
-- **Follow-ups** — subject, optional context, due date, ball owner, and an
-  optional contact selected from the central Contacts directory. New follow-ups
-  cannot be attached to an archived contact.
-- **Due dates** with day-level reasoning in a configurable time zone, and a
-  five-level visual ageing scale (upcoming → tomorrow → today → overdue →
-  7+ days late).
-- **Status** — open, completed, abandoned.
-- **Quick actions** — Nudge, Received, Ball sent, Snooze (+1 d / +3 d / +1 w),
-  Complete, Abandon, Reopen.
-- **Filters** — All / To nudge / My court / Their court / Completed.
-- **Tasks** — a title, a due date, and two states: to do or done. Optionally a
-  contact and a linked follow-up, both for context only: no ball, no nudge, and
-  **no state is ever synchronised** between a task and a follow-up. The list at
-  `/tasks` orders them overdue → today → upcoming, with Complete and Snooze on
-  each row and completed tasks one tab away. See
-  [docs/tasks.md](docs/tasks.md).
-- **Today cockpit** (`/today`) — the V0.3 cockpit, extended in V0.4 with tasks.
-  Greets you by name, shows the date, and displays four follow-up attention
-  indicators (late / today / upcoming / waiting). The main column shows the
-  priority follow-up feed (late + today + stagnant) followed by unfinished
-  tasks due today or earlier. The side column shows upcoming and waiting
-  follow-ups unchanged. Completing or snoozing either kind updates the page
-  immediately without touching the other object.
-- **Authentication** — email and password, Argon2id, server-side sessions with
-  absolute and idle expiry, rate limiting.
-- **Admin CLI** — create workspaces and users, reset passwords, disable
-  accounts. Passwords are always typed interactively, never passed as
-  arguments.
-- **Self-hosting** — Docker Compose, PostgreSQL 16, migrations applied
-  automatically at startup.
-- **Demo data** — a seed of fictional contacts, follow-ups and tasks, flagged
-  in the UI so it can never be confused with real data.
+It shows four follow-up attention indicators (late, today, upcoming, waiting), a priority follow-up feed, and unfinished tasks due today or earlier. Upcoming and waiting follow-ups remain visible alongside the priority feed.
+
+Tasks and follow-ups keep independent state machines: completing or snoozing one never silently changes the other.
+
+---
+
+## Features
+
+### Follow-ups
+
+- Subject, optional context, due date, ball owner and optional linked contact.
+- Five-level visual ageing: upcoming → tomorrow → today → overdue → 7+ days late.
+- Status: open, completed or abandoned.
+- Quick actions: Nudge, Received, Ball sent, Snooze (+1 d / +3 d / +1 w), Complete, Abandon and Reopen.
+- Filters: All / To nudge / My court / Their court / Completed.
+- Search by subject and description, preserved in the URL and compatible with filters.
+- Editing after creation: subject, description, due date and linked contact. Ball ownership and status remain quick-action-only.
+
+### Tasks
+
+- Title, due date and two states: to do or done.
+- Optional contact and optional linked follow-up for context only.
+- `/tasks` orders unfinished work overdue → today → upcoming.
+- Complete, Reopen and Snooze actions.
+- No state synchronisation with follow-ups by design.
+
+See [docs/tasks.md](docs/tasks.md).
+
+### Contacts
+
+- Dedicated directory at `/contacts` with creation, viewing and editing.
+- First name, last name, organisation, job title, email, phone, notes and optional photo.
+- PostgreSQL search across name, email, phone, job title and organisation.
+- Filters by organisation and follow-up state, four sort orders and server-side pagination.
+- Contact sheet with linked follow-ups and a shortcut to create a follow-up with that contact preselected.
+- Archive and restore instead of destructive deletion. Existing follow-up history is preserved.
+
+### Organisations
+
+- First-class organisation records at `/organizations`.
+- Name, website, email, phone and notes.
+- Live search, archive filter and pagination.
+- Organisation sheet at `/organizations/[id]` with linked contacts, open follow-ups and open tasks.
+- Archive and restore.
+- Contacts link to organisations through a nullable foreign key; backward compatibility with the historical organisation text field is preserved.
+- Workspace isolation applies to organisation reads, writes and relationships.
+
+See [docs/organizations.md](docs/organizations.md).
+
+### UI — V0.7
+
+V0.7 is a visual refresh, not a functional rewrite:
+
+- Lumina Enterprise design system with semantic tokens and Electric Indigo (`#6366F1`) as the primary colour.
+- Geist typography and a consistent spacing, radius and elevation system.
+- Refreshed desktop sidebar and responsive mobile navigation.
+- Sticky translucent page headers on Today, Follow-ups, Tasks, Contacts and Organisations.
+- Consistent card surfaces, filter pills, form focus states and contact avatars.
+- Dark-mode token parity through `prefers-color-scheme`.
+- Dialogs rendered at the document level so they remain accessible and scrollable on short and mobile viewports.
+
+### Platform
+
+- **Authentication** — email/password, Argon2id, server-side sessions with absolute and idle expiry, rate limiting.
+- **Workspace isolation** — the workspace is derived server-side from the authenticated session, not from client input.
+- **Admin CLI** — create workspaces and users, reset passwords and disable accounts. Passwords are entered interactively.
+- **Self-hosting** — Docker Compose, PostgreSQL 16 and automatic Prisma migrations.
+- **Demo data** — fictional organisations, contacts, follow-ups and tasks for a dedicated demo workspace. Seeded business rows are identifiable as demo data where supported by the model.
 
 Not built yet, and deliberately shown as disabled in the navigation: Dashboard.
 
 ---
 
+## Principles
+
+- **Simplicity.** A feature must solve a real problem without making the product harder to understand.
+- **Next action first.** Follow-up workflows and work requiring attention take precedence over CRM ceremony.
+- **Self-hosting.** One application, one PostgreSQL database, no queue and no cache required.
+- **Ownership of your data.** Administrators decide where application data lives and who can reach it.
+- **No hidden telemetry.** NOD CRM sends no analytics or phone-home telemetry.
+
+---
+
 ## Screenshots
 
-![NOD CRM — cockpit Aujourd'hui](docs/screenshots/today-light.png)
+The screenshot set is currently being refreshed for V0.7. The repository still contains an older Follow-up board capture; it should not be treated as a representation of the current Lumina Enterprise interface.
 
-The "Aujourd'hui" cockpit (V0.3, extended in V0.4) answers one question: what needs action now? It greets you by name, shows four follow-up attention indicators, a priority follow-up feed, and — added in V0.4 — a task section for anything due today or overdue. Follow-ups and tasks each keep their own shape; neither replaces the other.
-
-![NOD CRM — tasks](docs/screenshots/tasks-light.png)
-
-The task list stays a list: overdue, today, upcoming, one line each, Complete and Snooze within reach.
-
-![NOD CRM Follow-Up board](docs/screenshots/board-light.png)
-
-The Follow-Up board keeps the next action visible: what needs your attention, what's on your side, and what's on theirs.
+Screenshot contributions must use fictional demo data only. See [docs/screenshots/README.md](docs/screenshots/README.md).
 
 ---
 
 ## Quick start
 
-You need [Docker](https://docs.docker.com/get-docker/) with the Compose plugin,
-and `openssl` (present on every mainstream Linux and macOS).
+You need [Docker](https://docs.docker.com/get-docker/) with the Compose plugin and `openssl`.
 
 ```bash
 git clone https://github.com/ious2944/nod-crm.git
 cd nod-crm
-./scripts/init-env.sh        # writes .env with freshly generated secrets
+./scripts/init-env.sh
 docker compose up -d
 ```
 
-That builds the image, starts PostgreSQL, applies the migrations and starts the
-application on <http://localhost:3000>.
+That builds the image, starts PostgreSQL, applies migrations and starts the application on `http://localhost:3000`.
 
-`init-env.sh` is a convenience, not a requirement — `cp .env.example .env` and
-editing the two secrets by hand does the same thing. Generate them with:
+`init-env.sh` is a convenience, not a requirement. `cp .env.example .env` and editing the secrets by hand works too. Generate them with:
 
 ```bash
 openssl rand -base64 48                              # AUTH_SECRET
@@ -159,14 +151,14 @@ openssl rand -base64 36 | tr -d '/+=' | cut -c1-40   # POSTGRES_PASSWORD
 
 ### Create your first account
 
-No credentials are seeded. Accounts are created by hand, interactively:
+No credentials are seeded. Accounts are created manually and interactively:
 
 ```bash
 docker compose exec app node scripts/admin.mjs create-workspace
 docker compose exec app node scripts/admin.mjs create-user
 ```
 
-Then open <http://localhost:3000> and sign in.
+Then open `http://localhost:3000` and sign in.
 
 ### Optional: demo data
 
@@ -174,14 +166,13 @@ Then open <http://localhost:3000> and sign in.
 docker compose exec app npx tsx prisma/seed.ts
 ```
 
-Four fictional contacts and seven follow-ups, all flagged `is_demo` and badged
-in the interface. Re-running replaces them and never touches real rows. The
-seed refuses to run in production unless you set `ALLOW_DEMO_SEED=1`.
+The current seed creates **4 fictional organisations, 4 contacts, 7 follow-ups and 6 tasks** in the selected demo workspace. Re-running it replaces the seeded demo business data for that workspace. It never creates login credentials.
+
+The seed refuses to run when `NODE_ENV=production` unless `ALLOW_DEMO_SEED=1` is explicitly set. For a dedicated demo workspace, `SEED_WORKSPACE_SLUG` and `SEED_WORKSPACE_NAME` can override the defaults.
 
 ### Migrations
 
-The `migrate` service runs `prisma migrate deploy` before the application
-starts, on every `docker compose up`. There is nothing to run by hand.
+The `migrate` service runs `prisma migrate deploy` before the application starts on every `docker compose up`. There is nothing to run by hand.
 
 ---
 
@@ -195,9 +186,7 @@ starts, on every `docker compose up`. There is nothing to run by hand.
 | RAM | ~1.5 GB for the whole stack | — |
 | Disk | ~3 GB for the image and its build cache | — |
 
-HTTPS is required in production: session cookies are `Secure`, so an instance
-served over plain HTTP cannot be logged into. See
-[docs/self-hosting.md](docs/self-hosting.md).
+HTTPS is required in production: session cookies are `Secure`, so an instance served over plain HTTP cannot be logged into. See [docs/self-hosting.md](docs/self-hosting.md).
 
 ---
 
@@ -208,17 +197,16 @@ Every variable is documented in [`.env.example`](.env.example). Summary:
 | Variable | Required | Role |
 | --- | --- | --- |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | yes | Database credentials. Compose builds `DATABASE_URL` from them. |
-| `AUTH_SECRET` | yes | HMAC pepper for session tokens, 32 characters minimum. The application refuses to start in production without it — and refuses the example values too. |
-| `DATABASE_URL` | dev only | Direct connection string, used when you run the app outside Docker. |
+| `AUTH_SECRET` | yes | HMAC pepper for session tokens, 32 characters minimum. Production refuses missing/example values. |
+| `DATABASE_URL` | dev only | Direct connection string when running outside Docker. |
 | `APP_NAME` | no | Name shown in the UI. Default `NOD CRM`. |
-| `APP_SOURCE_URL` | no | Target of the "Source" link. Point it at your fork if you modify NOD CRM (AGPL §13). |
+| `APP_SOURCE_URL` | no | Target of the Source link. Point it at your fork when required by AGPL §13. |
 | `APP_TIME_ZONE` | no | Time zone for day-level due dates. Default `Europe/Paris`. |
-| `APP_HOST_PORT` / `APP_BIND_ADDRESS` | no | Where the app is published. Default `127.0.0.1:3000`. |
-| `POSTGRES_VOLUME_NAME` | no | Docker volume holding the data. Change only to adopt an existing volume. |
-| `TEST_DATABASE_URL` | tests only | Separate database for the integration suite — it truncates tables. |
+| `APP_HOST_PORT` / `APP_BIND_ADDRESS` | no | Published address. Default `127.0.0.1:3000`. |
+| `POSTGRES_VOLUME_NAME` | no | Docker volume holding PostgreSQL data. |
+| `TEST_DATABASE_URL` | tests only | Separate database for integration tests; the suite truncates it. |
 
-Changing `AUTH_SECRET` logs everyone out. That is the intended way to revoke
-every session at once.
+Changing `AUTH_SECRET` invalidates every existing session.
 
 ---
 
@@ -238,8 +226,7 @@ docker compose -f docker-compose.dev.yml up -d
 docker compose -f docker-compose.dev.yml exec app npm run db:migrate
 ```
 
-More in [docs/development.md](docs/development.md), including the project
-layout and the conventions to follow.
+More in [docs/development.md](docs/development.md).
 
 ---
 
@@ -248,40 +235,75 @@ layout and the conventions to follow.
 ```bash
 npm run lint
 npm run typecheck
-npm test                     # unit tests
+npm test
 npm run test:integration     # needs TEST_DATABASE_URL — truncates that database
 npm run build
 ```
 
-Browser and CLI suites, which need a running instance and an account:
+Browser and CLI suites need a running instance and an account:
 
 ```bash
 BASE_URL=http://127.0.0.1:3000 E2E_EMAIL=you@example.com E2E_PASSWORD='…' npm run test:e2e
-npm run test:cli             # admin CLI in a real pseudo-terminal, needs python3
+npm run test:cli
 ```
 
-`npm test` requires the generated Prisma client — run `npm run db:generate`
-first on a fresh clone.
+`npm test` requires the generated Prisma client — run `npm run db:generate` first on a fresh clone.
 
 ---
 
 ## Security
 
-NOD CRM authenticates every request server-side, in the data access layer, and
-derives the workspace from the session — never from client input. The threat
-model, the controls and an honest list of residual risks are in
-[docs/security-model.md](docs/security-model.md).
+NOD CRM authenticates requests server-side and derives the workspace from the session rather than client input. The threat model, controls and residual risks are documented in [docs/security-model.md](docs/security-model.md).
 
-To report a vulnerability, read [SECURITY.md](SECURITY.md). Please do not open
-a public issue for one.
+To report a vulnerability, read [SECURITY.md](SECURITY.md). Please do not open a public issue for one.
+
+---
+
+## Limitations
+
+Known and accepted in V0.7:
+
+- No MFA. A stolen password is enough. The data model is ready; the feature is not built.
+- No roles. An authenticated user can do anything inside their workspace.
+- Password reset goes through the CLI, not self-service.
+- Multi-workspace isolation is enforced, but there is no UI to create or switch workspaces beyond the CLI.
+- “Nudge” records the nudge; it does not send an email. NOD CRM sends no application email today.
+- The Follow-up board has no pagination and loads every open follow-up. It is intended for modest workspace sizes; Contacts are paginated.
+- Follow-up search on open items is in memory; the completed tab uses PostgreSQL `ILIKE`. There is no full-text/trigram index yet.
+- Contact search uses `ILIKE`; `pg_trgm` is not shipped yet.
+- Contact photos live on a volume rather than in PostgreSQL. Backup includes them, but restore remains a manual step; see [docs/backup-restore.md](docs/backup-restore.md).
+- Follow-ups can be edited, but ball ownership and status remain quick-action-only.
+- Tasks cannot be generically edited or deleted; they can be completed, reopened or snoozed.
+- `/tasks` and `/today` are not paginated; the completed task tab is capped at 100.
+- A task always has a due date; “someday” tasks are not supported.
+- Quick actions require JavaScript. The login screen does not.
+- The interface is French-only.
+
+---
+
+## Roadmap
+
+Directions, not commitments. The full roadmap lives in [ROADMAP.md](ROADMAP.md).
+
+- **V0.1 — Follow-Up — shipped.** Core follow-up workflow, authentication and self-hosting.
+- **V0.2 — Contacts — shipped.** Directory, search, filters, pagination, photos and archiving.
+- **V0.3 — Aujourd'hui — shipped.** Action-oriented cockpit for what needs attention now.
+- **V0.4 — Tasks — shipped.** A separate task object and task-aware Today cockpit.
+- **V0.5 — Organisations — shipped.** First-class organisations and Contact → Organisation relationships.
+- **V0.6 — Follow-up Search & Editing — shipped.** Search plus safe editing of follow-up content.
+- **V0.7 — Lumina Enterprise UI Refresh — current / shipped.** Unified visual system, responsive refinements, dark-mode parity and viewport-safe dialogs; no new business logic.
+
+**Next — CSV import/export.** Contact import/export, search-index improvements, better empty/error states, English UI scaffolding and small ergonomics.
+
+Later candidates include contact history and duplicate merging, follow-up history, audit log, MFA, self-service password reset, multi-user invitations, pagination at larger scales, public API/webhooks and recurring work.
+
+Deliberately out of scope for a long time: sales pipelines, deal scoring, forecasting, marketing automation, plugin systems and AI features that guess what you should do.
 
 ---
 
 ## Contributing
 
-Contributions are welcome, especially bug reports, documentation and small
-focused fixes. Read [CONTRIBUTING.md](CONTRIBUTING.md) first — it is short, and
-it explains the one rule that matters: **keep NOD CRM simple**.
+Contributions are welcome, especially bug reports, documentation and small focused fixes. Read [CONTRIBUTING.md](CONTRIBUTING.md) first: the central rule is to **keep NOD CRM simple**.
 
 By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
@@ -289,80 +311,11 @@ By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-NOD CRM is licensed under the **GNU Affero General Public License v3.0 only**
-([AGPL-3.0-only](LICENSE)).
+NOD CRM is licensed under the **GNU Affero General Public License v3.0 only** ([AGPL-3.0-only](LICENSE)).
 
-You may run it, modify it and self-host it. If you modify NOD CRM and let other
-people use your instance over a network, section 13 requires you to offer them
-the corresponding source. The sidebar carries a "Source" link for exactly that
-purpose — point `APP_SOURCE_URL` at your repository and you are covered.
+You may run it, modify it and self-host it. If you modify NOD CRM and let other people use your instance over a network, AGPL section 13 requires you to offer them the corresponding source. Point `APP_SOURCE_URL` at your repository when appropriate.
 
 Third-party dependencies keep their own licenses; none of them was modified.
-
----
-
-## Limitations
-
-Known and accepted in V0.6:
-
-- No MFA. A stolen password is enough. The data model is ready; the feature is
-  not built.
-- No roles. An authenticated user can do anything inside their workspace.
-- Password reset goes through the CLI, not self-service.
-- Multi-workspace isolation is enforced everywhere, but there is no UI to
-  create or switch workspaces beyond the CLI.
-- "Nudge" records the nudge. It does not send an email — NOD CRM sends nothing.
-- No pagination on the **Follow-up board**: it loads every open follow-up.
-  Comfortable below roughly 2,000 open items. The Contacts list *is* paginated.
-- Follow-up search on open items is in-memory (all open records are loaded for
-  the stat tiles anyway); the "done" tab applies ILIKE in the database. Neither
-  uses a full-text index; a `pg_trgm` index is the next step, not shipped yet.
-- Contact search is `ILIKE`, so it is a sequential scan. Fine at the volumes
-  NOD CRM targets; a `pg_trgm` index is the next step, not shipped yet.
-- Contact photos are files on a volume, not rows. `nod-crm-backup.sh` archives
-  them alongside the database dump, but restoring them is a manual step — see
-  [docs/backup-restore.md](docs/backup-restore.md).
-- Follow-ups can now be edited (subject, description, due date, contact), but
-  ball ownership and status remain quick-action-only. Tasks still cannot be
-  edited or deleted — only completed, reopened, or snoozed.
-- No pagination on `/tasks` or `/today` either; both load the workspace's
-  unfinished items, and the completed tab is capped at 100.
-- A task always has a due date. "Someday" tasks without one are not supported.
-- Quick actions need JavaScript. The login screen does not.
-- The interface is French only.
-
----
-
-## Roadmap
-
-Directions, not commitments. Full version in [ROADMAP.md](ROADMAP.md).
-
-**V0.1 — Follow-Up.** Follow-ups, the workflow, authentication, self-hosting.
-
-**V0.2 — Contacts.** A real Contacts module: directory, server-side search,
-filters, sorting, pagination, photos, archiving, and an optional link from any
-follow-up.
-
-**V0.4 — Tasks.** A second business object next to the follow-up —
-something to do, as opposed to something to move forward with someone — with
-its own page, and an "Aujourd'hui" cockpit that finally gathers both in one
-feed.
-
-**V0.5 — Organisations.** Promoting the organisation field to a first-class
-table with its own list, detail page, and a contact picker.
-
-**V0.6 — Follow-up Search & Editing (current).** Searching follow-ups by
-subject and description; editing subject, description, due date and contact
-after creation.
-
-**Next — CSV import/export.** Bulk import and export of contacts and
-follow-ups; full-text search improvements (`pg_trgm` index).
-
-**Later.** Business audit log, MFA, self-service password reset, real
-multi-user workspaces, CSV import/export, public API, integrations.
-
-Deliberately out of scope for a long time: pipelines, deal scoring, marketing
-automation, and anything that turns NOD CRM into a generalist CRM.
 
 ---
 
