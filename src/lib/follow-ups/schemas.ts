@@ -92,6 +92,31 @@ export const createFollowUpSchema = z
 
 export type CreateFollowUpInput = z.infer<typeof createFollowUpSchema>;
 
+/**
+ * Schéma de mise à jour d'un suivi existant.
+ *
+ * Champs éditables : sujet, description, échéance, contact.
+ * Champs non éditables : propriétaire de la balle, statut — ils appartiennent
+ * aux actions rapides, dont la logique métier (machine à états, compteurs de
+ * relances) ne doit pas être contournée par un formulaire générique.
+ */
+export const updateFollowUpSchema = z.object({
+  id: z.string().uuid("Suivi introuvable."),
+  title: text(160, 1, "Le sujet est obligatoire."),
+  description: optionalText(2000),
+  dueDate: dueDateSchema,
+  contactId: z
+    .string()
+    .trim()
+    .default("")
+    .refine(
+      (value) => value === "" || UUID_PATTERN.test(value),
+      "Contact invalide.",
+    ),
+});
+
+export type UpdateFollowUpInput = z.infer<typeof updateFollowUpSchema>;
+
 export const quickActionSchema = z.object({
   id: z.uuid("Suivi introuvable."),
   intent: z.enum([

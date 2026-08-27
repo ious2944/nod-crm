@@ -37,7 +37,7 @@ export interface FollowUpView {
   description: string | null;
   status: FollowUpStatus;
   ballOwner: BallOwner;
-  /** `YYYY-MM-DD`, pré-rempli dans les formulaires de report. */
+  /** `YYYY-MM-DD`, pré-rempli dans les formulaires de report et d'édition. */
   dueDate: string;
   dueLabel: string;
   level: UrgencyLevel;
@@ -45,6 +45,8 @@ export interface FollowUpView {
   ageLabel: string;
   needsAttention: boolean;
   ballLabel: string;
+  /** UUID du contact lié — nécessaire pour pré-remplir le sélecteur en édition. */
+  contactId: string | null;
   contactName: string | null;
   contactInitials: string | null;
   /** Le contact lié a été archivé : on le dit, on ne le fait pas disparaître. */
@@ -91,6 +93,7 @@ export function toFollowUpView(
     ageLabel: ageLabel(timing.ageDays),
     needsAttention: timing.needsAttention,
     ballLabel: ballLabel(record.ballOwner, record.contact?.firstName),
+    contactId: record.contact?.id ?? null,
     contactName: record.contact ? contactFullName(record.contact) : null,
     contactInitials: record.contact ? initials(record.contact) : null,
     contactArchived: record.contact?.archivedAt != null,

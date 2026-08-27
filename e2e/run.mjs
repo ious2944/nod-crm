@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Parcours de bout en bout NOD CRM — V0.4.
+ * Parcours de bout en bout NOD CRM — V0.6.
  *
  * Pilote un vrai navigateur contre un build de production. Il couvre le chemin
  * fonctionnel complet *et* les propriétés de sécurité observables côté client
@@ -22,8 +22,10 @@
  *   6. Parcours Follow-up       (V0.3 — inchangé)
  *   7. Parcours Tâches          (V0.4 — nouveau)
  *   8. Module Contacts
- *   9. Déconnexion
- *  10. Hygiène
+ *   9. Organisations (V0.5)
+ *  10. Suivi — Recherche & Édition (V0.6)
+ *  11. Déconnexion
+ *  12. Hygiène
  */
 import process from "node:process";
 import { chromium } from "playwright";
@@ -503,8 +505,135 @@ try {
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
 
-  // ─── Section 10 : Déconnexion ─────────────────────────────────────────────
-  section("10. Déconnexion");
+  // ─── Section 10 : Suivi — Recherche & Édition (V0.6) ─────────────────────
+  section("10. Suivi — Recherche & Édition (V0.6)");
+
+  await page.goto("/follow-ups", { waitUntil: "networkidle" });
+
+  // Créer deux suivis avec des titres distincts pour tester la recherche.
+  const followUpA = `Contrat E2E ${Date.now()}`;
+  const followUpB = `Rapport E2E ${Date.now() + 1}`;
+
+  await page.getByRole("button", { name: "Nouveau suivi" }).click();
+  await page.fill("#title", followUpA);
+  await page.fill("#dueDate", "2027-01-15");
+  await page.getByRole("button", { name: "Créer le suivi" }).click();
+  await page.waitForSelector(`text=${followUpA}`, { timeout: 15000 });
+  check("10a — suivi A créé", (await page.locator("article", { hasText: followUpA }).count()) === 1);
+
+  await page.getByRole("button", { name: "Nouveau suivi" }).click();
+  await page.fill("#title", followUpB);
+  await page.fill("#dueDate", "2027-01-20");
+  await page.getByRole("button", { name: "Créer le suivi" }).click();
+  await page.waitForSelector(`text=${followUpB}`, { timeout: 15000 });
+  check("10b — suivi B créé", (await page.locator("article", { hasText: followUpB }).count()) === 1);
+
+  // ── Recherche ──────────────────────────────────────────────────────────────
+
+  await page.getByPlaceholder("Rechercher dans les suivis…").fill("Contrat");
+  await page.waitForTimeout(600); // délai debounce
+  await page.waitForURL("**/follow-ups**q=**", { timeout: 10000 });
+  check("10c — ?q= dans l'URL", new URL(page.url()).searchParams.has("q"));
+  check("10d — suivi A visible", (await page.locator("article", { hasText: followUpA }).count()) === 1);
+  check("10e — suivi B masqué", (await page.locator("article", { hasText: followUpB }).count()) === 0);
+
+  // Insensibilité à la casse
+  await page.getByPlaceholder("Rechercher dans les suivis…").fill("CONTRAT");
+  await page.waitForTimeout(600);
+  await page.waitForURL("**/follow-ups**q=CONTRAT**", { timeout: 10000 });
+  check("10f — recherche insensible à la casse", (await page.locator("article", { hasText: followUpA }).count()) === 1);
+
+  // Effacer la recherche
+  await page.getByRole("button", { name: "Effacer la recherche" }).click();
+  await page.waitForTimeout(700);
+  check(
+    "10g — tous les suivis réapparaissent après effacement",
+    (await page.locator("article", { hasText: followUpA }).count()) === 1 &&
+    (await page.locator("article", { hasText: followUpB }).count()) === 1,
+  );
+
+  // Filtre + recherche combinés
+  await page.getByRole("link", { name: "Chez eux", exact: true }).click();
+  await page.waitForTimeout(400);
+  await page.getByPlaceholder("Rechercher dans les suivis…").fill("Contrat");
+  await page.waitForTimeout(600);
+  await page.waitForURL("**/follow-ups**f=them**", { timeout: 10000 });
+  {
+    const params = new URL(page.url()).searchParams;
+    check("10h — filtre + recherche dans l'URL", params.has("f") && params.has("q"));
+  }
+
+  // Changer de filtre conserve ?q=
+  await page.getByRole("link", { name: "Tous", exact: true }).click();
+  await page.waitForTimeout(400);
+  check("10i — ?q= préservé lors du changement de filtre", new URL(page.url()).searchParams.has("q"));
+
+  // Effacer et revenir à la liste complète
+  await page.getByPlaceholder("Rechercher dans les suivis…").fill("");
+  await page.waitForTimeout(600);
+
+  // ── Édition ────────────────────────────────────────────────────────────────
+
+  await page.goto("/follow-ups", { waitUntil: "networkidle" });
+  const cardA = page.locator("article", { hasText: followUpA });
+
+  // Ouvrir le dialogue d'édition
+  await cardA.getByRole("button", { name: "Modifier" }).click();
+  await page.waitForSelector("[role=dialog]", { timeout: 5000 });
+  check("10j — dialogue d'édition ouvert", await page.locator("[role=dialog]").isVisible());
+
+  // Champs pré-remplis
+  const editTitle = page.locator("#edit-title");
+  check("10k — sujet pré-rempli", (await editTitle.inputValue()) === followUpA);
+
+  // Modifier le titre et la description
+  const updatedTitle = `${followUpA} — édité`;
+  await editTitle.fill(updatedTitle);
+  await page.fill("#edit-description", "Contexte mis à jour par E2E.");
+  await page.getByRole("button", { name: "Enregistrer" }).click();
+  await page.waitForTimeout(1500);
+
+  check("10l — dialogue fermé après sauvegarde", (await page.locator("[role=dialog]").count()) === 0);
+  check("10m — titre mis à jour", (await page.locator("article", { hasText: updatedTitle }).count()) === 1);
+  check("10n — description visible", (await page.locator("article", { hasText: "Contexte mis à jour" }).count()) === 1);
+
+  // Annulation — pas de modification
+  const cardAUpdated = page.locator("article", { hasText: updatedTitle });
+  await cardAUpdated.getByRole("button", { name: "Modifier" }).click();
+  await page.waitForSelector("[role=dialog]", { timeout: 5000 });
+  await page.locator("[role=dialog]").getByRole("button", { name: "Annuler" }).click();
+  await page.waitForTimeout(400);
+  check("10o — annulation ferme le dialogue", (await page.locator("[role=dialog]").count()) === 0);
+  check("10p — annulation — titre inchangé", (await page.locator("article", { hasText: updatedTitle }).count()) === 1);
+
+  // Sujet vide → erreur (dialogue reste ouvert)
+  await cardAUpdated.getByRole("button", { name: "Modifier" }).click();
+  await page.waitForSelector("[role=dialog]", { timeout: 5000 });
+  await page.locator("#edit-title").fill("");
+  await page.getByRole("button", { name: "Enregistrer" }).click();
+  await page.waitForTimeout(800);
+  check("10q — sujet vide → dialogue reste ouvert", (await page.locator("[role=dialog]").count()) === 1);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+
+  // Quick action toujours fonctionnelle après édition
+  const cardFinal = page.locator("article", { hasText: updatedTitle });
+  await cardFinal.getByRole("button", { name: "Terminer" }).click();
+  await page.waitForTimeout(1200);
+  check("10r — quick action fonctionnelle après édition", (await page.locator("article", { hasText: updatedTitle }).count()) === 0);
+
+  // Recherche dans les terminés
+  await page.getByRole("link", { name: "Terminés", exact: true }).click();
+  await page.waitForTimeout(400);
+  await page.getByPlaceholder("Rechercher dans les suivis…").fill("édité");
+  await page.waitForTimeout(600);
+  await page.waitForURL("**/follow-ups**done**", { timeout: 10000 });
+  check("10s — recherche dans l'onglet Terminés", (await page.locator("article", { hasText: updatedTitle }).count()) === 1);
+
+  await page.goto("/follow-ups", { waitUntil: "networkidle" });
+
+  // ─── Section 11 : Déconnexion ─────────────────────────────────────────────
+  section("11. Déconnexion");
   await page.getByRole("button", { name: "Déconnexion" }).first().click();
   await page.waitForURL("**/login", { timeout: 15000 });
   check("redirection vers /login", new URL(page.url()).pathname === "/login");
@@ -515,8 +644,8 @@ try {
     check(`${path} est bien reprotégé`, new URL(page.url()).pathname === "/login");
   }
 
-  // ─── Section 11 : Hygiène ─────────────────────────────────────────────────
-  section("11. Hygiène");
+  // ─── Section 12 : Hygiène ─────────────────────────────────────────────────
+  section("12. Hygiène");
   check("aucune erreur JavaScript", consoleErrors.length === 0, consoleErrors.join(" | "));
   const html = await page.content();
   check(

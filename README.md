@@ -50,10 +50,16 @@ theirs**. Everything on screen exists to make the next action obvious.
 
 ---
 
-## Features (V0.5)
+## Features (V0.6)
 
 Only what actually exists today:
 
+- **Follow-up search** — a search bar on `/follow-ups` filters by subject and
+  description. Server-side, preserved in the URL (`?q=`), works alongside all
+  existing filters.
+- **Follow-up editing** — a "Modifier" button on each card opens an edit dialog.
+  Editable fields: subject, description, due date, linked contact. Ball ownership
+  and status remain the exclusive domain of the quick actions.
 - **Organisations** — a dedicated module at `/organizations`, with creation,
   editing and archiving. Each organisation can store name, website, email, phone
   and notes. The organisation sheet shows all linked contacts, open follow-ups
@@ -295,7 +301,7 @@ Third-party dependencies keep their own licenses; none of them was modified.
 
 ## Limitations
 
-Known and accepted in V0.5:
+Known and accepted in V0.6:
 
 - No MFA. A stolen password is enough. The data model is ready; the feature is
   not built.
@@ -306,14 +312,17 @@ Known and accepted in V0.5:
 - "Nudge" records the nudge. It does not send an email — NOD CRM sends nothing.
 - No pagination on the **Follow-up board**: it loads every open follow-up.
   Comfortable below roughly 2,000 open items. The Contacts list *is* paginated.
+- Follow-up search on open items is in-memory (all open records are loaded for
+  the stat tiles anyway); the "done" tab applies ILIKE in the database. Neither
+  uses a full-text index; a `pg_trgm` index is the next step, not shipped yet.
 - Contact search is `ILIKE`, so it is a sequential scan. Fine at the volumes
   NOD CRM targets; a `pg_trgm` index is the next step, not shipped yet.
 - Contact photos are files on a volume, not rows. `nod-crm-backup.sh` archives
   them alongside the database dump, but restoring them is a manual step — see
   [docs/backup-restore.md](docs/backup-restore.md).
-- Existing follow-ups still cannot be edited after creation; only the quick
-  actions change them. The same is true of tasks: complete, reopen and snooze,
-  but no edit form and no delete.
+- Follow-ups can now be edited (subject, description, due date, contact), but
+  ball ownership and status remain quick-action-only. Tasks still cannot be
+  edited or deleted — only completed, reopened, or snoozed.
 - No pagination on `/tasks` or `/today` either; both load the workspace's
   unfinished items, and the completed tab is capped at 100.
 - A task always has a due date. "Someday" tasks without one are not supported.
@@ -337,11 +346,15 @@ something to do, as opposed to something to move forward with someone — with
 its own page, and an "Aujourd'hui" cockpit that finally gathers both in one
 feed.
 
-**V0.5 — Organisations (current).** Promoting the organisation field to a
-first-class table with its own list, detail page, and a contact picker.
+**V0.5 — Organisations.** Promoting the organisation field to a first-class
+table with its own list, detail page, and a contact picker.
 
-**Next — Follow-up editing and search.** Searching follow-ups, editing an
-existing one after creation, and CSV import/export.
+**V0.6 — Follow-up Search & Editing (current).** Searching follow-ups by
+subject and description; editing subject, description, due date and contact
+after creation.
+
+**Next — CSV import/export.** Bulk import and export of contacts and
+follow-ups; full-text search improvements (`pg_trgm` index).
 
 **Later.** Business audit log, MFA, self-service password reset, real
 multi-user workspaces, CSV import/export, public API, integrations.

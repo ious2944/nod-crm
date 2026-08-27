@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**NOD CRM v0.6 — Follow-up Search & Editing.**
+
+### Added
+
+- **Follow-up search** — a search bar on `/follow-ups` filters follow-ups by
+  subject and description. The search is server-side (ILIKE for the "done" tab,
+  in-memory for open items already fetched for the stats row) and is preserved
+  in the URL (`?q=`) so the result is shareable and survives page refresh. The
+  search works alongside all existing filters and preserves the filter when
+  switched.
+- **Follow-up editing** — a "Modifier" button on each follow-up card opens an
+  edit dialog. Editable fields: subject, description, due date, and linked
+  contact. Ball ownership and status are intentionally excluded — they belong to
+  the quick-action state machine and must not be changed through a generic form.
+  The contact picker reuses the same `ContactPicker` component with
+  `allowCreate={false}` — editing a follow-up is not the right moment to create
+  a new contact inline. The dialog pre-fills all fields from the current state of
+  the follow-up and closes on success.
+- **Empty state for search** — when a search query is active and returns no
+  results, a dedicated "Aucun résultat" message is shown instead of the generic
+  filter-dependent empty state.
+
+### Changed
+
+- `FilterTabs` and `StatTiles` now accept a `query` prop and use
+  `buildFollowUpHref` to build their links, so the active search query is
+  preserved when switching filters or clicking a counter tile.
+- `FollowUpView` gains a `contactId` field (the UUID of the linked contact, or
+  `null`) used by the edit dialog to pre-fill the contact picker.
+- `getFollowUpBoard` accepts an optional `query: string` argument. Stats are
+  always derived from the full set of open follow-ups (the search does not affect
+  the counter tiles). Items are filtered: open follow-ups in memory (all already
+  loaded for stats), done follow-ups in the database with ILIKE.
+
+### Security
+
+- `updateFollowUp` derives the workspace from the session (never from client
+  input). The `updateMany` where clause includes `workspaceId` so that a
+  forged `id` from another workspace modifies zero rows and is rejected with an
+  error. Archived contacts cannot be linked to a follow-up.
+- `updateFollowUpSchema` does not expose `ballOwner` or `status` as editable
+  fields. Even if a client posts these fields, the schema's `parse` silently
+  ignores them, and the `data` object passed to `updateMany` only contains the
+  four allowed fields.
+
+---
+
 **NOD CRM v0.5 — Organisations.**
 
 ### Added

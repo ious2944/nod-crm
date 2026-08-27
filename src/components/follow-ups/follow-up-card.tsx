@@ -1,6 +1,7 @@
 import { DueBadge } from "@/components/ui/due-badge";
 import type { UrgencyLevel } from "@/lib/follow-ups/domain";
 import type { FollowUpView } from "@/lib/follow-ups/view";
+import { EditFollowUpDialog } from "./edit-follow-up-dialog";
 import { CardActions, QuickAction, SnoozeMenu } from "./quick-actions";
 
 /** Le vieillissement se lit d'abord à la couleur : discret → très visible.
@@ -70,7 +71,10 @@ export function FollowUpCard({ item }: { item: FollowUpView }) {
           </div>
         </div>
 
-        <DueBadge level={item.level} label={item.dueLabel} />
+        <div className="flex items-center gap-2">
+          <EditFollowUpDialog item={item} />
+          <DueBadge level={item.level} label={item.dueLabel} />
+        </div>
       </div>
 
       {item.description && (

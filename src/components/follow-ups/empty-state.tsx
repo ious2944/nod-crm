@@ -28,7 +28,30 @@ const MESSAGES: Record<FollowUpFilter, { icon: string; title: string; hint: stri
   },
 };
 
-export function EmptyState({ filter }: { filter: FollowUpFilter }) {
+export function EmptyState({
+  filter,
+  hasQuery = false,
+}: {
+  filter: FollowUpFilter;
+  hasQuery?: boolean;
+}) {
+  // Une recherche active sans résultat mérite son propre message : « aucun
+  // suivi en cours » et « aucun suivi correspond à ta recherche » n'ont pas
+  // la même implication pour l'utilisateur.
+  if (hasQuery) {
+    return (
+      <div className="rounded-xl border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
+        <p aria-hidden className="text-3xl">
+          🔍
+        </p>
+        <p className="mt-3 font-semibold text-ink">Aucun résultat</p>
+        <p className="mt-1 text-sm text-muted">
+          Aucun suivi ne correspond à cette recherche. Essaie d&apos;autres mots-clés.
+        </p>
+      </div>
+    );
+  }
+
   const message = MESSAGES[filter];
 
   return (

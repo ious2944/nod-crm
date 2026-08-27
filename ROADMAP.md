@@ -63,7 +63,7 @@ Shipped:
 
 ---
 
-## V0.5 — Organisations *(current)*
+## V0.5 — Organisations
 
 Shipped:
 
@@ -83,13 +83,25 @@ Shipped:
 
 ---
 
-## Next — Follow-up editing and search
+## V0.6 — Follow-up Search & Editing *(current)*
+
+Shipped:
+
+- **Follow-up search** — a search bar on `/follow-ups` filters by subject and
+  description. Server-side (ILIKE for the "done" tab, in-memory for open items
+  already loaded for stats), preserved in `?q=`, works alongside `?f=`.
+- **Follow-up editing** — a "Modifier" button on each card opens an edit
+  dialog. Editable fields: subject, description, due date, contact. Ball
+  ownership and status remain the exclusive domain of the quick actions.
+
+---
+
+## Next — CSV import/export
 
 The gaps that show up fastest in daily use:
-- **Search** across follow-ups (contacts already have it).
-- **Editing an existing follow-up** — today only the quick actions can change
-  one after creation.
 - **CSV import and export** for contacts, so nobody is locked in.
+- **Full-text search index** (`pg_trgm`) for contacts and follow-ups, once
+  a workspace is large enough that the sequential scan shows.
 - **Empty and error states** that say what to do next, not just that nothing
   is there.
 - **English UI**, and the internationalisation scaffolding that makes other
