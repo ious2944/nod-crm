@@ -144,8 +144,24 @@ export async function archiveTreatment(formData: FormData) {
 export async function createProcessor(formData: FormData) {
   const workspaceId = await getWorkspaceIdForAction();
   const parsed = processorSchema.parse(Object.fromEntries(formData));
-  const { id: _ignored, ...data } = parsed;
-  await prisma.privacyProcessor.create({ data: { workspaceId, ...data } });
+  await prisma.privacyProcessor.create({
+    data: {
+      workspaceId,
+      name: parsed.name,
+      service: parsed.service,
+      category: parsed.category,
+      dataCategories: parsed.dataCategories,
+      purpose: parsed.purpose,
+      country: parsed.country,
+      eeaStatus: parsed.eeaStatus,
+      dpaStatus: parsed.dpaStatus,
+      dpaUrl: parsed.dpaUrl,
+      subprocessorsStatus: parsed.subprocessorsStatus,
+      notes: parsed.notes,
+      lastReviewedAt: parsed.lastReviewedAt,
+      nextReviewAt: parsed.nextReviewAt,
+    },
+  });
   revalidatePrivacy("/rgpd/processors", "/rgpd/treatments");
 }
 
