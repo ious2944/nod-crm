@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 
-import { applyQuickAction } from "@/app/(app)/follow-ups/actions";
+import { applyTaskAction } from "@/app/(app)/tasks/actions";
 import { PopoverMenu } from "@/components/ui/popover-menu";
 import {
   ACTION_BASE,
@@ -12,44 +12,49 @@ import {
   useRowActions,
   type ActionVariant,
 } from "@/components/ui/row-actions";
-import { SNOOZE_OPTIONS } from "@/lib/follow-ups/domain";
+import { TASK_SNOOZE_OPTIONS } from "@/lib/tasks/domain";
 
 /**
- * Actions rapides d'une carte de suivi.
+ * Actions d'une ligne de tâche : terminer, reporter, rouvrir.
  *
- * Le comportement partagé (une seule mutation à la fois, message d'échec en
- * région live) vit dans `@/components/ui/row-actions` depuis la V0.4, où les
- * lignes de tâches ont eu besoin du même. Ici ne restent que les intentions
- * propres au suivi.
+ * Trois intentions, pas une de plus — une tâche est à faire ou terminée. Le
+ * comportement (une seule mutation à la fois) est celui, partagé, de
+ * `@/components/ui/row-actions`.
  */
 
 const CONFLICT_MESSAGE =
-  "Ce suivi a changé entre-temps. Recharge la page pour voir son état à jour.";
+  "Cette tâche a changé entre-temps. Recharge la page pour voir son état à jour.";
 
-export function CardActions({ children }: { children: ReactNode }) {
+export function TaskActions({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
   return (
-    <RowActions action={applyQuickAction} conflictMessage={CONFLICT_MESSAGE}>
+    <RowActions
+      action={applyTaskAction}
+      conflictMessage={CONFLICT_MESSAGE}
+      className={className}
+    >
       {children}
     </RowActions>
   );
 }
 
-export function QuickAction({
+export function TaskAction({
   id,
   intent,
   label,
-  days,
   variant = "default",
   title,
-  className = "",
 }: {
   id: string;
-  intent: string;
+  intent: "complete" | "reopen";
   label: string;
-  days?: number;
   variant?: ActionVariant;
   title?: string;
-  className?: string;
 }) {
   const { busy, run } = useRowActions();
 
@@ -58,15 +63,21 @@ export function QuickAction({
       type="button"
       disabled={busy}
       title={title}
-      onClick={() => run(buildAction(id, intent, days))}
-      className={`${ACTION_BASE} ${ACTION_VARIANTS[variant]} ${className}`}
+      onClick={() => run(actionFormData({ id, intent }))}
+      className={`${ACTION_BASE} ${ACTION_VARIANTS[variant]}`}
     >
       {label}
     </button>
   );
 }
 
-export function SnoozeMenu({ id }: { id: string }) {
+/**
+ * Report : quelques choix rapides, pas un calendrier.
+ *
+ * Le panneau est le même composant que celui des suivis (`PopoverMenu`), donc
+ * le même comportement au clavier, au défilement et sur écran étroit.
+ */
+export function TaskSnoozeMenu({ id }: { id: string }) {
   const { busy, run } = useRowActions();
 
   return (
@@ -85,13 +96,13 @@ export function SnoozeMenu({ id }: { id: string }) {
     >
       {(close) => (
         <>
-          {SNOOZE_OPTIONS.map((option) => (
+          {TASK_SNOOZE_OPTIONS.map((option) => (
             <button
               key={option.days}
               type="button"
               className={`${ACTION_BASE} ${ACTION_VARIANTS.ghost} w-full justify-start`}
               onClick={() => {
-                run(buildAction(id, "snooze", option.days));
+                run(actionFormData({ id, intent: "snooze", days: option.days }));
                 close();
               }}
             >
@@ -102,8 +113,4 @@ export function SnoozeMenu({ id }: { id: string }) {
       )}
     </PopoverMenu>
   );
-}
-
-function buildAction(id: string, intent: string, days?: number): FormData {
-  return actionFormData(days === undefined ? { id, intent } : { id, intent, days });
 }

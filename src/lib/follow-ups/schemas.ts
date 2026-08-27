@@ -30,7 +30,14 @@ const text = (max: number, min = 0, message?: string) =>
     .transform(sanitizeText)
     .pipe(z.string().min(min, message).max(max, `Ce champ dépasse ${max} caractères.`));
 
-const dateKey = z
+/**
+ * Échéance : une date calendaire, jamais une heure.
+ *
+ * Exporté parce que le module Tâches applique exactement la même règle : une
+ * échéance de tâche et une échéance de suivi ne doivent pas pouvoir diverger
+ * sur ce qui est acceptable.
+ */
+export const dueDateSchema = z
   .string()
   .trim()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Échéance invalide.")
@@ -55,7 +62,7 @@ export const createFollowUpSchema = z
   .object({
     title: text(160, 1, "Le sujet est obligatoire."),
     description: optionalText(2000),
-    dueDate: dateKey,
+    dueDate: dueDateSchema,
     ballOwner: ballOwnerSchema,
     // "" = aucun contact ; "new" = création rapide ; sinon l'UUID d'un contact
     // existant, dont l'appartenance au workspace est revérifiée côté serveur.

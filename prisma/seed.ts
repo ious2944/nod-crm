@@ -68,6 +68,8 @@ async function main() {
   });
 
   // Idempotent : on repart d'un jeu de démo propre à chaque exécution.
+  // Les tâches d'abord : elles référencent les suivis.
+  await prisma.task.deleteMany({ where: { workspaceId: workspace.id, isDemo: true } });
   await prisma.followUp.deleteMany({ where: { workspaceId: workspace.id, isDemo: true } });
   await prisma.contact.deleteMany({ where: { workspaceId: workspace.id, isDemo: true } });
 
@@ -147,8 +149,11 @@ async function main() {
     },
   ];
 
+  const followUpIds = new Map<string, string>();
+
   for (const followUp of followUps) {
-    await prisma.followUp.create({
+    const created = await prisma.followUp.create({
+      select: { id: true },
       data: {
         workspaceId: workspace.id,
         contactId: followUp.contact ? contacts.get(followUp.contact) : null,
@@ -164,10 +169,84 @@ async function main() {
         isDemo: true,
       },
     });
+    followUpIds.set(followUp.title, created.id);
+  }
+
+  /**
+   * Tâches de démonstration — « quelque chose à faire », par opposition au
+   * suivi qui est « quelque chose à faire avancer avec quelqu'un ».
+   *
+   * Le jeu couvre volontairement tous les cas d'affichage : en retard,
+   * aujourd'hui, demain, plus tard, terminée ; avec et sans contact ; avec et
+   * sans suivi lié ; titre court et titre très long.
+   */
+  const tasks = [
+    {
+      title: "Préparer la présentation trimestrielle",
+      dueAt: dueInDays(-3),
+      createdAt: daysAgo(8),
+      contact: null,
+      followUp: null,
+      notes: "Trois slides suffisent : contexte, chiffres, décision.",
+    },
+    {
+      title: "Relire le brief",
+      dueAt: dueInDays(-1),
+      createdAt: daysAgo(4),
+      contact: "carla",
+      followUp: null,
+    },
+    {
+      title: "Préparer la proposition commerciale",
+      dueAt: dueInDays(0),
+      createdAt: daysAgo(2),
+      contact: "david",
+      // Une tâche et son suivi : deux états, deux échéances, aucune
+      // synchronisation. Terminer l'un ne termine jamais l'autre.
+      followUp: "Préparer la proposition client",
+    },
+    {
+      title: "Rédiger le compte rendu de l'atelier de cadrage et le diffuser à toutes les parties prenantes",
+      dueAt: dueInDays(1),
+      createdAt: daysAgo(1),
+      contact: "alice",
+      followUp: null,
+    },
+    {
+      title: "Mettre à jour la fiche tarifaire",
+      dueAt: dueInDays(6),
+      createdAt: daysAgo(1),
+      contact: null,
+      followUp: null,
+    },
+    {
+      title: "Réserver la salle",
+      dueAt: dueInDays(-5),
+      createdAt: daysAgo(10),
+      contact: null,
+      followUp: null,
+      completedAt: daysAgo(4),
+    },
+  ];
+
+  for (const task of tasks) {
+    await prisma.task.create({
+      data: {
+        workspaceId: workspace.id,
+        contactId: task.contact ? contacts.get(task.contact) : null,
+        followUpId: task.followUp ? followUpIds.get(task.followUp) : null,
+        title: task.title,
+        notes: task.notes ?? null,
+        dueAt: task.dueAt,
+        createdAt: task.createdAt,
+        completedAt: task.completedAt ?? null,
+        isDemo: true,
+      },
+    });
   }
 
   console.log(
-    `Seed terminé : ${CONTACTS.length} contacts et ${followUps.length} suivis de démonstration.`,
+    `Seed terminé : ${CONTACTS.length} contacts, ${followUps.length} suivis et ${tasks.length} tâches de démonstration.`,
   );
   // Aucun identifiant n'est seedé : les comptes se créent uniquement à la main.
   const userCount = await prisma.user.count({ where: { workspaceId: workspace.id } });

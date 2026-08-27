@@ -43,39 +43,27 @@ Shipped:
 
 ---
 
-## V0.3 — Aujourd'hui *(current)*
+## V0.4 — Tasks *(current)*
 
 Shipped:
 
-- A cockpit at `/today`, the landing page of an open session: four attention
-  counters, one priority feed, next seven days, and what is waiting on them.
-- A feed that lists what needs doing now — late, today, stalled — instead of
-  spreading it over several screens. What is merely due this week lives in
-  "Prochainement", not in the feed.
-- A stagnation signal derived from `updated_at` — no new column. Its limits are
-  written down in [docs/cockpit.md](docs/cockpit.md).
-- Acting from the cockpit through the existing follow-up actions, not a second
-  implementation of them.
+- **Tasks**: a title, a due date, two states (to do / done). Nothing else — no
+  priority, no status machine, no workflow to configure.
+- A **task page** (`/tasks`) ordered by urgency — overdue, today, upcoming —
+  with Complete and Snooze on each row, and completed tasks one tab away.
+- An **optional contact** and an **optional linked follow-up**, both for
+  context. Neither creates any synchronisation: completing a task never
+  completes a follow-up, and the reverse is just as true.
+- The **"Aujourd'hui" cockpit** (`/today`): one feed with the open follow-ups
+  whose due date has arrived and the unfinished tasks due today or overdue.
+- Workspace isolation extended to tasks and to both of their links, with
+  integration tests for read, write, complete, snooze and cross-workspace
+  linking.
+- Design decisions and the exact boundary rules: [docs/tasks.md](docs/tasks.md).
 
 ---
 
-## V0.4 — Tasks
-
-Not built. The idea, and the line that separates it from what exists:
-
-> A **task** is something to do. A **follow-up** is something to move forward
-> with someone.
-
-Today only the second exists, so anything that is simply on your plate has to
-be dressed up as a follow-up with a contact and a ball owner. Tasks would carry
-their own weight, and could eventually be attached to a contact or to a
-follow-up.
-
-Nothing beyond that is decided yet — no data model, no screens.
-
----
-
-## V0.5 — Organisations and follow-up editing
+## Next — Organisations and follow-up editing
 
 The gaps that show up fastest in daily use:
 
@@ -99,9 +87,10 @@ The gaps that show up fastest in daily use:
 Worth building eventually, in no particular order:
 
 - **Contact history and duplicate merging** — the page itself shipped in V0.2.
+- **Tasks on the contact sheet** — a person's open tasks next to their
+  follow-ups, and a task count in the directory. Deliberately left out of V0.4
+  to keep the module small.
 - **Follow-up history** — every nudge, snooze and hand-off, visible on the item.
-  It would also make the cockpit's stagnation figure exact rather than a lower
-  bound; see [docs/cockpit.md](docs/cockpit.md).
 - **Business audit log** — who completed what, and when.
 - **MFA (TOTP), then passkeys.** The data model already accommodates it: a
   server-side session can represent a half-authenticated state.
@@ -113,7 +102,8 @@ Worth building eventually, in no particular order:
 - **Trigram search index** (`pg_trgm`) for contacts, once a workspace is large
   enough that the sequential scan shows.
 - **Public API and webhooks**, if and when something concrete needs them.
-- **Recurring follow-ups** ("nudge every 15 days while the ball is theirs").
+- **Recurring follow-ups** ("nudge every 15 days while the ball is theirs"),
+  and recurring tasks, which raise exactly the same questions.
 - **Notes** on a follow-up, timestamped.
 - **Tags**.
 - **Email reminders**. Note that this means NOD CRM starts sending mail, with

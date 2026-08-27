@@ -16,14 +16,20 @@ You create a follow-up, you wait, you nudge, the ball goes back to them, you
 close it. That is the whole product. There are no pipelines, no scoring, no
 forty-field contact forms — and there is no plan to add them.
 
+Since V0.4 it also answers the smaller question next to it — *what do I have to
+do?* — with tasks. The two are deliberately different objects:
+
+> **A task is something to do. A follow-up is something to move forward with
+> someone.**
+
 The metaphor is table tennis: 🏓 the ball is either **on your side** or **on
 theirs**. Everything on screen exists to make the next action obvious.
 
-> ⚠️ **V0.3.** Three screens: **Aujourd'hui** (the daily cockpit), **Suivis**
-> (the follow-ups themselves) and **Contacts**. They work and are used in
-> production, but it is a young project — read [Limitations](#limitations)
-> before you commit to it. The user interface is currently in French only; the
-> documentation is in English and internationalisation is on the roadmap.
+> ⚠️ **V0.4.** Three modules — Follow-Up, Contacts and Tasks. They work and are
+> used in production, but it is a young project — read
+> [Limitations](#limitations) before you commit to it. The user interface is
+> currently in French only; the documentation is in English and
+> internationalisation is on the roadmap.
 
 ---
 
@@ -42,79 +48,17 @@ theirs**. Everything on screen exists to make the next action obvious.
 
 ---
 
-## Aujourd'hui
+## Features (V0.4)
 
-Signing in lands you on **Aujourd'hui**, the daily cockpit. One screen, and one
-rule:
+Only what actually exists today:
 
-> **Aujourd'hui lists what there is to do now.**
-
-Four counters give the shape of the day — what is **late**, what is due
-**today**, what is **coming up**, and what is sitting **with the other party**.
-Each one is also a filter, so a number is never a dead end. Below them, three
-zones that answer three different questions:
-
-| Zone | Question | What it does |
-| --- | --- | --- |
-| **À traiter** | *What do I do now?* | The priority feed: overdue first, then today's work, then follow-ups that have stopped moving. Nudge, received, ball sent and complete work straight from the row. |
-| **Prochainement** | *What is coming?* | The next seven days, read-only. Nothing here needs you today. |
-| **En attente chez eux** | *What should I watch?* | Everything waiting on someone else, longest wait first. |
-
-A follow-up can be perfectly on time and still be rotting. When the ball has
-been with the other party for a week without anything moving, it is flagged —
-so it surfaces before its due date ever arrives.
-
-No charts, no totals, no conversion rates. The design decisions, the
-prioritisation rules and what the stagnation signal really measures are in
-[docs/cockpit.md](docs/cockpit.md).
-
----
-
-## Features (V0.3)
-
-Only what actually exists today.
-
-### Aujourd'hui — the daily cockpit
-
-- **Four attention counters** — late, today, next seven days, waiting on them.
-  Each doubles as a filter of the feed.
-- **Priority feed** — one list of what needs doing now: overdue first, then the
-  day's work, then follow-ups that have stopped moving.
-- **Stagnation signal** — a follow-up whose ball is with the other party and
-  which has not moved for a week is flagged, even when its due date is still
-  far off.
-- **Chez moi / chez eux** on every row, so you never have to guess whose turn
-  it is.
-- **Quick actions from the feed** — nudge, received, ball sent, complete,
-  without leaving the screen. Counters and lists update together.
-- **Prochainement** — the next seven days, so nothing arrives as a surprise.
-- **En attente chez eux** — what is waiting on someone else, longest wait
-  first.
-
-### Suivis — the follow-ups themselves
-
-- **A follow-up** — subject, optional context, due date, ball owner, and an
-  optional contact from the Contacts directory. New follow-ups cannot be
-  attached to an archived contact.
-- **The full list** at `/follow-ups`, reached from **Suivis** in the sidebar —
-  everything, not just today.
-- **Due dates** with day-level reasoning in a configurable time zone, and a
-  five-level visual ageing scale (upcoming → tomorrow → today → overdue →
-  7+ days late).
-- **Status** — open, completed, abandoned.
-- **Quick actions** — Nudge, Received, Ball sent, Snooze (+1 d / +3 d / +1 w),
-  Complete, Abandon, Reopen.
-- **Filters** — All / To nudge / My court / Their court / Completed.
-
-### Contacts
-
-- **A dedicated directory** at `/contacts`, with creation, viewing and editing.
-  Each contact can store first and last name, organisation, job title, email,
-  phone, free-form notes and an optional photo. A contact exists independently
-  and does not need to be linked to a follow-up.
-- **Search and filters** — one search box across name, email, phone, job title
-  and organisation, executed by PostgreSQL; filters by organisation and
-  follow-up state; four sort orders; server-side pagination. The list also
+- **Contacts** — a dedicated directory at `/contacts`, with creation, viewing
+  and editing. Each contact can store first and last name, organisation, job
+  title, email, phone, free-form notes and an optional photo. A contact exists
+  independently and does not need to be linked to a follow-up.
+- **Contact search and filters** — one search box across name, email, phone,
+  job title and organisation, executed by PostgreSQL; filters by organisation
+  and follow-up state; four sort orders; server-side pagination. The list also
   shows the number of active follow-ups for each contact.
 - **Contact sheet** — everything about a person on one page, including their
   linked follow-ups and a button to create a new follow-up with that contact
@@ -122,9 +66,29 @@ Only what actually exists today.
 - **Archiving** — contacts are archived rather than destroyed and can be
   restored. Archiving a contact never deletes or detaches its existing
   follow-ups; historical follow-ups keep the contact and mark it as archived.
-
-### Platform
-
+- **Follow-ups** — subject, optional context, due date, ball owner, and an
+  optional contact selected from the central Contacts directory. New follow-ups
+  cannot be attached to an archived contact.
+- **Due dates** with day-level reasoning in a configurable time zone, and a
+  five-level visual ageing scale (upcoming → tomorrow → today → overdue →
+  7+ days late).
+- **Status** — open, completed, abandoned.
+- **Quick actions** — Nudge, Received, Ball sent, Snooze (+1 d / +3 d / +1 w),
+  Complete, Abandon, Reopen.
+- **Filters** — All / To nudge / My court / Their court / Completed.
+- **Tasks** — a title, a due date, and two states: to do or done. Optionally a
+  contact and a linked follow-up, both for context only: no ball, no nudge, and
+  **no state is ever synchronised** between a task and a follow-up. The list at
+  `/tasks` orders them overdue → today → upcoming, with Complete and Snooze on
+  each row and completed tasks one tab away. See
+  [docs/tasks.md](docs/tasks.md).
+- **Today cockpit** (`/today`) — the V0.3 cockpit, extended in V0.4 with tasks.
+  Greets you by name, shows the date, and displays four follow-up attention
+  indicators (late / today / upcoming / waiting). The main column shows the
+  priority follow-up feed (late + today + stagnant) followed by unfinished
+  tasks due today or earlier. The side column shows upcoming and waiting
+  follow-ups unchanged. Completing or snoozing either kind updates the page
+  immediately without touching the other object.
 - **Authentication** — email and password, Argon2id, server-side sessions with
   absolute and idle expiry, rate limiting.
 - **Admin CLI** — create workspaces and users, reset passwords, disable
@@ -132,25 +96,27 @@ Only what actually exists today.
   arguments.
 - **Self-hosting** — Docker Compose, PostgreSQL 16, migrations applied
   automatically at startup.
-- **Demo data** — a seed of fictional contacts and follow-ups, flagged in the
-  UI so it can never be confused with real data.
+- **Demo data** — a seed of fictional contacts, follow-ups and tasks, flagged
+  in the UI so it can never be confused with real data.
 
-Not built yet, and deliberately shown as disabled in the navigation:
-Organisations and Dashboard. Dashboard is not Aujourd'hui — the cockpit is a
-plan of work, not a set of metrics.
+Not built yet, and deliberately shown as disabled in the navigation: Dashboard,
+Organisations.
 
 ---
 
 ## Screenshots
 
-![NOD CRM follow-up list](docs/screenshots/board-light.png)
+![NOD CRM — cockpit Aujourd'hui](docs/screenshots/today-light.png)
 
-The follow-up list, reached from **Suivis**: the next action stays visible —
-what needs your attention, what's on your side, and what's on theirs.
+The "Aujourd'hui" cockpit (V0.3, extended in V0.4) answers one question: what needs action now? It greets you by name, shows four follow-up attention indicators, a priority follow-up feed, and — added in V0.4 — a task section for anything due today or overdue. Follow-ups and tasks each keep their own shape; neither replaces the other.
 
-> This capture predates V0.3 and shows an older navigation. A current one of
-> **Aujourd'hui** is the next screenshot to add; see
-> [docs/screenshots/README.md](docs/screenshots/README.md).
+![NOD CRM — tasks](docs/screenshots/tasks-light.png)
+
+The task list stays a list: overdue, today, upcoming, one line each, Complete and Snooze within reach.
+
+![NOD CRM Follow-Up board](docs/screenshots/board-light.png)
+
+The Follow-Up board keeps the next action visible: what needs your attention, what's on your side, and what's on theirs.
 
 ---
 
@@ -288,13 +254,8 @@ first on a fresh clone.
 ## Security
 
 NOD CRM authenticates every request server-side, in the data access layer, and
-derives the workspace from the session — never from client input. That holds
-for Aujourd'hui too: its single read takes a filter, never a workspace, so no
-signature in the cockpit can express a cross-workspace query
-([docs/cockpit.md](docs/cockpit.md)). Acting from the cockpit goes through the
-same follow-up server action as the list, with the same checks.
-
-The threat model, the controls and an honest list of residual risks are in
+derives the workspace from the session — never from client input. The threat
+model, the controls and an honest list of residual risks are in
 [docs/security-model.md](docs/security-model.md).
 
 To report a vulnerability, read [SECURITY.md](SECURITY.md). Please do not open
@@ -328,7 +289,7 @@ Third-party dependencies keep their own licenses; none of them was modified.
 
 ## Limitations
 
-Known and accepted in V0.3:
+Known and accepted in V0.4:
 
 - No MFA. A stolen password is enough. The data model is ready; the feature is
   not built.
@@ -337,14 +298,8 @@ Known and accepted in V0.3:
 - Multi-workspace isolation is enforced everywhere, but there is no UI to
   create or switch workspaces beyond the CLI.
 - "Nudge" records the nudge. It does not send an email — NOD CRM sends nothing.
-- No pagination on the **Suivis** list or on **Aujourd'hui**: both load every
-  open follow-up. Comfortable below roughly 2,000 open items. The Contacts list
-  *is* paginated.
-- The stagnation signal ("sans mouvement depuis N j") is derived from
-  `updated_at`, so it dates the last recorded action on the follow-up, not the
-  moment the ball actually changed hands. It understates the wait rather than
-  overstating it; the exact figure needs the follow-up history, which is not
-  built. See [docs/cockpit.md](docs/cockpit.md).
+- No pagination on the **Follow-up board**: it loads every open follow-up.
+  Comfortable below roughly 2,000 open items. The Contacts list *is* paginated.
 - Contact search is `ILIKE`, so it is a sequential scan. Fine at the volumes
   NOD CRM targets; a `pg_trgm` index is the next step, not shipped yet.
 - Contact photos are files on a volume, not rows. `nod-crm-backup.sh` archives
@@ -353,7 +308,11 @@ Known and accepted in V0.3:
 - Organisations are a text field on the contact, not a table. The migration
   path is written down in [docs/contacts.md](docs/contacts.md).
 - Existing follow-ups still cannot be edited after creation; only the quick
-  actions change them.
+  actions change them. The same is true of tasks: complete, reopen and snooze,
+  but no edit form and no delete.
+- No pagination on `/tasks` or `/today` either; both load the workspace's
+  unfinished items, and the completed tab is capped at 100.
+- A task always has a due date. "Someday" tasks without one are not supported.
 - Quick actions need JavaScript. The login screen does not.
 - The interface is French only.
 
@@ -369,17 +328,16 @@ Directions, not commitments. Full version in [ROADMAP.md](ROADMAP.md).
 filters, sorting, pagination, photos, archiving, and an optional link from any
 follow-up.
 
-**V0.3 — Aujourd'hui (current).** The daily cockpit: attention counters, one
-priority feed, the coming week, what is going cold, and a stagnation signal.
+**V0.4 — Tasks (current).** A second business object next to the follow-up —
+something to do, as opposed to something to move forward with someone — with
+its own page, and an "Aujourd'hui" cockpit that finally gathers both in one
+feed.
 
-**V0.4 — Tasks (next, not built).** A task is *something to do*; a follow-up is
-*something to move forward with someone*. The two are not the same, and today
-only the second exists. Tasks would eventually be attachable to a contact or to
-a follow-up.
+**Next — Organisations.** Promoting the organisation field to a table, plus
+searching follow-ups and editing an existing one.
 
-**Later.** Organisations as a table, follow-up search and editing, business
-audit log, MFA, self-service password reset, real multi-user workspaces, CSV
-import/export, public API, integrations.
+**Later.** Business audit log, MFA, self-service password reset, real
+multi-user workspaces, CSV import/export, public API, integrations.
 
 Deliberately out of scope for a long time: pipelines, deal scoring, marketing
 automation, and anything that turns NOD CRM into a generalist CRM.

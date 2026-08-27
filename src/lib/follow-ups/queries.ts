@@ -81,6 +81,27 @@ export async function getFollowUpBoard(filter: FollowUpFilter): Promise<FollowUp
   };
 }
 
+/**
+ * Suivis actionnables aujourd'hui, pour le cockpit « Aujourd'hui ».
+ *
+ * Même définition qu'en V0.3 (`needsAttention` : un suivi ouvert dont
+ * l'échéance est atteinte), mais posée dans le `WHERE` plutôt qu'après coup :
+ * le cockpit n'a pas besoin de charger les suivis lointains pour les écarter.
+ * La borne est la fin du jour courant dans `APP_TIME_ZONE`.
+ */
+export async function getActionableFollowUps(endOfToday: Date): Promise<FollowUpView[]> {
+  const workspaceId = await getWorkspaceIdForPage();
+  const now = new Date();
+
+  const records = await prisma.followUp.findMany({
+    where: { workspaceId, status: "OPEN", dueAt: { lte: endOfToday } },
+    orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
+    include: { contact: CONTACT_SELECTION },
+  });
+
+  return records.map((record) => toFollowUpView(record, now, APP_TIME_ZONE));
+}
+
 // `listContacts` a disparu en V0.2 : le formulaire Follow-Up ne charge plus
 // l'annuaire entier dans la page, il interroge `searchContactOptions`
 // (`src/lib/contacts/queries.ts`), qui cherche côté serveur et plafonne le

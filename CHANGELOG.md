@@ -7,57 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-**NOD CRM v0.3 — Cockpit "Aujourd'hui".**
+**NOD CRM v0.4 — Tasks.**
 
 ### Added
 
-- **Cockpit `/today`** — the new landing page of an open session, and the first
-  brick of a personal workspace. It answers one question: what has to be done
-  now, with whom, and what is about to slip away. Login, `/` and the sidebar
-  all lead here; the follow-up board stays at `/follow-ups` as the full list.
-- **Four attention counters** — late, today, next 7 days, waiting on them. Each
-  one is also a filter of the feed (`/today?f=late`), and shares its predicate
-  with the counter, so a counter can never announce a number the click
-  contradicts.
-- **Priority feed** — one list of what needs doing now, in order: biggest
-  overdue first, then the day's work, then follow-ups that have stopped moving.
-  What is merely due this week is *not* repeated here — "Prochainement" owns
-  that window. Nudge, received, ball sent and complete are available on every
-  row, through the existing Follow-up Server Action — the cockpit adds no
-  second business logic.
-- **Stagnation signal** — `⚠ Sans mouvement depuis N j` on a follow-up whose
-  ball is with the other party and which has not moved for a week. Computed
-  from `updated_at`; **no migration, no new column**. What that number does and
-  does not measure is written down in `docs/cockpit.md`.
-- **"Prochainement"** — the next seven days, read-only: these need no action
-  today.
-- **"En attente chez eux"** — what is cooling off, longest wait first, with a
-  single relance action.
-- **Positive empty states** per zone ("Rien en retard.", "Aucune réponse en
-  attente.") instead of a generic empty list.
-- **`docs/cockpit.md`** — prioritisation rules, what stagnation measures, the
-  single query, and how the structure makes room for search, contact history,
-  organisations, notes, automations and Mirai without a rewrite.
+- **Tasks module** — a second business object next to the follow-up, and the
+  distinction is the whole point: **a task is something to do, a follow-up is
+  something to move forward with someone.** A task has a title, a due date,
+  optional notes, and exactly two states (`completed_at IS NULL` or not). No
+  priority, no status machine, no workflow to configure.
+- **`/tasks`** — the list, ordered by urgency: overdue, then today, then
+  upcoming, as compact rows rather than cards. Completed tasks leave the main
+  list and sit behind a "Terminées" tab (capped at the last 100). Each row
+  carries the title, the due date, the contact and the linked follow-up, with
+  Complete as the primary action and Snooze (Demain / +3 j / +1 sem.) as the
+  secondary one.
+- **`/today` — the "Aujourd'hui" cockpit** — the V0.3 cockpit extended with
+  tasks, not replaced. The greeting, date, four follow-up attention indicators
+  (`En retard` / `Aujourd'hui` / `À venir` / `Chez eux`), priority follow-up
+  feed (late + today + stagnant), upcoming and waiting sections are all
+  unchanged. V0.4 adds a task section in the main column below the priority
+  feed: tasks where `completed_at IS NULL AND due_at <= end of the current day`
+  in `APP_TIME_ZONE`. Completing or snoozing either kind refreshes the cockpit
+  immediately. The four attention indicators remain follow-up-only; a separate
+  explicit task count link is shown below them when tasks are due.
+- **Optional links** — a task may reference a contact, a follow-up, both, or
+  neither. The contact is context and links to their sheet; it does not give
+  the task a ball or a nudge count. **No state is ever synchronised**:
+  completing a task never completes the follow-up it cites, and completing a
+  follow-up never completes the task. Deleting either link target keeps the
+  task and clears the link.
+- **`docs/tasks.md`** — the module's design decisions: the two states, the
+  actionable-today rule, why nothing synchronises, how the workspace boundary
+  is enforced, and what was left out on purpose.
 
 ### Changed
 
-- Login and `/` now redirect to `/today` instead of `/follow-ups`.
-- The sidebar entry for the board reads **"Suivis"**, not "Follow-up": next to
-  "Aujourd'hui", what has to be understood at a glance is the relation between
-  the two — the day on one side, the full list on the other. The module keeps
-  its name under the brand at the top of the sidebar.
-- The mobile top bar wraps instead of overflowing. With a third module in it,
-  its contents no longer fit 390 px and "Déconnexion" was pushed off-screen.
-- The follow-up board's heading is "Follow-up"; "Aujourd'hui" now names the
-  cockpit.
-- Urgency colours and the ball badge moved to
-  `src/components/follow-ups/urgency-styles.ts` and `ball-badge.tsx`, shared by
-  the board and the cockpit so `J+11` cannot look different on two pages.
-- A follow-up mutation now revalidates both `/follow-ups` and `/today`.
+- **Navigation** now reads Aujourd'hui / Suivis / Tâches / Contacts. The
+  follow-up page keeps everything it had — the four counters, the five filters,
+  the full list — but is now titled **Suivis**: the daily cockpit it used to
+  double as has become a page of its own at `/today`, which is the only way a
+  single feed can mix follow-ups and tasks without turning the list into a
+  second dashboard. On mobile the top bar moved to two rows, because four
+  modules no longer fit on one line under 400 px.
+- **The four V0.3 attention indicators are untouched** — `En retard`,
+  `Aujourd'hui`, `À venir`, `Chez eux` still count follow-ups and only
+  follow-ups, and still appear on the cockpit `/today` page exactly as in V0.3.
+  A separate, explicitly-named task count is shown below them; the two meanings
+  are never mixed silently.
+- Tasks reuse the follow-up due-date vocabulary and the existing ageing tokens
+  (`J+4`, `Aujourd'hui`, `Demain`, `Dans 5 j`). **V0.4 adds no colour**, so
+  dark mode follows without a line of new palette.
+- Shared UI extracted rather than duplicated, with the behaviour unchanged:
+  the due-date badge (`ui/due-badge`), the one-mutation-at-a-time row actions
+  (`ui/row-actions`), and the search-then-pick field (`ui/search-picker`) that
+  the contact picker now uses too.
+- The demo seed adds six tasks covering every display case: overdue, today,
+  tomorrow, later, completed, with and without a contact, with and without a
+  linked follow-up, short and very long titles.
 
----
+### Security
 
-**NOD CRM v0.2 — Contacts.**
+- Every task read and write is scoped to the workspace derived from the
+  session. No function in `src/lib/tasks/queries.ts` even accepts a
+  `workspaceId` argument, so no code path can cross the boundary by accident.
+- `contact_id` and `follow_up_id` are re-checked against the session's
+  workspace before any write: linking a task to another workspace's contact or
+  follow-up fails closed, and an archived contact is refused like an unknown
+  one. A composite `(id, workspace_id)` foreign key would have enforced this in
+  PostgreSQL but would have ruled out the `ON DELETE SET NULL` that keeps a
+  task alive when its contact or follow-up disappears — so the check lives in
+  the action, and the tests cover both directions.
+- Task transitions are validated server-side (complete, reopen, snooze only)
+  and applied with a conditional `updateMany` whose `WHERE` repeats the state
+  read a moment earlier, so two simultaneous clicks cannot both win.
+- The create schema enumerates its fields: an enriched form cannot set
+  `workspace_id`, `completed_at` or `is_demo`.
+
+
+**NOD CRM v0.2 — Contacts.** Still unreleased too: v0.2 and v0.4 will ship
+together, since no tag was cut in between.
 
 ### Added
 
