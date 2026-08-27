@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**NOD CRM v0.7 — UI Refresh / Lumina Enterprise.**
+
+This release is a **visual refonte only**. No functional behaviour was added,
+removed or modified. The V0.6 code paths, queries, actions and security model
+are unchanged.
+
+### Changed
+
+- **Design system** — new semantic token set (`--nod-*` raw values mapped to
+  Tailwind utilities via `@theme inline`). Primary colour: Electric Indigo
+  `#6366F1` (hover `#4F46E5`). Canvas: `#F8F9FF`. Surface: `#FFFFFF`.
+  Text: Slate-900 / Slate-600. Borders: Slate-200 / Slate-300.
+- **Typography** — Geist Sans and Geist Mono are already loaded via
+  `next/font/google`; V0.7 makes them the declared `--font-sans` / `--font-mono`
+  in the theme block. No new font dependencies.
+- **Shadow scale** — three utility classes (`.shadow-card`, `.shadow-card-hover`,
+  `.shadow-dialog`) defined in plain CSS, not Tailwind config. Applied
+  consistently across all card and dialog surfaces.
+- **Sidebar** (`app-shell.tsx`) — width from `w-60` to `w-64`; active indicator
+  is a 3 px left bar (`bg-accent`); active link background `bg-accent-soft
+  text-accent`; no Module_TAGLINE, no fake features, no fictional user.
+- **Page headers** — each app page now has its own sticky `<header>` with a
+  translucent `bg-surface/95 backdrop-blur-sm` treatment. No shared top bar
+  component was added.
+- **Cards** — all list cards (follow-ups, contacts, organisations, tasks, cockpit
+  feed rows) use `shadow-card transition-all hover:shadow-card-hover
+  hover:border-border-strong`.
+- **Filter tabs** — solid pill style: active tab is `bg-accent text-accent-contrast`;
+  inactive tab is `text-muted hover:bg-surface-muted hover:text-ink`. Applied on
+  Follow-ups, Tasks, and Today pages.
+- **Contact avatar** — initials fallback changed from `bg-surface-muted
+  text-muted` to `bg-accent-soft text-accent`.
+- **Form fields** — focus ring added: `focus:border-accent focus:ring-2
+  focus:ring-accent/20` in both `ui/form.tsx` and `auth/login-form.tsx`.
+- **Dialogs** — backdrop changed to `bg-black/50`; shadow changed to
+  `shadow-dialog`.
+- **Dark mode** — no structural changes. Existing `@media
+  (prefers-color-scheme: dark)` block updated with matching dark-mode token
+  values. No class-based dark-mode toggle was added.
+
+---
+
 **NOD CRM v0.6 — Follow-up Search & Editing.**
 
 ### Added

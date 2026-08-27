@@ -50,7 +50,7 @@ export function ContactFollowUps({ followUps }: { followUps: FollowUpView[] }) {
       {followUps.map((followUp) => (
         <li
           key={followUp.id}
-          className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-border-subtle bg-surface px-4 py-3"
+          className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-border-subtle bg-surface px-4 py-3 shadow-card"
         >
           <div className="min-w-0 flex-1">
             <p className="truncate text-[14px] font-medium text-ink">{followUp.title}</p>

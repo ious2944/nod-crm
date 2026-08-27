@@ -7,7 +7,7 @@ import { login } from "@/app/login/actions";
 import { initialLoginState } from "@/lib/auth/schemas";
 
 const FIELD =
-  "w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted/70";
+  "w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted/60 transition-[border-color,box-shadow] focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20";
 const LABEL = "block text-xs font-semibold uppercase tracking-wide text-muted";
 
 function SubmitButton() {

@@ -45,7 +45,7 @@ export function ContactAvatar({
   return (
     <span
       aria-hidden
-      className={`${box} ${text} grid shrink-0 place-items-center rounded-full bg-surface-muted font-semibold text-muted`}
+      className={`${box} ${text} grid shrink-0 place-items-center rounded-full bg-accent-soft font-semibold text-accent`}
     >
       {initials}
     </span>

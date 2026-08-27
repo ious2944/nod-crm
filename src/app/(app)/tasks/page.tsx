@@ -15,16 +15,11 @@ export const metadata = {
 };
 
 /**
- * Liste des tâches.
+ * Liste des tâches — V0.7 Lumina Enterprise.
  *
- * Une tâche, c'est **quelque chose à faire**. Pas de balle, pas de relance :
- * pour « faire avancer quelque chose avec quelqu'un », c'est la page Suivis.
- *
- * L'ordre est celui de l'urgence — en retard, aujourd'hui, à venir — et les
- * tâches terminées ne polluent pas cette liste : elles sont à un onglet de là.
+ * Une tâche, c'est **quelque chose à faire**. Pas de balle, pas de relance.
  */
 export default async function TasksPage({ searchParams }: PageProps<"/tasks">) {
-  // La page dépend de l'heure et de la base : elle est rendue à chaque requête.
   await connection();
 
   const filter = parseTaskFilter((await searchParams).f);
@@ -32,19 +27,26 @@ export default async function TasksPage({ searchParams }: PageProps<"/tasks">) {
   const today = dayKey(new Date(), APP_TIME_ZONE);
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Tâches</h1>
-          <p className="text-sm text-muted">{taskHeadline(list.todoCount)}</p>
+    <div className="flex min-h-full flex-col">
+      {/* En-tête sticky */}
+      <header className="sticky top-0 z-10 border-b border-border-subtle bg-surface/95 backdrop-blur-sm">
+        <div className="mx-auto w-full max-w-4xl px-4 sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 py-4">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">
+                Tâches
+              </h1>
+              <p className="text-sm text-muted">{taskHeadline(list.todoCount)}</p>
+            </div>
+            <NewTaskDialog defaultDueDate={today} />
+          </div>
         </div>
-        {/* Échéance par défaut : aujourd'hui. Une tâche qu'on note, c'est le
-            plus souvent une tâche du jour. */}
-        <NewTaskDialog defaultDueDate={today} />
       </header>
 
-      <section aria-label="Tâches" className="mt-6 space-y-4">
-        <nav aria-label="Filtres" className="-mx-1 flex flex-wrap gap-1 px-1 pb-1">
+      {/* Contenu scrollable */}
+      <div className="mx-auto w-full max-w-4xl flex-1 space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+        {/* Filtres */}
+        <nav aria-label="Filtres" className="-mx-1 flex flex-wrap gap-1.5 px-1">
           {TASK_FILTERS.map((item) => {
             const active = filter === item.key;
             const count = item.key === "todo" ? list.todoCount : list.completedCount;
@@ -54,10 +56,10 @@ export default async function TasksPage({ searchParams }: PageProps<"/tasks">) {
                 key={item.key}
                 href={`/tasks?f=${item.key}`}
                 aria-current={active ? "page" : undefined}
-                className={`shrink-0 rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
+                className={`shrink-0 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors ${
                   active
-                    ? "border-accent bg-accent-soft text-accent"
-                    : "border-border-subtle bg-surface text-muted hover:text-ink"
+                    ? "bg-accent text-accent-contrast shadow-sm"
+                    : "bg-surface text-muted hover:bg-surface-muted hover:text-ink border border-border-subtle"
                 }`}
               >
                 {item.label}
@@ -67,38 +69,45 @@ export default async function TasksPage({ searchParams }: PageProps<"/tasks">) {
           })}
         </nav>
 
-        {filter === "done" ? (
-          list.completed.length === 0 ? (
-            <TasksEmptyState filter="done" />
-          ) : (
-            <ul className="space-y-2">
-              {list.completed.map((item) => (
-                <li key={item.id}>
-                  <TaskRow item={item} />
-                </li>
-              ))}
-            </ul>
-          )
-        ) : list.sections.length === 0 ? (
-          <TasksEmptyState filter="todo" />
-        ) : (
-          list.sections.map((section) => (
-            <section key={section.bucket} aria-label={section.label} className="space-y-2">
-              <h2 className="px-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted">
-                {section.label}
-                <span className="ml-1.5 tabular-nums opacity-70">{section.items.length}</span>
-              </h2>
+        {/* Liste */}
+        <section aria-label="Tâches">
+          {filter === "done" ? (
+            list.completed.length === 0 ? (
+              <TasksEmptyState filter="done" />
+            ) : (
               <ul className="space-y-2">
-                {section.items.map((item) => (
+                {list.completed.map((item) => (
                   <li key={item.id}>
                     <TaskRow item={item} />
                   </li>
                 ))}
               </ul>
-            </section>
-          ))
-        )}
-      </section>
+            )
+          ) : list.sections.length === 0 ? (
+            <TasksEmptyState filter="todo" />
+          ) : (
+            list.sections.map((section) => (
+              <section
+                key={section.bucket}
+                aria-label={section.label}
+                className="mb-6 space-y-2"
+              >
+                <h2 className="px-0.5 text-[11px] font-semibold uppercase tracking-widest text-muted">
+                  {section.label}
+                  <span className="ml-1.5 tabular-nums opacity-70">{section.items.length}</span>
+                </h2>
+                <ul className="space-y-2">
+                  {section.items.map((item) => (
+                    <li key={item.id}>
+                      <TaskRow item={item} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))
+          )}
+        </section>
+      </div>
     </div>
   );
 }

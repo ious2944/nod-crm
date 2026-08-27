@@ -3,19 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, useTransition } from "react";
 
-import { FIELD } from "@/components/ui/form";
-import {
-  buildFollowUpHref,
-  type FollowUpFilter,
-} from "@/lib/follow-ups/filters";
+import { buildFollowUpHref, type FollowUpFilter } from "@/lib/follow-ups/filters";
 
 /**
- * Barre de recherche de la liste de suivis.
+ * Barre de recherche de la liste de suivis — V0.7.
  *
  * La recherche est exécutée côté serveur à chaque changement d'URL : elle
  * ne filtre pas le DOM, elle déclenche un rendu serveur qui interroge la base.
- * Même mécanique que `ContactToolbar` : délai de saisie pour éviter un rendu
- * par lettre, valeur locale pendant la pause.
  */
 
 const DEBOUNCE_MS = 300;
@@ -33,8 +27,6 @@ export function FollowUpSearchBar({
   const lastPushed = useRef(query);
   const searchId = useId();
 
-  // Synchroniser l'état local quand l'URL change (retour arrière, effacement
-  // d'un filtre depuis les onglets).
   useEffect(() => {
     if (query !== lastPushed.current) {
       lastPushed.current = query;
@@ -62,7 +54,7 @@ export function FollowUpSearchBar({
       </label>
       <span
         aria-hidden
-        className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+        className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-muted"
       >
         🔍
       </span>
@@ -72,7 +64,7 @@ export function FollowUpSearchBar({
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Rechercher dans les suivis…"
-        className={`${FIELD} pl-9`}
+        className="w-full rounded-lg border border-border-strong bg-surface py-2 pl-9 pr-9 text-sm text-ink placeholder:text-muted/60 transition-[border-color,box-shadow] focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
         autoComplete="off"
       />
       {search && (
@@ -80,7 +72,7 @@ export function FollowUpSearchBar({
           type="button"
           onClick={() => setSearch("")}
           aria-label="Effacer la recherche"
-          className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted hover:text-ink"
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted hover:text-ink transition-colors"
         >
           ✕
         </button>
