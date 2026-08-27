@@ -16,7 +16,7 @@ export interface TestUser {
 export async function resetDatabase(): Promise<void> {
   // Un seul TRUNCATE en cascade : plus rapide et insensible à l'ordre des FK.
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "login_attempts", "sessions", "users", "tasks", "follow_ups", "contacts", "organizations", "workspaces" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "privacy_treatment_processors", "privacy_incidents", "privacy_requests", "privacy_processors", "privacy_treatments", "login_attempts", "sessions", "users", "tasks", "follow_ups", "contacts", "organizations", "workspaces" RESTART IDENTITY CASCADE',
   );
   cookieJar.reset();
 }
@@ -99,8 +99,6 @@ export async function createTaskRecord(
     data: {
       workspaceId,
       title: "Tâche de test",
-      // Milieu de journée : la tâche reste dans le bon jour calendaire quel que
-      // soit le fuseau du serveur qui exécute la suite.
       dueAt: new Date(Date.now() + dueInDays * 86_400_000),
       ...rest,
     },

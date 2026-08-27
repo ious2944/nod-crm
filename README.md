@@ -13,7 +13,7 @@ Most CRMs answer “who are my customers?”. NOD CRM starts with a smaller, mor
 
 A follow-up moves back and forth like a table-tennis ball: it is either **on your side** or **on theirs**. Tasks cover work that simply needs doing. Contacts and Organisations provide the context around both. The `Aujourd'hui` cockpit brings the work that needs attention now into one place.
 
-> **V0.7 — Lumina Enterprise UI Refresh.** The current release keeps the V0.6 feature set and gives it a consistent visual system: Electric Indigo, Geist, clearer surface hierarchy, sticky page headers, responsive layouts, dark mode and viewport-safe dialogs. V0.7 does not add new business logic.
+> **V0.8 — RGPD Essentials.** NOD CRM adds a lightweight privacy-operations workspace for startups and small teams: treatment register, processors, data-subject requests, incidents and an action-oriented privacy cockpit. It helps document and operate essential privacy processes; it does **not** provide legal certification or replace professional advice.
 
 NOD CRM is a young project used in production. Read [Limitations](#limitations) before adopting it. The interface is currently French-only; the documentation is in English.
 
@@ -23,12 +23,13 @@ NOD CRM is a young project used in production. Read [Limitations](#limitations) 
 
 NOD CRM deliberately avoids the generalist-CRM model. There are no sales pipelines, deal scoring, forecasting or marketing automation.
 
-Its four business areas stay intentionally distinct:
+Its product areas stay intentionally distinct:
 
 - **Follow-ups** — something to move forward with someone.
 - **Tasks** — something to do.
 - **Contacts** — the people involved.
 - **Organisations** — the structures those people belong to.
+- **RGPD Essentials** — the privacy work that needs to be documented and followed.
 
 The product is organised around the next useful action rather than around collecting more fields.
 
@@ -87,14 +88,28 @@ See [docs/tasks.md](docs/tasks.md).
 
 See [docs/organizations.md](docs/organizations.md).
 
+### Privacy / RGPD Essentials — V0.8
+
+The `/rgpd` area is deliberately a **mini-DPO workspace**, not a legal automation suite.
+
+It contains five building blocks:
+
+1. **Treatment register** — purpose, people concerned, data categories, legal basis, retention rule, recipients, transfers, security measures and review dates.
+2. **Processors** — service, location, EEA status, DPA status, subprocessors and review dates. Processors can be linked to treatments.
+3. **Data-subject requests** — access, rectification, erasure, objection, restriction, portability or other requests, with due dates and status tracking.
+4. **Incidents / breaches** — discovery date, affected data, approximate number of people, consequences, measures, risk assessment and notification decisions.
+5. **Privacy cockpit** — action-oriented alerts for missing legal bases or retention rules, DPA issues, overdue reviews, rights requests and incidents that still need assessment.
+
+NOD CRM never displays “your company is GDPR compliant”. It highlights what has been documented and what still needs attention. See [docs/rgpd-essentials.md](docs/rgpd-essentials.md).
+
 ### UI — V0.7
 
-V0.7 is a visual refresh, not a functional rewrite:
+V0.7 is the visual system used by all modules, including RGPD Essentials:
 
 - Lumina Enterprise design system with semantic tokens and Electric Indigo (`#6366F1`) as the primary colour.
 - Geist typography and a consistent spacing, radius and elevation system.
 - Refreshed desktop sidebar and responsive mobile navigation.
-- Sticky translucent page headers on Today, Follow-ups, Tasks, Contacts and Organisations.
+- Sticky translucent page headers on application pages.
 - Consistent card surfaces, filter pills, form focus states and contact avatars.
 - Dark-mode token parity through `prefers-color-scheme`.
 - Dialogs rendered at the document level so they remain accessible and scrollable on short and mobile viewports.
@@ -118,12 +133,12 @@ Not built yet, and deliberately shown as disabled in the navigation: Dashboard.
 - **Self-hosting.** One application, one PostgreSQL database, no queue and no cache required.
 - **Ownership of your data.** Administrators decide where application data lives and who can reach it.
 - **No hidden telemetry.** NOD CRM sends no analytics or phone-home telemetry.
+- **Privacy tooling, not legal certification.** RGPD Essentials helps operate privacy work; it does not make legal conclusions for the user.
 
 ---
 
 ## Screenshots
 
-<<<<<<< HEAD
 ### Aujourd'hui
 
 ![NOD CRM — cockpit Aujourd'hui](docs/screenshots/today-light.png)
@@ -143,11 +158,6 @@ The Follow-up board keeps the next action visible, with attention indicators, se
 The task view keeps independent work simple: overdue, today and upcoming tasks, with completion and snooze actions immediately available.
 
 All screenshots use fictional demo data only. See [docs/screenshots/README.md](docs/screenshots/README.md).
-=======
-The screenshot set is currently being refreshed for V0.7. The repository still contains an older Follow-up board capture; it should not be treated as a representation of the current Lumina Enterprise interface.
-
-Screenshot contributions must use fictional demo data only. See [docs/screenshots/README.md](docs/screenshots/README.md).
->>>>>>> origin/main
 
 ---
 
@@ -275,7 +285,9 @@ npm run test:cli
 
 ## Security
 
-NOD CRM authenticates requests server-side and derives the workspace from the session rather than client input. The threat model, controls and residual risks are documented in [docs/security-model.md](docs/security-model.md).
+NOD CRM authenticates requests server-side and derives the workspace from the session rather than client input. RGPD Essentials follows the same rule: every privacy record is scoped by `workspace_id`, and client-supplied foreign identifiers are rechecked against that workspace before relationships are created.
+
+The threat model, controls and residual risks are documented in [docs/security-model.md](docs/security-model.md).
 
 To report a vulnerability, read [SECURITY.md](SECURITY.md). Please do not open a public issue for one.
 
@@ -283,7 +295,7 @@ To report a vulnerability, read [SECURITY.md](SECURITY.md). Please do not open a
 
 ## Limitations
 
-Known and accepted in V0.7:
+Known and accepted in V0.8:
 
 - No MFA. A stolen password is enough. The data model is ready; the feature is not built.
 - No roles. An authenticated user can do anything inside their workspace.
@@ -300,6 +312,8 @@ Known and accepted in V0.7:
 - A task always has a due date; “someday” tasks are not supported.
 - Quick actions require JavaScript. The login screen does not.
 - The interface is French-only.
+- **RGPD Essentials is an operational aid, not legal advice, legal certification, a DPIA/AIPD tool, a consent-management platform or an automated transfer-law assessment.**
+- Legal bases, retention rules, DPA status, international-transfer assessments and breach-notification decisions are documented by the user; NOD CRM does not choose them automatically.
 
 ---
 
@@ -313,9 +327,10 @@ Directions, not commitments. The full roadmap lives in [ROADMAP.md](ROADMAP.md).
 - **V0.4 — Tasks — shipped.** A separate task object and task-aware Today cockpit.
 - **V0.5 — Organisations — shipped.** First-class organisations and Contact → Organisation relationships.
 - **V0.6 — Follow-up Search & Editing — shipped.** Search plus safe editing of follow-up content.
-- **V0.7 — Lumina Enterprise UI Refresh — current / shipped.** Unified visual system, responsive refinements, dark-mode parity and viewport-safe dialogs; no new business logic.
+- **V0.7 — Lumina Enterprise UI Refresh — shipped.** Unified visual system, responsive refinements, dark-mode parity and viewport-safe dialogs; no new business logic.
+- **V0.8 — RGPD Essentials — current.** Treatment register, processors, rights requests, incidents and privacy alerts.
 
-**Next — CSV import/export.** Contact import/export, search-index improvements, better empty/error states, English UI scaffolding and small ergonomics.
+**Next.** CSV import/export, search-index improvements, better empty/error states, English UI scaffolding and small ergonomics remain candidates rather than commitments.
 
 Later candidates include contact history and duplicate merging, follow-up history, audit log, MFA, self-service password reset, multi-user invitations, pagination at larger scales, public API/webhooks and recurring work.
 

@@ -1,14 +1,4 @@
-/**
- * Navigation du CRM.
- *
- * Les entrées `available: false` sont affichées désactivées : elles annoncent la
- * suite (Organisations, Dashboard) sans faire croire qu'un module existe déjà.
- *
- * L'ordre de « Pilotage » répond aux deux questions du produit, dans cet ordre :
- * *qu'est-ce qui demande une action maintenant ?* (Aujourd'hui), *qu'est-ce que
- * je dois faire avancer avec quelqu'un ?* (Suivis), *qu'est-ce que je dois
- * faire ?* (Tâches).
- */
+/** Navigation principale de NOD CRM. */
 export interface NavItem {
   label: string;
   href?: string;
@@ -40,5 +30,9 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Contacts", href: "/contacts", available: true, icon: "◍" },
       { label: "Organisations", href: "/organizations", available: true, icon: "▤" },
     ],
+  },
+  {
+    title: "Conformité",
+    items: [{ label: "RGPD", href: "/rgpd", available: true, icon: "◈" }],
   },
 ];
