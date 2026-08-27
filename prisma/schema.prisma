@@ -1,6 +1,6 @@
-// NOD CRM — schéma minimal V0.1
-// Périmètre : Workspace / Contact / FollowUp uniquement.
-// Les autres modules (organisations, actions, opportunités…) viendront plus tard.
+// NOD CRM — schéma
+// Périmètre : Workspace / Contact / FollowUp / Task.
+// Les autres modules (organisations, opportunités…) viendront plus tard.
 
 generator client {
   provider = "prisma-client"
@@ -31,6 +31,7 @@ model Workspace {
 
   contacts  Contact[]
   followUps FollowUp[]
+  tasks     Task[]
   users     User[]
 
   @@map("workspaces")
@@ -133,6 +134,7 @@ model Contact {
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   followUps FollowUp[]
+  tasks     Task[]
 
   // Les trois index suivent les trois tris proposés par la liste Contacts, et
   // commencent tous par le couple réellement filtré (`workspace_id`,
@@ -163,8 +165,52 @@ model FollowUp {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  tasks     Task[]
 
   @@index([workspaceId, status, dueAt])
   @@index([contactId])
   @@map("follow_ups")
+}
+
+/// Une tâche (V0.4) : **quelque chose à faire**.
+///
+/// À ne pas confondre avec un suivi, qui est **quelque chose à faire avancer
+/// avec quelqu'un**. C'est toute la distinction du module : une tâche n'a ni
+/// balle, ni relance, ni interlocuteur obligatoire. Elle peut rester seule,
+/// citer un contact pour le contexte, ou pointer un suivi — sans qu'aucun de
+/// ces liens ne synchronise les états (terminer l'un ne termine jamais
+/// l'autre).
+///
+/// **États.** Deux, et pas un de plus : `completed_at IS NULL` (à faire) ou
+/// non (terminée). Ni priorité, ni statut intermédiaire, ni workflow.
+///
+/// **Cloisonnement.** `workspace_id` est obligatoire ; `contact_id` et
+/// `follow_up_id` sont facultatifs et vérifiés côté serveur contre le
+/// workspace de la session avant écriture — exactement comme
+/// `follow_ups.contact_id`. PostgreSQL ne peut pas l'imposer seul ici : une
+/// clé étrangère composite (id, workspace_id) interdirait le `SET NULL` à la
+/// suppression, dont dépend la conservation des tâches d'un contact supprimé.
+model Task {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  contactId   String?   @map("contact_id") @db.Uuid
+  followUpId  String?   @map("follow_up_id") @db.Uuid
+  title       String
+  notes       String?
+  dueAt       DateTime  @map("due_at")
+  completedAt DateTime? @map("completed_at")
+  isDemo      Boolean   @default(false) @map("is_demo")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  followUp  FollowUp? @relation(fields: [followUpId], references: [id], onDelete: SetNull)
+
+  // L'index suit la seule lecture qui compte : les tâches non terminées d'un
+  // workspace, de la plus en retard à la plus lointaine.
+  @@index([workspaceId, completedAt, dueAt])
+  @@index([contactId])
+  @@index([followUpId])
+  @@map("tasks")
 }

@@ -14,12 +14,24 @@ import { parseFilter } from "@/lib/follow-ups/filters";
 import { getFollowUpBoard } from "@/lib/follow-ups/queries";
 
 export const metadata = {
-  title: "Follow-up — NOD CRM",
+  title: "Suivis — NOD CRM",
 };
 
 /** Échéance proposée par défaut : dans 3 jours. */
 const DEFAULT_DUE_IN_DAYS = 3;
 
+/**
+ * Liste des suivis.
+ *
+ * Un suivi, c'est **quelque chose à faire avancer avec quelqu'un** : il a une
+ * balle, des relances et un interlocuteur. Pour « quelque chose à faire » tout
+ * court, c'est la page Tâches.
+ *
+ * Cette page garde intacts les quatre compteurs et les cinq filtres de la V0.3 ;
+ * ce qui a changé en V0.4, c'est qu'elle ne porte plus le titre « Aujourd'hui » :
+ * le cockpit du jour, qui réunit suivis et tâches actionnables, a sa propre page
+ * (`/today`).
+ */
 export default async function FollowUpsPage({ searchParams }: PageProps<"/follow-ups">) {
   // La page dépend de l'heure et de la base : elle est rendue à chaque requête.
   await connection();
@@ -34,9 +46,7 @@ export default async function FollowUpsPage({ searchParams }: PageProps<"/follow
     <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          {/* Le titre « Aujourd'hui » appartient désormais au cockpit
-              (`/today`) : ce tableau, lui, est la liste complète du module. */}
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Follow-up</h1>
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Suivis</h1>
           <AttentionHeadline count={board.stats.needsAttention} />
         </div>
         <NewFollowUpDialog defaultDueDate={addDaysToKey(today, DEFAULT_DUE_IN_DAYS)} />

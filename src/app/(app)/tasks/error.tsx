@@ -1,6 +1,6 @@
 "use client";
 
-export default function TodayError({
+export default function TasksError({
   error,
   reset,
 }: {
@@ -12,7 +12,7 @@ export default function TodayError({
       <p aria-hidden className="text-3xl">
         ⚠️
       </p>
-      <h1 className="mt-3 text-lg font-semibold">La page Aujourd&apos;hui n&apos;a pas pu se charger</h1>
+      <h1 className="mt-3 text-lg font-semibold">La page Tâches n&apos;a pas pu se charger</h1>
       <p className="mt-1 text-sm text-muted">
         Vérifie que PostgreSQL tourne et que les migrations sont appliquées
         (<code className="font-mono">npm run db:migrate</code>).

@@ -215,7 +215,11 @@ async function setArchivedAt(formData: FormData, archivedAt: Date | null): Promi
 
   revalidatePath("/contacts");
   revalidatePath(`/contacts/${parsed.data.id}`);
+  // Archiver un contact change ce que montrent les suivis, les tâches et le
+  // cockpit — sans en supprimer aucun.
   revalidatePath("/follow-ups");
+  revalidatePath("/tasks");
+  revalidatePath("/today");
 }
 
 /**

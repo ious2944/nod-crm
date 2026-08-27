@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { applyTaskAction } from "@/app/(app)/tasks/actions";
 import { applyQuickAction } from "@/app/(app)/follow-ups/actions";
 import { login } from "@/app/login/actions";
 import { initialLoginState } from "@/lib/auth/schemas";
@@ -9,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { headerJar, TestRedirect } from "./cookie-jar";
 import {
   createFollowUpRecord,
+  createTaskRecord,
   createWorkspaceWithUser,
   formData,
   resetDatabase,
@@ -126,6 +128,32 @@ describe("concurrence", () => {
     const results = await Promise.allSettled([
       applyQuickAction(formData({ id, intent: "complete" })),
       applyQuickAction(formData({ id, intent: "abandon" })),
+    ]);
+
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+  });
+
+  it("ne termine qu'une fois une tâche malgré deux appels simultanés", async () => {
+    const id = await createTaskRecord(user.workspaceId);
+
+    const results = await Promise.allSettled([
+      applyTaskAction(formData({ id, intent: "complete" })),
+      applyTaskAction(formData({ id, intent: "complete" })),
+    ]);
+
+    // La garde est la même que pour les suivis : l'`UPDATE` conditionnel ne
+    // trouve la ligne dans l'état lu qu'une seule fois.
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const after = await prisma.task.findUniqueOrThrow({ where: { id } });
+    expect(after.completedAt).not.toBeNull();
+  });
+
+  it("ne termine pas une tâche pendant qu'on la reporte", async () => {
+    const id = await createTaskRecord(user.workspaceId);
+
+    const results = await Promise.allSettled([
+      applyTaskAction(formData({ id, intent: "complete" })),
+      applyTaskAction(formData({ id, intent: "snooze", days: 3 })),
     ]);
 
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);

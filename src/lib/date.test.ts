@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { addDaysToKey, dayKey, daysBetween, shiftDueDate, startOfDay } from "./date";
+import {
+  addDaysToKey,
+  dayKey,
+  daysBetween,
+  endOfDay,
+  shiftDueDate,
+  startOfDay,
+} from "./date";
 
 const PARIS = "Europe/Paris";
 
@@ -63,5 +70,27 @@ describe("shiftDueDate", () => {
     const after = shiftDueDate(before, 3, PARIS);
     expect(dayKey(after, PARIS)).toBe("2026-10-27");
     expect(after.toISOString()).toBe("2026-10-26T23:00:00.000Z");
+  });
+});
+
+describe("endOfDay", () => {
+  it("va jusqu'à la dernière milliseconde du jour local", () => {
+    expect(endOfDay("2026-06-10", PARIS).toISOString()).toBe("2026-06-10T21:59:59.999Z");
+    expect(endOfDay("2026-01-10", PARIS).toISOString()).toBe("2026-01-10T22:59:59.999Z");
+  });
+
+  it("borne exactement ce qui est actionnable aujourd'hui", () => {
+    const bound = endOfDay("2026-06-10", PARIS);
+
+    // Une échéance calée sur minuit local, aujourd'hui : dans la borne.
+    expect(startOfDay("2026-06-10", PARIS) <= bound).toBe(true);
+    // Demain : hors borne, donc hors du feed « Aujourd'hui ».
+    expect(startOfDay("2026-06-11", PARIS) <= bound).toBe(false);
+  });
+
+  it("survit au changement d'heure, où le jour ne fait pas 24 h", () => {
+    // Nuit du passage à l'heure d'été 2026 en Europe : 29 mars, 23 heures.
+    const bound = endOfDay("2026-03-29", PARIS);
+    expect(bound.getTime() - startOfDay("2026-03-29", PARIS).getTime()).toBe(23 * 3_600_000 - 1);
   });
 });

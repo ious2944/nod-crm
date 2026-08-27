@@ -1,7 +1,19 @@
+import { DueBadge } from "@/components/ui/due-badge";
+import type { UrgencyLevel } from "@/lib/follow-ups/domain";
 import type { FollowUpView } from "@/lib/follow-ups/view";
-import { BallBadge } from "./ball-badge";
 import { CardActions, QuickAction, SnoozeMenu } from "./quick-actions";
-import { URGENCY_CHIP, URGENCY_EDGE } from "./urgency-styles";
+
+/** Le vieillissement se lit d'abord à la couleur : discret → très visible.
+ *  La pastille est partagée avec les tâches (`DueBadge`) ; le liseré de gauche
+ *  reste propre à la carte de suivi. */
+const EDGE: Record<UrgencyLevel, string> = {
+  done: "bg-done-fg/35",
+  calm: "bg-border-subtle",
+  soon: "bg-soon-fg/50",
+  today: "bg-today-fg",
+  late: "bg-late-fg",
+  critical: "bg-critical-fg",
+};
 
 export function FollowUpCard({ item }: { item: FollowUpView }) {
   const isOpen = item.status === "OPEN";
@@ -15,7 +27,7 @@ export function FollowUpCard({ item }: { item: FollowUpView }) {
     >
       {/* Arrondi porté par le liseré lui-même : la carte n'a plus besoin
           d'`overflow-hidden`, qui découpait les menus ouverts depuis ses actions. */}
-      <span aria-hidden className={`absolute inset-y-0 left-0 w-1 rounded-l-xl ${URGENCY_EDGE[item.level]}`} />
+      <span aria-hidden className={`absolute inset-y-0 left-0 w-1 rounded-l-xl ${EDGE[item.level]}`} />
 
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div className="min-w-0 flex-1">
@@ -48,15 +60,17 @@ export function FollowUpCard({ item }: { item: FollowUpView }) {
               <span className="italic">Sans contact</span>
             )}
             {item.organizationName && <span>· {item.organizationName}</span>}
-            <BallBadge ballOwner={item.ballOwner} label={item.ballLabel} />
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+                item.ballOwner === "ME" ? "bg-accent-soft text-accent" : "bg-surface-muted text-ink"
+              }`}
+            >
+              🏓 {item.ballLabel}
+            </span>
           </div>
         </div>
 
-        <span
-          className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${URGENCY_CHIP[item.level]}`}
-        >
-          {item.dueLabel}
-        </span>
+        <DueBadge level={item.level} label={item.dueLabel} />
       </div>
 
       {item.description && (

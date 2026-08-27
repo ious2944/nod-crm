@@ -75,6 +75,19 @@ export function startOfDay(key: string, timeZone: string): Date {
   return new Date(instant);
 }
 
+/**
+ * Dernier instant du jour `key` dans le fuseau donné (minuit du lendemain
+ * moins une milliseconde).
+ *
+ * C'est la borne exacte de « ce qu'il y a à faire aujourd'hui » : une échéance
+ * `<= endOfDay(aujourd'hui)` est actionnable, une échéance au-delà ne l'est pas.
+ * On la calcule à partir du jour suivant plutôt qu'en ajoutant 24 h : les jours
+ * de changement d'heure en font 23 ou 25.
+ */
+export function endOfDay(key: string, timeZone: string): Date {
+  return new Date(startOfDay(addDaysToKey(key, 1), timeZone).getTime() - 1);
+}
+
 /** Ajoute `days` jours calendaires à une clé `YYYY-MM-DD`. */
 export function addDaysToKey(key: string, days: number): string {
   const shifted = new Date(Date.parse(`${key}T00:00:00Z`) + days * MS_PER_DAY);

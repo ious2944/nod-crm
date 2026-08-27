@@ -1,14 +1,19 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { applyQuickAction, createFollowUp } from "@/app/(app)/follow-ups/actions";
+import { applyTaskAction, createTask, findFollowUps } from "@/app/(app)/tasks/actions";
 import { initialCreateState } from "@/lib/follow-ups/create-state";
 import { searchContactOptions } from "@/lib/contacts/queries";
 import { getFollowUpBoard } from "@/lib/follow-ups/queries";
 import { prisma } from "@/lib/prisma";
+import { initialCreateTaskState } from "@/lib/tasks/create-state";
+import { getTaskList } from "@/lib/tasks/queries";
+import { getTodayFeed } from "@/lib/today/queries";
 
 import {
   createContactRecord,
   createFollowUpRecord,
+  createTaskRecord,
   createWorkspaceWithUser,
   formData,
   resetDatabase,
@@ -31,6 +36,7 @@ describe("isolation des workspaces", () => {
   let bob: TestUser;
   let bobFollowUpId: string;
   let bobContactId: string;
+  let bobTaskId: string;
 
   beforeEach(async () => {
     await resetDatabase();
@@ -39,6 +45,10 @@ describe("isolation des workspaces", () => {
 
     bobFollowUpId = await createFollowUpRecord(bob.workspaceId, "Secret de Bob");
     bobContactId = await createContactRecord(bob.workspaceId);
+    bobTaskId = await createTaskRecord(bob.workspaceId, {
+      title: "Tâche de Bob",
+      dueInDays: -1,
+    });
 
     await createFollowUpRecord(alice.workspaceId, "Sujet d'Alice");
     await signIn(alice);
@@ -121,6 +131,96 @@ describe("isolation des workspaces", () => {
     expect(created.workspaceId).toBe(alice.workspaceId);
   });
 
+  it("ne montre à Alice que ses propres tâches", async () => {
+    await createTaskRecord(alice.workspaceId, { title: "Tâche d'Alice", dueInDays: -1 });
+
+    const list = await getTaskList("todo");
+    const feed = await getTodayFeed();
+
+    expect(list.todoCount).toBe(1);
+    expect(list.sections.flatMap((section) => section.items).map((item) => item.title)).toEqual([
+      "Tâche d'Alice",
+    ]);
+    expect(feed.map((item) => item.title)).not.toContain("Tâche de Bob");
+  });
+
+  it("ne compte pas les tâches terminées de Bob", async () => {
+    await prisma.task.update({
+      where: { id: bobTaskId },
+      data: { completedAt: new Date() },
+    });
+
+    const list = await getTaskList("done");
+
+    expect(list.completedCount).toBe(0);
+    expect(list.completed).toHaveLength(0);
+  });
+
+  it.each(["complete", "reopen", "snooze"])(
+    "refuse à Alice l'action « %s » sur une tâche de Bob",
+    async (intent) => {
+      const before = await prisma.task.findUniqueOrThrow({ where: { id: bobTaskId } });
+
+      await expect(
+        applyTaskAction(formData({ id: bobTaskId, intent, days: 7 })),
+      ).rejects.toThrow(/introuvable/i);
+
+      const after = await prisma.task.findUniqueOrThrow({ where: { id: bobTaskId } });
+      expect(after).toEqual(before);
+    },
+  );
+
+  it("refuse à Alice de rattacher sa tâche à un contact de Bob", async () => {
+    const result = await createTask(
+      initialCreateTaskState,
+      formData({
+        title: "Tâche cross-workspace",
+        dueDate: "2026-05-01",
+        contactId: bobContactId,
+      }),
+    );
+
+    expect(result.status).toBe("error");
+    expect(await prisma.task.count({ where: { title: "Tâche cross-workspace" } })).toBe(0);
+  });
+
+  it("refuse à Alice de rattacher sa tâche à un suivi de Bob", async () => {
+    const result = await createTask(
+      initialCreateTaskState,
+      formData({
+        title: "Tâche cross-suivi",
+        dueDate: "2026-05-01",
+        followUpId: bobFollowUpId,
+      }),
+    );
+
+    expect(result.status).toBe("error");
+    expect(result.fieldErrors?.followUpId).toMatch(/introuvable/i);
+    expect(await prisma.task.count({ where: { title: "Tâche cross-suivi" } })).toBe(0);
+  });
+
+  it("ne laisse jamais une tâche choisir son workspace", async () => {
+    const result = await createTask(
+      initialCreateTaskState,
+      formData({
+        title: "Tâche injectée",
+        dueDate: "2026-05-01",
+        workspaceId: bob.workspaceId,
+        workspace_id: bob.workspaceId,
+      }),
+    );
+
+    expect(result.status).toBe("success");
+    const created = await prisma.task.findFirstOrThrow({ where: { title: "Tâche injectée" } });
+    expect(created.workspaceId).toBe(alice.workspaceId);
+  });
+
+  it("ne propose jamais un suivi de Bob au sélecteur d'Alice", async () => {
+    const options = await findFollowUps("");
+
+    expect(options.map((option) => option.id)).not.toContain(bobFollowUpId);
+  });
+
   it("résiste à un identifiant inexistant ou malformé", async () => {
     await expect(
       applyQuickAction(
@@ -134,5 +234,15 @@ describe("isolation des workspaces", () => {
     ).rejects.toThrow(/invalide/i);
 
     expect(await prisma.followUp.count()).toBe(2);
+
+    await expect(
+      applyTaskAction(formData({ id: "00000000-0000-4000-8000-000000000000", intent: "complete" })),
+    ).rejects.toThrow(/introuvable/i);
+
+    await expect(
+      applyTaskAction(formData({ id: "'; DROP TABLE tasks; --", intent: "complete" })),
+    ).rejects.toThrow(/invalide/i);
+
+    expect(await prisma.task.count()).toBe(1);
   });
 });
