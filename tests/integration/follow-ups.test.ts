@@ -348,4 +348,21 @@ describe("updateFollowUp", () => {
     expect(result.status).toBe("error");
     expect(result.fieldErrors?.contactId).toBeDefined();
   });
+
+  it("retourne une erreur propre pour un id inexistant (pas de fuite d'information)", async () => {
+    // Un UUID valide mais qui n'existe dans aucun workspace.
+    const nonExistentId = "00000000-0000-4000-8000-000000000099";
+
+    const result = await updateFollowUp(
+      initialEditFollowUpState,
+      formData({ id: nonExistentId, title: "Test", dueDate: "2026-09-01" }),
+    );
+
+    // Le comportement doit être identique à un suivi d'un autre workspace :
+    // erreur générique, pas de distinction entre « inexistant » et « étranger ».
+    expect(result.status).toBe("error");
+    expect(result.message).toBe("Suivi introuvable.");
+    // Pas de fieldErrors ici : l'erreur est au niveau de l'action, pas du champ.
+    expect(result.fieldErrors).toBeUndefined();
+  });
 });
