@@ -1,9 +1,14 @@
 import { connection } from "next/server";
 
-import { createTreatment, updateTreatment, archiveTreatment } from "@/app/(app)/rgpd/actions";
+import { restoreTreatment } from "@/app/(app)/rgpd/archive-actions";
+import { archiveTreatment, createTreatment, updateTreatment } from "@/app/(app)/rgpd/actions";
 import { PrivacyPageHeader } from "@/components/privacy/privacy-nav";
 import { LEGAL_BASES, TREATMENT_STATUSES, labelFor } from "@/lib/privacy/constants";
-import { listPrivacyProcessorOptions, listPrivacyTreatments } from "@/lib/privacy/queries";
+import {
+  listArchivedPrivacyTreatments,
+  listPrivacyProcessorOptions,
+  listPrivacyTreatments,
+} from "@/lib/privacy/queries";
 
 export const metadata = { title: "Traitements RGPD — NOD CRM" };
 
@@ -16,8 +21,9 @@ function dateValue(value: Date | null) {
 
 export default async function PrivacyTreatmentsPage() {
   await connection();
-  const [items, processors] = await Promise.all([
+  const [items, archivedItems, processors] = await Promise.all([
     listPrivacyTreatments(),
+    listArchivedPrivacyTreatments(),
     listPrivacyProcessorOptions(),
   ]);
 
@@ -75,12 +81,34 @@ export default async function PrivacyTreatmentsPage() {
                   />
                   <form action={archiveTreatment} className="mt-3">
                     <input type="hidden" name="id" value={item.id} />
-                    <button className="text-sm font-semibold text-danger hover:underline">Archiver le traitement</button>
+                    <button className="text-sm font-semibold text-critical-fg hover:underline">Archiver le traitement</button>
                   </form>
                 </details>
               </li>
             ))}
           </ul>
+        )}
+
+        {archivedItems.length > 0 && (
+          <details className="rounded-xl border border-border-subtle bg-surface p-4 shadow-card">
+            <summary className="cursor-pointer text-sm font-semibold text-muted">
+              Archivés ({archivedItems.length})
+            </summary>
+            <ul className="mt-3 divide-y divide-border-subtle">
+              {archivedItems.map((item) => (
+                <li key={item.id} className="flex items-center justify-between gap-4 py-3">
+                  <div>
+                    <p className="font-medium text-ink">{item.name}</p>
+                    <p className="text-xs text-muted">Archivé le {item.archivedAt?.toLocaleDateString("fr-FR")}</p>
+                  </div>
+                  <form action={restoreTreatment}>
+                    <input type="hidden" name="id" value={item.id} />
+                    <button className="text-sm font-semibold text-accent hover:underline">Restaurer</button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          </details>
         )}
       </main>
     </div>
