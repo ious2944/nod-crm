@@ -53,31 +53,39 @@ export const processorSchema = z.object({
   nextReviewAt: optionalDate,
 });
 
-export const requestSchema = z
-  .object({
-    id: z.string().uuid().optional(),
-    contactId: z.union([z.literal(""), z.string().uuid()]).optional(),
-    requesterName: text(300),
-    requesterEmail: z.union([z.literal(""), z.string().trim().email().max(254)]).optional(),
-    requestType: z.enum([
-      "ACCESS",
-      "RECTIFICATION",
-      "ERASURE",
-      "OBJECTION",
-      "RESTRICTION",
-      "PORTABILITY",
-      "OTHER",
-    ]),
-    receivedAt: requiredDate,
-    dueAt: requiredDate,
-    status: z.enum(["RECEIVED", "IN_PROGRESS", "WAITING", "COMPLETED", "REFUSED"]),
-    owner: text(200),
-    notes: text(4000),
-  })
-  .refine(
-    (value) => Boolean(value.contactId || value.requesterName || value.requesterEmail),
-    { message: "Identifie la personne par un contact, un nom ou un email." },
-  );
+const requestFields = z.object({
+  contactId: z.union([z.literal(""), z.string().uuid()]).optional(),
+  requesterName: text(300),
+  requesterEmail: z.union([z.literal(""), z.string().trim().email().max(254)]).optional(),
+  requestType: z.enum([
+    "ACCESS",
+    "RECTIFICATION",
+    "ERASURE",
+    "OBJECTION",
+    "RESTRICTION",
+    "PORTABILITY",
+    "OTHER",
+  ]),
+  receivedAt: requiredDate,
+  dueAt: requiredDate,
+  status: z.enum(["RECEIVED", "IN_PROGRESS", "WAITING", "COMPLETED", "REFUSED"]),
+  owner: text(200),
+  notes: text(4000),
+});
+
+function hasRequestIdentity(value: z.infer<typeof requestFields>) {
+  return Boolean(value.contactId || value.requesterName || value.requesterEmail);
+}
+
+export const requestSchema = requestFields.refine(hasRequestIdentity, {
+  message: "Identifie la personne par un contact, un nom ou un email.",
+});
+
+export const updateRequestSchema = requestFields
+  .extend({ id: privacyIdSchema })
+  .refine(hasRequestIdentity, {
+    message: "Identifie la personne par un contact, un nom ou un email.",
+  });
 
 export const incidentSchema = z.object({
   id: z.string().uuid().optional(),
@@ -99,7 +107,3 @@ export const incidentSchema = z.object({
   owner: text(200),
   status: z.enum(["OPEN", "ANALYSIS", "CLOSED"]),
 });
-
-export function parseForm<T extends z.ZodTypeAny>(schema: T, formData: FormData) {
-  return schema.parse(Object.fromEntries(formData));
-}
