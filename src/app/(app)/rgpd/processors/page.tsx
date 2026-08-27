@@ -1,9 +1,10 @@
 import { connection } from "next/server";
 
+import { restoreProcessor } from "@/app/(app)/rgpd/archive-actions";
 import { archiveProcessor, createProcessor, updateProcessor } from "@/app/(app)/rgpd/actions";
 import { PrivacyPageHeader } from "@/components/privacy/privacy-nav";
 import { DPA_STATUSES, EEA_STATUSES, TRI_STATES, labelFor } from "@/lib/privacy/constants";
-import { listPrivacyProcessors } from "@/lib/privacy/queries";
+import { listArchivedPrivacyProcessors, listPrivacyProcessors } from "@/lib/privacy/queries";
 
 export const metadata = { title: "Sous-traitants RGPD — NOD CRM" };
 
@@ -16,7 +17,10 @@ function dateValue(value: Date | null) {
 
 export default async function PrivacyProcessorsPage() {
   await connection();
-  const items = await listPrivacyProcessors();
+  const [items, archivedItems] = await Promise.all([
+    listPrivacyProcessors(),
+    listArchivedPrivacyProcessors(),
+  ]);
 
   return (
     <div className="flex min-h-full flex-col">
@@ -58,12 +62,34 @@ export default async function PrivacyProcessorsPage() {
                   <ProcessorForm action={updateProcessor} item={item} />
                   <form action={archiveProcessor} className="mt-3">
                     <input type="hidden" name="id" value={item.id} />
-                    <button className="text-sm font-semibold text-danger hover:underline">Archiver le sous-traitant</button>
+                    <button className="text-sm font-semibold text-critical-fg hover:underline">Archiver le sous-traitant</button>
                   </form>
                 </details>
               </li>
             ))}
           </ul>
+        )}
+
+        {archivedItems.length > 0 && (
+          <details className="rounded-xl border border-border-subtle bg-surface p-4 shadow-card">
+            <summary className="cursor-pointer text-sm font-semibold text-muted">
+              Archivés ({archivedItems.length})
+            </summary>
+            <ul className="mt-3 divide-y divide-border-subtle">
+              {archivedItems.map((item) => (
+                <li key={item.id} className="flex items-center justify-between gap-4 py-3">
+                  <div>
+                    <p className="font-medium text-ink">{item.name}</p>
+                    <p className="text-xs text-muted">{item.service} · archivé le {item.archivedAt?.toLocaleDateString("fr-FR")}</p>
+                  </div>
+                  <form action={restoreProcessor}>
+                    <input type="hidden" name="id" value={item.id} />
+                    <button className="text-sm font-semibold text-accent hover:underline">Restaurer</button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          </details>
         )}
       </main>
     </div>
