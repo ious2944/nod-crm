@@ -2,14 +2,29 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 
+import { DeleteOpportunityButton } from "@/components/commerce/delete-opportunity-button";
+import { EditOpportunityDialog } from "@/components/commerce/edit-opportunity-dialog";
 import { ChangeStatusForm } from "@/components/commerce/change-status-form";
 import { StatusBadge } from "@/components/commerce/status-badge";
+import { NewFollowUpDialog } from "@/components/follow-ups/new-follow-up-dialog";
+import { NewTaskDialog } from "@/components/tasks/new-task-dialog";
 import { APP_TIME_ZONE } from "@/lib/config";
+import { dayKey } from "@/lib/date";
 import { getOpportunityDetail } from "@/lib/commerce/queries";
 
 export const metadata = {
   title: "Opportunité — NOD CRM",
 };
+
+/** Formate une date YYYY-MM-DD en locale française courte (ex. « 31 déc. 2026 »). */
+function formatFrenchDate(isoDate: string): string {
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${isoDate}T00:00:00Z`));
+}
 
 /**
  * Fiche opportunité.
@@ -34,6 +49,9 @@ export default async function OpportunityPage({ params }: PageProps<"/commerce/[
     year: "numeric",
     timeZone: APP_TIME_ZONE,
   }).format(new Date(opportunity.createdAt));
+
+  // Aujourd'hui en YYYY-MM-DD (fuseau local) pour pré-remplir les formulaires.
+  const today = dayKey(new Date(), APP_TIME_ZONE);
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
@@ -90,16 +108,22 @@ export default async function OpportunityPage({ params }: PageProps<"/commerce/[
             {opportunity.expectedCloseDate && (
               <div>
                 <dt className="inline text-muted">Date prévisionnelle : </dt>
-                <dd className="inline text-ink">{opportunity.expectedCloseDate}</dd>
+                <dd className="inline text-ink">{formatFrenchDate(opportunity.expectedCloseDate)}</dd>
               </div>
             )}
             {!opportunity.isOpen && opportunity.closedDate && (
               <div>
                 <dt className="inline text-muted">Clôturée le : </dt>
-                <dd className="inline text-ink">{opportunity.closedDate}</dd>
+                <dd className="inline text-ink">{formatFrenchDate(opportunity.closedDate)}</dd>
               </div>
             )}
           </dl>
+        </div>
+
+        {/* Actions : modifier et supprimer */}
+        <div className="flex shrink-0 items-center gap-2">
+          <EditOpportunityDialog opportunity={opportunity} />
+          <DeleteOpportunityButton opportunityId={opportunity.id} />
         </div>
       </header>
 
@@ -128,41 +152,42 @@ export default async function OpportunityPage({ params }: PageProps<"/commerce/[
 
       {/* Tâches liées */}
       <section aria-label="Tâches liées" className="mt-8">
-        <h2 className="text-lg font-semibold tracking-tight">
-          Tâches{" "}
-          {opportunity.openTasks.length > 0 && (
-            <span className="text-base font-normal text-muted">
-              ({opportunity.openTasks.length})
-            </span>
-          )}
-        </h2>
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-lg font-semibold tracking-tight">
+            Tâches{" "}
+            {opportunity.openTasks.length > 0 && (
+              <span className="text-base font-normal text-muted">
+                ({opportunity.openTasks.length})
+              </span>
+            )}
+          </h2>
+          <NewTaskDialog
+            defaultDueDate={today}
+            defaultOpportunityId={opportunity.id}
+            defaultOpportunityName={opportunity.name}
+            triggerLabel="+ Tâche"
+            triggerClassName="rounded-lg px-3 py-1.5 text-sm font-medium text-muted hover:bg-surface-muted hover:text-ink"
+          />
+        </div>
 
         {opportunity.openTasks.length === 0 ? (
           <p className="mt-2 text-sm text-muted">
-            Aucune tâche ouverte liée à cette affaire.{" "}
-            <Link
-              href="/tasks"
-              className="underline-offset-2 hover:text-ink hover:underline"
-            >
-              Créer une tâche
-            </Link>
+            Aucune tâche ouverte liée à cette affaire.
           </p>
         ) : (
           <ul className="mt-3 space-y-2">
             {opportunity.openTasks.map((task) => (
-              <li key={task.id}>
-                <Link
-                  href="/tasks"
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-subtle bg-surface px-4 py-3 shadow-card transition-all hover:border-border-strong hover:shadow-card-hover"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-ink">{task.title}</p>
-                    {task.contactName && (
-                      <p className="text-sm text-muted">{task.contactName}</p>
-                    )}
-                  </div>
-                  <p className="shrink-0 text-xs text-muted">{task.dueAt}</p>
-                </Link>
+              <li
+                key={task.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-subtle bg-surface px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-ink">{task.title}</p>
+                  {task.contactName && (
+                    <p className="text-sm text-muted">{task.contactName}</p>
+                  )}
+                </div>
+                <p className="shrink-0 text-xs text-muted">{formatFrenchDate(task.dueAt)}</p>
               </li>
             ))}
           </ul>
@@ -171,44 +196,45 @@ export default async function OpportunityPage({ params }: PageProps<"/commerce/[
 
       {/* Suivis liés */}
       <section aria-label="Suivis liés" className="mt-8">
-        <h2 className="text-lg font-semibold tracking-tight">
-          Suivis{" "}
-          {opportunity.openFollowUps.length > 0 && (
-            <span className="text-base font-normal text-muted">
-              ({opportunity.openFollowUps.length})
-            </span>
-          )}
-        </h2>
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-lg font-semibold tracking-tight">
+            Suivis{" "}
+            {opportunity.openFollowUps.length > 0 && (
+              <span className="text-base font-normal text-muted">
+                ({opportunity.openFollowUps.length})
+              </span>
+            )}
+          </h2>
+          <NewFollowUpDialog
+            defaultDueDate={today}
+            defaultOpportunityId={opportunity.id}
+            defaultOpportunityName={opportunity.name}
+            triggerLabel="+ Suivi"
+            triggerClassName="rounded-lg px-3 py-1.5 text-sm font-medium text-muted hover:bg-surface-muted hover:text-ink"
+          />
+        </div>
 
         {opportunity.openFollowUps.length === 0 ? (
           <p className="mt-2 text-sm text-muted">
-            Aucun suivi ouvert lié à cette affaire.{" "}
-            <Link
-              href="/follow-ups"
-              className="underline-offset-2 hover:text-ink hover:underline"
-            >
-              Créer un suivi
-            </Link>
+            Aucun suivi ouvert lié à cette affaire.
           </p>
         ) : (
           <ul className="mt-3 space-y-2">
             {opportunity.openFollowUps.map((followUp) => (
-              <li key={followUp.id}>
-                <Link
-                  href="/follow-ups"
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-subtle bg-surface px-4 py-3 shadow-card transition-all hover:border-border-strong hover:shadow-card-hover"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-ink">{followUp.title}</p>
-                    {followUp.contactName && (
-                      <p className="text-sm text-muted">{followUp.contactName}</p>
-                    )}
-                  </div>
-                  <div className="shrink-0 text-right text-xs text-muted">
-                    <p>{followUp.dueAt}</p>
-                    <p>{followUp.ballOwner === "ME" ? "Balle chez moi" : "Balle chez eux"}</p>
-                  </div>
-                </Link>
+              <li
+                key={followUp.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-subtle bg-surface px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-ink">{followUp.title}</p>
+                  {followUp.contactName && (
+                    <p className="text-sm text-muted">{followUp.contactName}</p>
+                  )}
+                </div>
+                <div className="shrink-0 text-right text-xs text-muted">
+                  <p>{formatFrenchDate(followUp.dueAt)}</p>
+                  <p>{followUp.ballOwner === "ME" ? "Balle chez moi" : "Balle chez eux"}</p>
+                </div>
               </li>
             ))}
           </ul>

@@ -265,7 +265,7 @@ export default async function OrganizationPage({ params }: PageProps<"/organizat
           <ul className="mt-3 space-y-2">
             {org.openOpportunities.map((opp) => (
               <li key={opp.id}>
-                <a
+                <Link
                   href={`/commerce/${opp.id}`}
                   className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-subtle bg-surface px-4 py-3 shadow-card transition-all hover:border-border-strong hover:shadow-card-hover"
                 >
@@ -278,7 +278,7 @@ export default async function OrganizationPage({ params }: PageProps<"/organizat
                       {opp.estimatedAmount}
                     </p>
                   )}
-                </a>
+                </Link>
               </li>
             ))}
           </ul>

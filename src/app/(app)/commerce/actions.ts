@@ -282,6 +282,7 @@ export async function deleteOpportunity(formData: FormData): Promise<void> {
   await prisma.opportunity.delete({ where: { id } });
 
   revalidateCommerceList();
+  revalidateOpportunityDetail(id);
 }
 
 // ─── Sélecteur ─────────────────────────────────────────────────────────────

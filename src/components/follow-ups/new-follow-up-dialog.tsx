@@ -29,12 +29,17 @@ function SubmitButton() {
 export function NewFollowUpDialog({
   defaultDueDate,
   defaultContact,
+  defaultOpportunityId,
+  defaultOpportunityName,
   triggerLabel = "Nouveau suivi",
   triggerClassName,
 }: {
   defaultDueDate: string;
   /** Contact déjà choisi — le bouton « + Nouveau Follow-Up » d'une fiche. */
   defaultContact?: PickerSelection;
+  /** Opportunité pré-sélectionnée (depuis la fiche opportunité). */
+  defaultOpportunityId?: string;
+  defaultOpportunityName?: string;
   triggerLabel?: string;
   triggerClassName?: string;
 }) {
@@ -232,7 +237,11 @@ export function NewFollowUpDialog({
                 />
               </div>
 
-              <OpportunityPicker error={errors.opportunityId} />
+              <OpportunityPicker
+                opportunityId={defaultOpportunityId}
+                opportunityName={defaultOpportunityName}
+                error={errors.opportunityId}
+              />
 
               {state.status === "error" && state.message && (
                 <p className="rounded-lg bg-critical-bg px-3 py-2 text-sm text-critical-fg">

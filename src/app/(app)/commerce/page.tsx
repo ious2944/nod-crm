@@ -15,6 +15,16 @@ export const metadata = {
   title: "Commerce — NOD CRM",
 };
 
+/** Formate une date YYYY-MM-DD en locale française courte (ex. « 31 déc. 2026 »). */
+function formatFrenchDate(isoDate: string): string {
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${isoDate}T00:00:00Z`));
+}
+
 const FILTERS: StatusFilter[] = ["open", "closed", "all"];
 
 /**
@@ -113,10 +123,10 @@ export default async function CommercePage({ searchParams }: PageProps<"/commerc
                       <p className="font-semibold text-ink">{item.estimatedAmount}</p>
                     )}
                     {item.expectedCloseDate && (
-                      <p>Prévu le {item.expectedCloseDate}</p>
+                      <p>Prévu le {formatFrenchDate(item.expectedCloseDate)}</p>
                     )}
                     {!item.isOpen && item.closedDate && (
-                      <p>Clos le {item.closedDate}</p>
+                      <p>Clos le {formatFrenchDate(item.closedDate)}</p>
                     )}
                   </div>
                 </Link>

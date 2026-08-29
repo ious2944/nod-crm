@@ -48,8 +48,8 @@ export function SearchPicker({
   name: string;
   label: string;
   placeholder: string;
-  /** Première option de la liste : se passer de lien. */
-  noneLabel: string;
+  /** Première option de la liste : se passer de lien. Omis quand le champ est obligatoire. */
+  noneLabel?: string;
   /** Message affiché quand la recherche ne donne rien. */
   emptyLabel: string;
   search: (query: string) => Promise<PickerOption[]>;
@@ -160,14 +160,16 @@ export function SearchPicker({
             aria-label={label}
             className="nod-rise absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-border-subtle bg-surface p-1.5 shadow-lg"
           >
-            <PickerButton
-              onSelect={() => {
-                onClear();
-                close();
-              }}
-            >
-              {noneLabel}
-            </PickerButton>
+            {noneLabel !== undefined && (
+              <PickerButton
+                onSelect={() => {
+                  onClear();
+                  close();
+                }}
+              >
+                {noneLabel}
+              </PickerButton>
+            )}
 
             {results.map((option) => (
               <PickerButton

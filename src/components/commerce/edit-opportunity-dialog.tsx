@@ -4,26 +4,23 @@ import { useActionState, useEffect, useId, useState } from "react";
 import { createPortal } from "react-dom";
 import { useFormStatus } from "react-dom";
 
-import { createOpportunity } from "@/app/(app)/commerce/actions";
+import { updateOpportunity } from "@/app/(app)/commerce/actions";
 import { ContactPicker } from "@/components/follow-ups/contact-picker";
 import { OrganizationPicker } from "@/components/organizations/organization-picker";
 import { FIELD, FieldError, LABEL } from "@/components/ui/form";
 import {
-  initialCreateOpportunityState,
-  type CreateOpportunityState,
+  initialUpdateOpportunityState,
+  type UpdateOpportunityState,
 } from "@/lib/commerce/create-state";
 import { OPPORTUNITY_LIMITS } from "@/lib/commerce/schemas";
-import { PIPELINE_ORDER, STATUS_LABELS } from "@/lib/commerce/domain";
+import type { OpportunityDetail } from "@/lib/commerce/view";
 
 /**
- * Dialogue de création d'une opportunité commerciale.
+ * Dialogue d'édition d'une opportunité existante.
  *
- * Champs obligatoires : nom, organisation.
- * Champs facultatifs : contact, statut initial, montant estimé, date prévisionnelle,
- * notes.
- *
- * Aucune logique de rappel ni d'échéance opérationnelle : ces préoccupations
- * appartiennent à Task et FollowUp.
+ * Champs éditables : nom, organisation, contact, montant estimé, date
+ * prévisionnelle, notes. Le statut n'est pas éditable ici — il appartient au
+ * pipeline (`ChangeStatusForm`).
  */
 
 function SubmitButton() {
@@ -34,33 +31,52 @@ function SubmitButton() {
       disabled={pending}
       className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast transition-colors hover:bg-accent-hover disabled:cursor-progress disabled:opacity-60"
     >
-      {pending ? "Création…" : "Créer l'opportunité"}
+      {pending ? "Enregistrement…" : "Enregistrer"}
     </button>
   );
 }
 
-export function NewOpportunityDialog({
-  triggerLabel = "Nouvelle opportunité",
+export function EditOpportunityDialog({
+  opportunity,
+  triggerLabel = "Modifier",
   triggerClassName,
 }: {
+  opportunity: Pick<
+    OpportunityDetail,
+    | "id"
+    | "name"
+    | "organizationId"
+    | "organizationName"
+    | "contactId"
+    | "contactName"
+    | "estimatedAmountRaw"
+    | "expectedCloseDate"
+    | "notes"
+  >;
   triggerLabel?: string;
   triggerClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [contactMode, setContactMode] = useState("");
+  const [contactMode, setContactMode] = useState(opportunity.contactId ?? "");
   const titleId = useId();
 
   const [state, formAction] = useActionState(
-    async (previous: CreateOpportunityState, formData: FormData) => {
-      const result = await createOpportunity(previous, formData);
+    async (previous: UpdateOpportunityState, formData: FormData) => {
+      const result = await updateOpportunity(previous, formData);
       if (result.status === "success") {
         setOpen(false);
-        setContactMode("");
       }
       return result;
     },
-    initialCreateOpportunityState,
+    initialUpdateOpportunityState,
   );
+
+  // Réinitialise le contact quand on ferme sans sauvegarder.
+  useEffect(() => {
+    if (!open) {
+      setContactMode(opportunity.contactId ?? "");
+    }
+  }, [open, opportunity.contactId]);
 
   useEffect(() => {
     if (!open) return;
@@ -73,8 +89,10 @@ export function NewOpportunityDialog({
 
   const errors = state.fieldErrors ?? {};
 
-  // Les pickers sont des composants contrôlés côté client.
-  // OrganizationPicker gère son propre état interne.
+  const defaultContact =
+    opportunity.contactId && opportunity.contactName
+      ? { id: opportunity.contactId, name: opportunity.contactName }
+      : undefined;
 
   return (
     <>
@@ -83,10 +101,10 @@ export function NewOpportunityDialog({
         onClick={() => setOpen(true)}
         className={
           triggerClassName ??
-          "inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accent-contrast transition-colors hover:bg-accent-hover"
+          "rounded-lg px-3 py-1.5 text-sm font-medium text-muted hover:bg-surface-muted hover:text-ink"
         }
       >
-        <span aria-hidden>+</span> {triggerLabel}
+        {triggerLabel}
       </button>
 
       {open &&
@@ -110,11 +128,9 @@ export function NewOpportunityDialog({
                 <div className="mb-4 flex items-start justify-between gap-4">
                   <div>
                     <h2 id={titleId} className="text-lg font-semibold">
-                      Nouvelle opportunité
+                      Modifier l'opportunité
                     </h2>
-                    <p className="text-sm text-muted">
-                      Le contexte de l'affaire — pas les actions à mener.
-                    </p>
+                    <p className="text-sm text-muted">Contexte de l'affaire commerciale.</p>
                   </div>
                   <button
                     type="button"
@@ -127,18 +143,21 @@ export function NewOpportunityDialog({
                 </div>
 
                 <form action={formAction} className="space-y-4">
+                  {/* Identifiant caché */}
+                  <input type="hidden" name="id" value={opportunity.id} />
+
                   {/* Nom */}
                   <div>
-                    <label className={LABEL} htmlFor="oppName">
+                    <label className={LABEL} htmlFor="editOppName">
                       Nom de l'affaire
                     </label>
                     <input
-                      id="oppName"
+                      id="editOppName"
                       name="name"
                       required
                       maxLength={OPPORTUNITY_LIMITS.name}
                       autoFocus
-                      placeholder="Refonte site vitrine Acme"
+                      defaultValue={opportunity.name}
                       className={`mt-1 ${FIELD}`}
                     />
                     <FieldError message={errors.name} />
@@ -146,53 +165,35 @@ export function NewOpportunityDialog({
 
                   {/* Organisation (obligatoire) */}
                   <OrganizationPicker
-                    organizationId={null}
-                    organizationName={null}
+                    organizationId={opportunity.organizationId}
+                    organizationName={opportunity.organizationName}
                     required
                     error={errors.organizationId}
                   />
 
                   {/* Contact (facultatif) */}
                   <ContactPicker
+                    defaultSelection={defaultContact}
                     mode={contactMode}
                     onModeChange={setContactMode}
                     allowCreate={false}
                     error={errors.contactId}
                   />
 
-                  {/* Statut initial */}
-                  <div>
-                    <label className={LABEL} htmlFor="oppStatus">
-                      Statut
-                    </label>
-                    <select
-                      id="oppStatus"
-                      name="status"
-                      defaultValue="A_QUALIFIER"
-                      className={`mt-1 ${FIELD}`}
-                    >
-                      {PIPELINE_ORDER.slice(0, 3).map((status) => (
-                        <option key={status} value={status}>
-                          {STATUS_LABELS[status]}
-                        </option>
-                      ))}
-                    </select>
-                    <FieldError message={errors.status} />
-                  </div>
-
                   {/* Montant estimé */}
                   <div>
-                    <label className={LABEL} htmlFor="oppAmount">
+                    <label className={LABEL} htmlFor="editOppAmount">
                       Montant estimé (€, facultatif)
                     </label>
                     <input
-                      id="oppAmount"
+                      id="editOppAmount"
                       name="estimatedAmount"
                       type="number"
                       min="0"
                       max="999999999999"
                       step="0.01"
                       placeholder="0"
+                      defaultValue={opportunity.estimatedAmountRaw ?? ""}
                       className={`mt-1 ${FIELD} sm:max-w-56`}
                     />
                     <FieldError message={errors.estimatedAmount} />
@@ -200,13 +201,14 @@ export function NewOpportunityDialog({
 
                   {/* Date prévisionnelle de clôture */}
                   <div>
-                    <label className={LABEL} htmlFor="oppExpectedClose">
+                    <label className={LABEL} htmlFor="editOppExpectedClose">
                       Date prévisionnelle (facultatif)
                     </label>
                     <input
-                      id="oppExpectedClose"
+                      id="editOppExpectedClose"
                       name="expectedCloseDate"
                       type="date"
+                      defaultValue={opportunity.expectedCloseDate ?? ""}
                       className={`mt-1 ${FIELD} sm:max-w-56`}
                     />
                     <FieldError message={errors.expectedCloseDate} />
@@ -214,14 +216,15 @@ export function NewOpportunityDialog({
 
                   {/* Notes */}
                   <div>
-                    <label className={LABEL} htmlFor="oppNotes">
+                    <label className={LABEL} htmlFor="editOppNotes">
                       Notes (facultatif)
                     </label>
                     <textarea
-                      id="oppNotes"
+                      id="editOppNotes"
                       name="notes"
-                      rows={2}
+                      rows={3}
                       maxLength={OPPORTUNITY_LIMITS.notes}
+                      defaultValue={opportunity.notes ?? ""}
                       className={`mt-1 ${FIELD}`}
                     />
                     <FieldError message={errors.notes} />

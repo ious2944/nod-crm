@@ -50,6 +50,8 @@ export interface OpportunityListItem {
   statusVariant: StatusVariant;
   isOpen: boolean;
   estimatedAmount: string | null;
+  /** Valeur brute en nombre pour les formulaires d'édition (non formatée). */
+  estimatedAmountRaw: number | null;
   /** `YYYY-MM-DD` ou null. */
   expectedCloseDate: string | null;
   closedDate: string | null;
@@ -106,6 +108,7 @@ export function toOpportunityListItem(
     statusVariant: statusVariant(record.status),
     isOpen: isOpenStatus(record.status),
     estimatedAmount: formatAmount(record.estimatedAmount),
+    estimatedAmountRaw: record.estimatedAmount,
     expectedCloseDate: record.expectedCloseAt ? dayKey(record.expectedCloseAt, timeZone) : null,
     closedDate: record.closedAt ? dayKey(record.closedAt, timeZone) : null,
     organizationId: record.organization.id,

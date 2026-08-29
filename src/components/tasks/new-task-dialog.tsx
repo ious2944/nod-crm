@@ -36,10 +36,15 @@ function SubmitButton() {
 
 export function NewTaskDialog({
   defaultDueDate,
+  defaultOpportunityId,
+  defaultOpportunityName,
   triggerLabel = "Nouvelle tâche",
   triggerClassName,
 }: {
   defaultDueDate: string;
+  /** Opportunité pré-sélectionnée (depuis la fiche opportunité). */
+  defaultOpportunityId?: string;
+  defaultOpportunityName?: string;
   triggerLabel?: string;
   triggerClassName?: string;
 }) {
@@ -169,7 +174,11 @@ export function NewTaskDialog({
                 error={errors.followUpId}
               />
 
-              <OpportunityPicker error={errors.opportunityId} />
+              <OpportunityPicker
+                opportunityId={defaultOpportunityId}
+                opportunityName={defaultOpportunityName}
+                error={errors.opportunityId}
+              />
 
               <div>
                 <label className={LABEL} htmlFor="taskNotes">
