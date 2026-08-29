@@ -13,7 +13,7 @@ Most CRMs answer “who are my customers?”. NOD CRM starts with a smaller, mor
 
 A follow-up moves back and forth like a table-tennis ball: it is either **on your side** or **on theirs**. Tasks cover work that simply needs doing. Contacts and Organisations provide the context around both. The `Aujourd'hui` cockpit brings the work that needs attention now into one place.
 
-> **V0.8 — RGPD Essentials.** NOD CRM adds a lightweight privacy-operations workspace for startups and small teams: treatment register, processors, data-subject requests, incidents and an action-oriented privacy cockpit. It helps document and operate essential privacy processes; it does **not** provide legal certification or replace professional advice.
+> **V0.9 — Commerce.** NOD CRM adds a lightweight commercial opportunity module: track where each deal stands, link tasks and follow-ups to an opportunity, and let the `Aujourd'hui` cockpit surface the operational work. Commerce does **not** provide forecasting, deal scoring or marketing automation.
 
 NOD CRM is a young project used in production. Read [Limitations](#limitations) before adopting it. The interface is currently French-only; the documentation is in English.
 
@@ -21,7 +21,7 @@ NOD CRM is a young project used in production. Read [Limitations](#limitations) 
 
 ## What NOD CRM is
 
-NOD CRM deliberately avoids the generalist-CRM model. There are no sales pipelines, deal scoring, forecasting or marketing automation.
+NOD CRM deliberately avoids the generalist-CRM model. There is no deal scoring, forecasting or marketing automation.
 
 Its product areas stay intentionally distinct:
 
@@ -29,6 +29,7 @@ Its product areas stay intentionally distinct:
 - **Tasks** — something to do.
 - **Contacts** — the people involved.
 - **Organisations** — the structures those people belong to.
+- **Commerce** — where each commercial opportunity stands.
 - **RGPD Essentials** — the privacy work that needs to be documented and followed.
 
 The product is organised around the next useful action rather than around collecting more fields.
@@ -81,12 +82,22 @@ See [docs/tasks.md](docs/tasks.md).
 - First-class organisation records at `/organizations`.
 - Name, website, email, phone and notes.
 - Live search, archive filter and pagination.
-- Organisation sheet at `/organizations/[id]` with linked contacts, open follow-ups and open tasks.
+- Organisation sheet at `/organizations/[id]` with linked contacts, open follow-ups, open tasks and open opportunities.
 - Archive and restore.
 - Contacts link to organisations through a nullable foreign key; backward compatibility with the historical organisation text field is preserved.
 - Workspace isolation applies to organisation reads, writes and relationships.
 
 See [docs/organizations.md](docs/organizations.md).
+
+### Commerce
+
+- Opportunity list at `/commerce` with open/closed/all filters and pipeline counts.
+- Opportunity fields: name, linked organisation (required), optional contact, estimated amount, expected close date, pipeline status and notes.
+- Five-stage pipeline: À qualifier → En discussion → Proposition → Gagnée / Perdue. Status transitions are enforced server-side.
+- Opportunity sheet at `/commerce/[id]` with pipeline controls, edit, delete and linked tasks and follow-ups.
+- Create a task or follow-up directly from an opportunity with the opportunity preselected.
+- Deleting an opportunity preserves linked tasks and follow-ups (`ON DELETE SET NULL`).
+- Workspace isolation applies to all opportunity reads, writes and relationships.
 
 ### Privacy / RGPD Essentials — V0.8
 
@@ -198,7 +209,7 @@ Then open `http://localhost:3000` and sign in.
 docker compose exec app npx tsx prisma/seed.ts
 ```
 
-The current seed creates **4 fictional organisations, 4 contacts, 7 follow-ups and 6 tasks** in the selected demo workspace. Re-running it replaces the seeded demo business data for that workspace. It never creates login credentials.
+The current seed creates **4 fictional organisations, 4 contacts, 7 follow-ups, 6 tasks and 5 opportunities** in the selected demo workspace. Re-running it replaces the seeded demo business data for that workspace. It never creates login credentials.
 
 The seed refuses to run when `NODE_ENV=production` unless `ALLOW_DEMO_SEED=1` is explicitly set. For a dedicated demo workspace, `SEED_WORKSPACE_SLUG` and `SEED_WORKSPACE_NAME` can override the defaults.
 
@@ -295,7 +306,7 @@ To report a vulnerability, read [SECURITY.md](SECURITY.md). Please do not open a
 
 ## Limitations
 
-Known and accepted in V0.8:
+Known and accepted in V0.9:
 
 - No MFA. A stolen password is enough. The data model is ready; the feature is not built.
 - No roles. An authenticated user can do anything inside their workspace.
@@ -328,13 +339,14 @@ Directions, not commitments. The full roadmap lives in [ROADMAP.md](ROADMAP.md).
 - **V0.5 — Organisations — shipped.** First-class organisations and Contact → Organisation relationships.
 - **V0.6 — Follow-up Search & Editing — shipped.** Search plus safe editing of follow-up content.
 - **V0.7 — Lumina Enterprise UI Refresh — shipped.** Unified visual system, responsive refinements, dark-mode parity and viewport-safe dialogs; no new business logic.
-- **V0.8 — RGPD Essentials — current.** Treatment register, processors, rights requests, incidents and privacy alerts.
+- **V0.8 — RGPD Essentials — shipped.** Treatment register, processors, rights requests, incidents and privacy alerts.
+- **V0.9 — Commerce — current.** Lightweight opportunity tracking, five-stage pipeline and integration with existing tasks and follow-ups.
 
 **Next.** CSV import/export, search-index improvements, better empty/error states, English UI scaffolding and small ergonomics remain candidates rather than commitments.
 
 Later candidates include contact history and duplicate merging, follow-up history, audit log, MFA, self-service password reset, multi-user invitations, pagination at larger scales, public API/webhooks and recurring work.
 
-Deliberately out of scope for a long time: sales pipelines, deal scoring, forecasting, marketing automation, plugin systems and AI features that guess what you should do.
+Deliberately out of scope for a long time: deal scoring, forecasting, marketing automation, plugin systems and AI features that guess what you should do.
 
 ---
 
