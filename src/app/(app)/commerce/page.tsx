@@ -37,7 +37,8 @@ const FILTERS: StatusFilter[] = ["open", "closed", "all"];
 export default async function CommercePage({ searchParams }: PageProps<"/commerce">) {
   await connection();
 
-  const filter = parseStatusFilter((await searchParams).f);
+  const rawFilter = (await searchParams).f;
+  const filter = parseStatusFilter(Array.isArray(rawFilter) ? rawFilter[0] : rawFilter);
   const [items, stats] = await Promise.all([
     listOpportunities(filter),
     getCommerceStats(),

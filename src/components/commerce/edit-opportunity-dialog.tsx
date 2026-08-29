@@ -65,26 +65,30 @@ export function EditOpportunityDialog({
       const result = await updateOpportunity(previous, formData);
       if (result.status === "success") {
         setOpen(false);
+        // Pas de reset de contactMode ici : le dialog se démontera après succès.
       }
       return result;
     },
     initialUpdateOpportunityState,
   );
 
-  // Réinitialise le contact quand on ferme sans sauvegarder.
-  useEffect(() => {
-    if (!open) {
-      setContactMode(opportunity.contactId ?? "");
-    }
-  }, [open, opportunity.contactId]);
+  // Centralise la fermeture pour réinitialiser le contact en même temps.
+  // `setState` dans un gestionnaire d'événement est sans risque de cascade.
+  function handleClose() {
+    setOpen(false);
+    setContactMode(opportunity.contactId ?? "");
+  }
 
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") handleClose();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
+    // handleClose dépend de opportunity.contactId via la closure — stable tant
+    // que l'opportunité ne change pas, ce qui est le cas dans ce dialogue.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const errors = state.fieldErrors ?? {};
@@ -120,7 +124,7 @@ export function EditOpportunityDialog({
               aria-label="Fermer"
               tabIndex={-1}
               className="absolute inset-0 cursor-default"
-              onClick={() => setOpen(false)}
+              onClick={handleClose}
             />
 
             <div className="pointer-events-none flex min-h-full items-end justify-center p-0 sm:items-center sm:p-4">
@@ -128,13 +132,13 @@ export function EditOpportunityDialog({
                 <div className="mb-4 flex items-start justify-between gap-4">
                   <div>
                     <h2 id={titleId} className="text-lg font-semibold">
-                      Modifier l'opportunité
+                      Modifier l&apos;opportunité
                     </h2>
-                    <p className="text-sm text-muted">Contexte de l'affaire commerciale.</p>
+                    <p className="text-sm text-muted">Contexte de l&apos;affaire commerciale.</p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setOpen(false)}
+                    onClick={handleClose}
                     className="rounded-lg px-2 py-1 text-muted hover:bg-surface-muted"
                     aria-label="Fermer"
                   >
@@ -149,7 +153,7 @@ export function EditOpportunityDialog({
                   {/* Nom */}
                   <div>
                     <label className={LABEL} htmlFor="editOppName">
-                      Nom de l'affaire
+                      Nom de l&apos;affaire
                     </label>
                     <input
                       id="editOppName"
@@ -239,7 +243,7 @@ export function EditOpportunityDialog({
                   <div className="flex items-center justify-end gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={() => setOpen(false)}
+                      onClick={handleClose}
                       className="rounded-lg px-3 py-2 text-sm text-muted hover:bg-surface-muted"
                     >
                       Annuler

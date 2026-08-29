@@ -113,7 +113,7 @@ export function NewOpportunityDialog({
                       Nouvelle opportunité
                     </h2>
                     <p className="text-sm text-muted">
-                      Le contexte de l'affaire — pas les actions à mener.
+                      Le contexte de l&apos;affaire — pas les actions à mener.
                     </p>
                   </div>
                   <button
@@ -130,7 +130,7 @@ export function NewOpportunityDialog({
                   {/* Nom */}
                   <div>
                     <label className={LABEL} htmlFor="oppName">
-                      Nom de l'affaire
+                      Nom de l&apos;affaire
                     </label>
                     <input
                       id="oppName"
