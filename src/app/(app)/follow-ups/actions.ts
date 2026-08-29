@@ -35,6 +35,13 @@ function revalidateFollowUpPages(): void {
   for (const path of FOLLOW_UP_PATHS) revalidatePath(path);
 }
 
+/** Revalide les pages Commerce quand un suivi est lié à une opportunité. */
+function revalidateCommerceIfLinked(opportunityId: string | null): void {
+  if (!opportunityId) return;
+  revalidatePath("/commerce");
+  revalidatePath(`/commerce/${opportunityId}`);
+}
+
 export async function createFollowUp(
   _previous: CreateFollowUpState,
   formData: FormData,
@@ -90,10 +97,33 @@ export async function createFollowUp(
     contactId = contact.id;
   }
 
+  let opportunityId: string | null = null;
+
+  if (input.opportunityId) {
+    const opportunity = await prisma.opportunity.findFirst({
+      where: {
+        id: input.opportunityId,
+        workspaceId,
+        status: { in: ["A_QUALIFIER", "EN_DISCUSSION", "PROPOSITION"] },
+      },
+      select: { id: true },
+    });
+
+    if (!opportunity) {
+      return {
+        status: "error",
+        message: "Cette opportunité n'existe pas ou est clôturée.",
+        fieldErrors: { opportunityId: "Opportunité introuvable." },
+      };
+    }
+    opportunityId = opportunity.id;
+  }
+
   await prisma.followUp.create({
     data: {
       workspaceId,
       contactId,
+      opportunityId,
       title: input.title,
       description: input.description,
       ballOwner: input.ballOwner,
@@ -102,6 +132,7 @@ export async function createFollowUp(
   });
 
   revalidateFollowUpPages();
+  revalidateCommerceIfLinked(opportunityId);
   return { status: "success", message: "Suivi créé." };
 }
 
@@ -121,7 +152,7 @@ export async function applyQuickAction(formData: FormData): Promise<void> {
 
   const followUp = await prisma.followUp.findFirst({
     where: { id, workspaceId },
-    select: { id: true, status: true, dueAt: true },
+    select: { id: true, status: true, dueAt: true, opportunityId: true },
   });
 
   if (!followUp) {
@@ -153,6 +184,7 @@ export async function applyQuickAction(formData: FormData): Promise<void> {
   }
 
   revalidateFollowUpPages();
+  revalidateCommerceIfLinked(followUp.opportunityId);
 }
 
 /**

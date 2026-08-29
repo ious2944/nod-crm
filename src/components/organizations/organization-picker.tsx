@@ -14,11 +14,17 @@ import { SearchPicker, type PickerOption } from "@/components/ui/search-picker";
 export function OrganizationPicker({
   organizationId,
   organizationName,
+  required: _required,
+  error,
 }: {
   /** Identifiant de l'organisation actuellement sélectionnée. */
   organizationId: string | null;
   /** Nom affiché quand une organisation est sélectionnée. */
   organizationName: string | null;
+  /** Indique visuellement que le champ est obligatoire (validation faite côté serveur). */
+  required?: boolean;
+  /** Message d'erreur de validation à afficher sous le sélecteur. */
+  error?: string;
 }) {
   const [selected, setSelected] = useState<PickerOption | null>(
     organizationId && organizationName
@@ -42,6 +48,7 @@ export function OrganizationPicker({
       selectionName={selected?.name ?? null}
       onSelect={(option) => setSelected(option)}
       onClear={() => setSelected(null)}
+      error={error}
     />
   );
 }

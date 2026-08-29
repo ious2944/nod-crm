@@ -16,7 +16,7 @@ export interface TestUser {
 export async function resetDatabase(): Promise<void> {
   // Un seul TRUNCATE en cascade : plus rapide et insensible à l'ordre des FK.
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "privacy_treatment_processors", "privacy_incidents", "privacy_requests", "privacy_processors", "privacy_treatments", "login_attempts", "sessions", "users", "tasks", "follow_ups", "contacts", "organizations", "workspaces" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "privacy_treatment_processors", "privacy_incidents", "privacy_requests", "privacy_processors", "privacy_treatments", "login_attempts", "sessions", "users", "tasks", "follow_ups", "opportunities", "contacts", "organizations", "workspaces" RESTART IDENTITY CASCADE',
   );
   cookieJar.reset();
 }
@@ -145,6 +145,29 @@ export async function createOrganizationRecord(
     select: { id: true },
   });
   return org.id;
+}
+
+/** Crée une opportunité directement en base, pour tester l'accès inter-workspace. */
+export async function createOpportunityRecord(
+  workspaceId: string,
+  organizationId: string,
+  overrides: Partial<{
+    name: string;
+    status: "A_QUALIFIER" | "EN_DISCUSSION" | "PROPOSITION" | "GAGNEE" | "PERDUE";
+    contactId: string | null;
+  }> = {},
+): Promise<string> {
+  const opportunity = await prisma.opportunity.create({
+    data: {
+      workspaceId,
+      organizationId,
+      name: "Opportunité de test",
+      status: "A_QUALIFIER",
+      ...overrides,
+    },
+    select: { id: true },
+  });
+  return opportunity.id;
 }
 
 /** Construit un `FormData` en y joignant un fichier — pour tester l'upload. */

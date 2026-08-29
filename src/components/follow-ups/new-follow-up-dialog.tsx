@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useFormStatus } from "react-dom";
 
 import { createFollowUp } from "@/app/(app)/follow-ups/actions";
+import { OpportunityPicker } from "@/components/commerce/opportunity-picker";
 import { FIELD, FieldError, LABEL } from "@/components/ui/form";
 import {
   initialCreateState,
@@ -230,6 +231,8 @@ export function NewFollowUpDialog({
                   className={`mt-1 ${FIELD}`}
                 />
               </div>
+
+              <OpportunityPicker error={errors.opportunityId} />
 
               {state.status === "error" && state.message && (
                 <p className="rounded-lg bg-critical-bg px-3 py-2 text-sm text-critical-fg">

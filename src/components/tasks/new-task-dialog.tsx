@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useFormStatus } from "react-dom";
 
 import { createTask } from "@/app/(app)/tasks/actions";
+import { OpportunityPicker } from "@/components/commerce/opportunity-picker";
 import { ContactPicker } from "@/components/follow-ups/contact-picker";
 import { FIELD, FieldError, LABEL } from "@/components/ui/form";
 import { initialCreateTaskState, type CreateTaskState } from "@/lib/tasks/create-state";
@@ -167,6 +168,8 @@ export function NewTaskDialog({
                 onChange={setFollowUpId}
                 error={errors.followUpId}
               />
+
+              <OpportunityPicker error={errors.opportunityId} />
 
               <div>
                 <label className={LABEL} htmlFor="taskNotes">

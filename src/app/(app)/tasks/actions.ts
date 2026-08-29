@@ -19,6 +19,13 @@ import {
 } from "@/lib/tasks/schemas";
 import { getWorkspaceIdForAction } from "@/lib/workspace";
 
+/** Revalide les pages Commerce quand une tâche est liée à une opportunité. */
+function revalidateCommerceIfLinked(opportunityId: string | null): void {
+  if (!opportunityId) return;
+  revalidatePath("/commerce");
+  revalidatePath(`/commerce/${opportunityId}`);
+}
+
 /**
  * Les trois pages qui montrent des tâches. Une mutation les rafraîchit toutes :
  * terminer une tâche depuis le cockpit doit la retirer du cockpit *et* mettre à
@@ -56,6 +63,7 @@ export async function createTask(
 
   let contactId: string | null = null;
   let followUpId: string | null = null;
+  let opportunityId: string | null = null;
 
   if (input.contactId) {
     // L'identifiant vient du client : on revérifie qu'il désigne bien un
@@ -94,11 +102,34 @@ export async function createTask(
     followUpId = followUp.id;
   }
 
+  if (input.opportunityId) {
+    // Même contrôle pour l'opportunité liée. Seules les opportunités ouvertes
+    // et du workspace courant sont valides.
+    const opportunity = await prisma.opportunity.findFirst({
+      where: {
+        id: input.opportunityId,
+        workspaceId,
+        status: { in: ["A_QUALIFIER", "EN_DISCUSSION", "PROPOSITION"] },
+      },
+      select: { id: true },
+    });
+
+    if (!opportunity) {
+      return {
+        status: "error",
+        message: "Cette opportunité n'existe pas ou est clôturée.",
+        fieldErrors: { opportunityId: "Opportunité introuvable." },
+      };
+    }
+    opportunityId = opportunity.id;
+  }
+
   await prisma.task.create({
     data: {
       workspaceId,
       contactId,
       followUpId,
+      opportunityId,
       title: input.title,
       notes: input.notes,
       dueAt: startOfDay(input.dueDate, APP_TIME_ZONE),
@@ -106,6 +137,7 @@ export async function createTask(
   });
 
   revalidateTaskPages();
+  revalidateCommerceIfLinked(opportunityId);
   return { status: "success", message: "Tâche créée." };
 }
 
@@ -128,7 +160,7 @@ export async function applyTaskAction(formData: FormData): Promise<void> {
 
   const task = await prisma.task.findFirst({
     where: { id, workspaceId },
-    select: { id: true, dueAt: true, completedAt: true },
+    select: { id: true, dueAt: true, completedAt: true, opportunityId: true },
   });
 
   if (!task) {
@@ -175,6 +207,7 @@ export async function applyTaskAction(formData: FormData): Promise<void> {
   }
 
   revalidateTaskPages();
+  revalidateCommerceIfLinked(task.opportunityId);
 }
 
 /**
