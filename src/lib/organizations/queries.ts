@@ -6,6 +6,7 @@ import { dayKey } from "@/lib/date";
 import { urgencyLevel, dueLabel } from "@/lib/follow-ups/domain";
 import { contactFullName } from "@/lib/follow-ups/view";
 import { computeTaskTiming } from "@/lib/tasks/domain";
+import { formatAmount, STATUS_LABELS } from "@/lib/commerce/domain";
 import { prisma } from "@/lib/prisma";
 import { getWorkspaceIdForPage } from "@/lib/workspace";
 import {
@@ -19,6 +20,7 @@ import type {
   OrganizationDetail,
   OrganizationFollowUp,
   OrganizationListItem,
+  OrganizationOpportunity,
   OrganizationPickerOption,
   OrganizationTask,
 } from "./view";
@@ -249,6 +251,22 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
         })
       : [];
 
+  // Opportunités ouvertes directement rattachées à cette organisation.
+  const openOpportunitiesRaw = await prisma.opportunity.findMany({
+    where: {
+      workspaceId,
+      organizationId: id,
+      status: { in: ["A_QUALIFIER", "EN_DISCUSSION", "PROPOSITION"] },
+    },
+    orderBy: [{ updatedAt: "desc" }],
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      estimatedAmount: true,
+    },
+  });
+
   const mappedContacts: OrganizationContact[] = contacts.map((c) => ({
     id: c.id,
     displayName: contactFullName(c) || c.email || "Contact sans nom",
@@ -301,6 +319,19 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
     };
   });
 
+  const mappedOpportunities: OrganizationOpportunity[] = openOpportunitiesRaw.map((opp) => {
+    const status = opp.status as import("@/lib/commerce/domain").OpportunityStatus;
+    return {
+      id: opp.id as string,
+      name: opp.name as string,
+      status,
+      statusLabel: STATUS_LABELS[status],
+      estimatedAmount: opp.estimatedAmount
+        ? formatAmount(parseFloat((opp.estimatedAmount as { toString(): string }).toString()))
+        : null,
+    };
+  });
+
   return {
     id: record.id,
     name: record.name,
@@ -313,6 +344,7 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
     contacts: mappedContacts,
     openFollowUps: mappedFollowUps,
     openTasks: mappedTasks,
+    openOpportunities: mappedOpportunities,
   };
 }
 

@@ -40,6 +40,65 @@ function daysAgo(days: number): Date {
 }
 
 /**
+ * Opportunités fictives de démonstration (Commerce V2).
+ *
+ * Couvre les cinq statuts du pipeline pour illustrer toutes les vues de la
+ * page Commerce. Les montants et dates sont volontairement approximatifs.
+ */
+const OPPORTUNITIES = [
+  {
+    name: "Refonte site web",
+    organizationKey: "acme",
+    contactKey: "alice",
+    status: "EN_DISCUSSION" as const,
+    estimatedAmount: 25000,
+    expectedCloseAt: dueInDays(45),
+    closedAt: null,
+    notes: "Besoin d'un devis détaillé par module.",
+  },
+  {
+    name: "Migration cloud",
+    organizationKey: "example-co",
+    contactKey: "bob",
+    status: "PROPOSITION" as const,
+    estimatedAmount: 80000,
+    expectedCloseAt: dueInDays(30),
+    closedAt: null,
+    notes: null,
+  },
+  {
+    name: "Formation équipe",
+    organizationKey: "globex",
+    contactKey: "carla",
+    status: "A_QUALIFIER" as const,
+    estimatedAmount: null,
+    expectedCloseAt: null,
+    closedAt: null,
+    notes: "À qualifier lors du prochain rendez-vous.",
+  },
+  {
+    name: "Audit sécurité",
+    organizationKey: "initech",
+    contactKey: null,
+    status: "GAGNEE" as const,
+    estimatedAmount: 15000,
+    expectedCloseAt: null,
+    closedAt: daysAgo(10),
+    notes: null,
+  },
+  {
+    name: "Déploiement ERP",
+    organizationKey: "acme",
+    contactKey: null,
+    status: "PERDUE" as const,
+    estimatedAmount: 120000,
+    expectedCloseAt: null,
+    closedAt: daysAgo(30),
+    notes: "Budget insuffisant côté client pour cette enveloppe.",
+  },
+];
+
+/**
  * Organisations fictives de démonstration (V0.5).
  *
  * Chaque organisation est rattachée aux contacts qui la référençaient via le
@@ -106,9 +165,10 @@ async function main() {
   });
 
   // Idempotent : on repart d'un jeu de démo propre à chaque exécution.
-  // Les tâches d'abord : elles référencent les suivis.
+  // Les tâches et suivis d'abord : ils peuvent référencer les opportunités.
   await prisma.task.deleteMany({ where: { workspaceId: workspace.id, isDemo: true } });
   await prisma.followUp.deleteMany({ where: { workspaceId: workspace.id, isDemo: true } });
+  await prisma.opportunity.deleteMany({ where: { workspaceId: workspace.id, isDemo: true } });
   await prisma.contact.deleteMany({ where: { workspaceId: workspace.id, isDemo: true } });
   // Les organisations de démonstration n'ont pas de colonne isDemo : on les
   // identifie par le nom et le workspace, et on les recrée idempotement.
@@ -306,8 +366,27 @@ async function main() {
     });
   }
 
+  for (const opp of OPPORTUNITIES) {
+    const organizationId = organizations.get(opp.organizationKey)!;
+    const contactId = opp.contactKey ? contacts.get(opp.contactKey) : null;
+    await prisma.opportunity.create({
+      data: {
+        workspaceId: workspace.id,
+        organizationId,
+        contactId: contactId ?? null,
+        name: opp.name,
+        status: opp.status,
+        estimatedAmount: opp.estimatedAmount,
+        expectedCloseAt: opp.expectedCloseAt,
+        closedAt: opp.closedAt,
+        notes: opp.notes,
+        isDemo: true,
+      },
+    });
+  }
+
   console.log(
-    `Seed terminé : ${ORGANIZATIONS.length} organisations, ${CONTACTS.length} contacts, ${followUps.length} suivis et ${tasks.length} tâches de démonstration.`,
+    `Seed terminé : ${ORGANIZATIONS.length} organisations, ${CONTACTS.length} contacts, ${followUps.length} suivis, ${tasks.length} tâches et ${OPPORTUNITIES.length} opportunités de démonstration.`,
   );
   // Aucun identifiant n'est seedé : les comptes se créent uniquement à la main.
   const userCount = await prisma.user.count({ where: { workspaceId: workspace.id } });

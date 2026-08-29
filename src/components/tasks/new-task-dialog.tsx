@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useFormStatus } from "react-dom";
 
 import { createTask } from "@/app/(app)/tasks/actions";
+import { OpportunityPicker } from "@/components/commerce/opportunity-picker";
 import { ContactPicker } from "@/components/follow-ups/contact-picker";
 import { FIELD, FieldError, LABEL } from "@/components/ui/form";
 import { initialCreateTaskState, type CreateTaskState } from "@/lib/tasks/create-state";
@@ -35,10 +36,15 @@ function SubmitButton() {
 
 export function NewTaskDialog({
   defaultDueDate,
+  defaultOpportunityId,
+  defaultOpportunityName,
   triggerLabel = "Nouvelle tâche",
   triggerClassName,
 }: {
   defaultDueDate: string;
+  /** Opportunité pré-sélectionnée (depuis la fiche opportunité). */
+  defaultOpportunityId?: string;
+  defaultOpportunityName?: string;
   triggerLabel?: string;
   triggerClassName?: string;
 }) {
@@ -166,6 +172,12 @@ export function NewTaskDialog({
                 value={followUpId}
                 onChange={setFollowUpId}
                 error={errors.followUpId}
+              />
+
+              <OpportunityPicker
+                opportunityId={defaultOpportunityId}
+                opportunityName={defaultOpportunityName}
+                error={errors.opportunityId}
               />
 
               <div>

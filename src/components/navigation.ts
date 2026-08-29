@@ -29,6 +29,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "Contacts", href: "/contacts", available: true, icon: "◍" },
       { label: "Organisations", href: "/organizations", available: true, icon: "▤" },
+      { label: "Commerce", href: "/commerce", available: true, icon: "◇" },
     ],
   },
   {

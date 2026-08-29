@@ -252,6 +252,39 @@ export default async function OrganizationPage({ params }: PageProps<"/organizat
         </section>
       )}
 
+      {/* ── Opportunités ouvertes ─────────────────────────────────────────── */}
+      {org.openOpportunities.length > 0 && (
+        <section aria-label="Opportunités ouvertes" className="mt-8">
+          <h2 className="text-lg font-semibold tracking-tight">
+            Opportunités{" "}
+            <span className="text-base font-normal text-muted">
+              ({org.openOpportunities.length})
+            </span>
+          </h2>
+
+          <ul className="mt-3 space-y-2">
+            {org.openOpportunities.map((opp) => (
+              <li key={opp.id}>
+                <Link
+                  href={`/commerce/${opp.id}`}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-subtle bg-surface px-4 py-3 shadow-card transition-all hover:border-border-strong hover:shadow-card-hover"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-ink">{opp.name}</p>
+                    <p className="text-xs text-muted">{opp.statusLabel}</p>
+                  </div>
+                  {opp.estimatedAmount && (
+                    <p className="shrink-0 text-sm font-semibold text-ink">
+                      {opp.estimatedAmount}
+                    </p>
+                  )}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <p className="mt-8 text-xs text-muted">Créé le {createdDate}</p>
     </div>
   );

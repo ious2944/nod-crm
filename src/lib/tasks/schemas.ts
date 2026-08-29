@@ -49,6 +49,7 @@ export const createTaskSchema = z.object({
   dueDate: dueDateSchema,
   contactId: optionalLink("Contact invalide."),
   followUpId: optionalLink("Suivi invalide."),
+  opportunityId: optionalLink("Opportunité invalide."),
   notes: optionalText(TASK_LIMITS.notes),
 });
 

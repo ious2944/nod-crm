@@ -33,6 +33,16 @@ export interface OrganizationDetail {
   contacts: OrganizationContact[];
   openFollowUps: OrganizationFollowUp[];
   openTasks: OrganizationTask[];
+  openOpportunities: OrganizationOpportunity[];
+}
+
+/** Une opportunité vue depuis la fiche organisation (résumé). */
+export interface OrganizationOpportunity {
+  id: string;
+  name: string;
+  status: string;
+  statusLabel: string;
+  estimatedAmount: string | null;
 }
 
 /** Un contact vu depuis la fiche organisation. */

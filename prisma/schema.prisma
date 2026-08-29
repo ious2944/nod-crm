@@ -1,5 +1,5 @@
 // NOD CRM — schéma
-// Périmètre : Workspace / Organization / Contact / FollowUp / Task / RGPD Essentials.
+// Périmètre : Workspace / Organization / Contact / FollowUp / Task / RGPD Essentials / Commerce.
 
 generator client {
   provider = "prisma-client"
@@ -21,6 +21,15 @@ enum BallOwner {
   THEM
 }
 
+/// Étapes du pipeline commercial. GAGNEE et PERDUE clôturent l'opportunité.
+enum OpportunityStatus {
+  A_QUALIFIER
+  EN_DISCUSSION
+  PROPOSITION
+  GAGNEE
+  PERDUE
+}
+
 model Workspace {
   id        String   @id @default(uuid()) @db.Uuid
   slug      String   @unique
@@ -33,6 +42,7 @@ model Workspace {
   organizations     Organization[]
   tasks             Task[]
   users             User[]
+  opportunities     Opportunity[]
   privacyTreatments PrivacyTreatment[]
   privacyProcessors PrivacyProcessor[]
   privacyRequests   PrivacyRequest[]
@@ -115,8 +125,9 @@ model Organization {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  contacts  Contact[]
+  workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contacts      Contact[]
+  opportunities Opportunity[]
 
   @@index([workspaceId, archivedAt, name])
   @@map("organizations")
@@ -145,6 +156,7 @@ model Contact {
   organization    Organization?    @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   followUps       FollowUp[]
   tasks           Task[]
+  opportunities   Opportunity[]
   privacyRequests PrivacyRequest[]
 
   @@index([workspaceId, archivedAt, firstName, lastName])
@@ -155,52 +167,99 @@ model Contact {
 }
 
 model FollowUp {
-  id           String         @id @default(uuid()) @db.Uuid
-  workspaceId  String         @map("workspace_id") @db.Uuid
-  contactId    String?        @map("contact_id") @db.Uuid
-  title        String
-  description  String?
-  status       FollowUpStatus @default(OPEN)
-  ballOwner    BallOwner      @default(THEM) @map("ball_owner")
-  dueAt        DateTime       @map("due_at")
-  nudgeCount   Int            @default(0) @map("nudge_count")
-  lastNudgedAt DateTime?      @map("last_nudged_at")
-  isDemo       Boolean        @default(false) @map("is_demo")
-  createdAt    DateTime       @default(now()) @map("created_at")
-  updatedAt    DateTime       @updatedAt @map("updated_at")
-  completedAt  DateTime?      @map("completed_at")
+  id             String         @id @default(uuid()) @db.Uuid
+  workspaceId    String         @map("workspace_id") @db.Uuid
+  contactId      String?        @map("contact_id") @db.Uuid
+  /// Lien facultatif vers une opportunité commerciale. N'altère pas le
+  /// fonctionnement normal du suivi (balle, relance, Today).
+  opportunityId  String?        @map("opportunity_id") @db.Uuid
+  title          String
+  description    String?
+  status         FollowUpStatus @default(OPEN)
+  ballOwner      BallOwner      @default(THEM) @map("ball_owner")
+  dueAt          DateTime       @map("due_at")
+  nudgeCount     Int            @default(0) @map("nudge_count")
+  lastNudgedAt   DateTime?      @map("last_nudged_at")
+  isDemo         Boolean        @default(false) @map("is_demo")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  completedAt    DateTime?      @map("completed_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  tasks     Task[]
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact     Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  opportunity Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  tasks       Task[]
 
   @@index([workspaceId, status, dueAt])
   @@index([contactId])
+  @@index([opportunityId])
   @@map("follow_ups")
 }
 
 /// Une tâche (V0.4) : quelque chose à faire.
 model Task {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @map("workspace_id") @db.Uuid
-  contactId   String?   @map("contact_id") @db.Uuid
-  followUpId  String?   @map("follow_up_id") @db.Uuid
-  title       String
-  notes       String?
-  dueAt       DateTime  @map("due_at")
-  completedAt DateTime? @map("completed_at")
-  isDemo      Boolean   @default(false) @map("is_demo")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String    @map("workspace_id") @db.Uuid
+  contactId     String?   @map("contact_id") @db.Uuid
+  followUpId    String?   @map("follow_up_id") @db.Uuid
+  /// Lien facultatif vers une opportunité commerciale. N'altère pas le
+  /// fonctionnement normal de la tâche.
+  opportunityId String?   @map("opportunity_id") @db.Uuid
+  title         String
+  notes         String?
+  dueAt         DateTime  @map("due_at")
+  completedAt   DateTime? @map("completed_at")
+  isDemo        Boolean   @default(false) @map("is_demo")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  followUp  FollowUp? @relation(fields: [followUpId], references: [id], onDelete: SetNull)
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact     Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  followUp    FollowUp?    @relation(fields: [followUpId], references: [id], onDelete: SetNull)
+  opportunity Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId, completedAt, dueAt])
   @@index([contactId])
   @@index([followUpId])
+  @@index([opportunityId])
   @@map("tasks")
+}
+
+/// Module Commerce (V0.9) — affaire commerciale en cours de négociation.
+///
+/// Une opportunité décrit l'affaire (qui, combien, où en est-on). Elle ne
+/// contient aucune logique de rappel ni d'échéance opérationnelle : ce rôle
+/// appartient aux Tâches et aux Suivis liés via `opportunityId`.
+model Opportunity {
+  id              String            @id @default(uuid()) @db.Uuid
+  workspaceId     String            @map("workspace_id") @db.Uuid
+  organizationId  String            @map("organization_id") @db.Uuid
+  /// Contact principal : doit appartenir au même workspace. Facultatif.
+  contactId       String?           @map("contact_id") @db.Uuid
+  name            String
+  status          OpportunityStatus @default(A_QUALIFIER)
+  /// Montant estimé hors taxe, en unité monétaire de l'espace.
+  estimatedAmount Decimal?          @map("estimated_amount") @db.Decimal(14, 2)
+  /// Date de clôture souhaitée, saisie par l'utilisateur.
+  expectedCloseAt DateTime?         @map("expected_close_at")
+  /// Horodatage effectif de passage au statut GAGNEE ou PERDUE.
+  closedAt        DateTime?         @map("closed_at")
+  notes           String?
+  isDemo          Boolean           @default(false) @map("is_demo")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact      Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  tasks        Task[]
+  followUps    FollowUp[]
+
+  @@index([workspaceId, status, createdAt])
+  @@index([workspaceId, status, estimatedAmount])
+  @@index([organizationId])
+  @@index([contactId])
+  @@map("opportunities")
 }
 
 /// V0.8 — entrée du registre des traitements RGPD.

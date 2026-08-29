@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useFormStatus } from "react-dom";
 
 import { createFollowUp } from "@/app/(app)/follow-ups/actions";
+import { OpportunityPicker } from "@/components/commerce/opportunity-picker";
 import { FIELD, FieldError, LABEL } from "@/components/ui/form";
 import {
   initialCreateState,
@@ -28,12 +29,17 @@ function SubmitButton() {
 export function NewFollowUpDialog({
   defaultDueDate,
   defaultContact,
+  defaultOpportunityId,
+  defaultOpportunityName,
   triggerLabel = "Nouveau suivi",
   triggerClassName,
 }: {
   defaultDueDate: string;
   /** Contact déjà choisi — le bouton « + Nouveau Follow-Up » d'une fiche. */
   defaultContact?: PickerSelection;
+  /** Opportunité pré-sélectionnée (depuis la fiche opportunité). */
+  defaultOpportunityId?: string;
+  defaultOpportunityName?: string;
   triggerLabel?: string;
   triggerClassName?: string;
 }) {
@@ -230,6 +236,12 @@ export function NewFollowUpDialog({
                   className={`mt-1 ${FIELD}`}
                 />
               </div>
+
+              <OpportunityPicker
+                opportunityId={defaultOpportunityId}
+                opportunityName={defaultOpportunityName}
+                error={errors.opportunityId}
+              />
 
               {state.status === "error" && state.message && (
                 <p className="rounded-lg bg-critical-bg px-3 py-2 text-sm text-critical-fg">

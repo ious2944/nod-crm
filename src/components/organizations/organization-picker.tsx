@@ -14,11 +14,17 @@ import { SearchPicker, type PickerOption } from "@/components/ui/search-picker";
 export function OrganizationPicker({
   organizationId,
   organizationName,
+  required = false,
+  error,
 }: {
   /** Identifiant de l'organisation actuellement sélectionnée. */
   organizationId: string | null;
   /** Nom affiché quand une organisation est sélectionnée. */
   organizationName: string | null;
+  /** Champ obligatoire : masque l'option « Aucune organisation » et retire « (facultatif) » du libellé. */
+  required?: boolean;
+  /** Message d'erreur de validation à afficher sous le sélecteur. */
+  error?: string;
 }) {
   const [selected, setSelected] = useState<PickerOption | null>(
     organizationId && organizationName
@@ -33,15 +39,16 @@ export function OrganizationPicker({
   return (
     <SearchPicker
       name="organizationId"
-      label="Organisation (facultatif)"
+      label={required ? "Organisation" : "Organisation (facultatif)"}
       placeholder="Rechercher une organisation…"
-      noneLabel="Aucune organisation"
+      noneLabel={required ? undefined : "Aucune organisation"}
       emptyLabel="Aucune organisation trouvée"
       search={search}
       value={selected?.id ?? ""}
       selectionName={selected?.name ?? null}
       onSelect={(option) => setSelected(option)}
       onClear={() => setSelected(null)}
+      error={error}
     />
   );
 }

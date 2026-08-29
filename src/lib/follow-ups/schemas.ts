@@ -77,6 +77,15 @@ export const createFollowUpSchema = z
     newContactFirstName: optionalText(80),
     newContactLastName: optionalText(80),
     newContactOrganization: optionalText(120),
+    // Lien facultatif vers une opportunité.
+    opportunityId: z
+      .string()
+      .trim()
+      .default("")
+      .refine(
+        (value) => value === "" || UUID_PATTERN.test(value),
+        "Opportunité invalide.",
+      ),
   })
   .superRefine((value, ctx) => {
     if (value.contactId !== "new") return;
