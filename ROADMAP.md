@@ -70,7 +70,7 @@ Shipped:
 
 ---
 
-## V0.8 — RGPD Essentials *(current)*
+## V0.8 — RGPD Essentials
 
 A lightweight privacy operations workspace for startups, TPEs and small teams.
 
@@ -98,9 +98,33 @@ The product helps document and operate privacy work; it does not decide the law 
 
 ---
 
+## V0.9 — Commerce *(current)*
+
+A lightweight commercial opportunity module.
+
+Shipped in the V0.9 scope:
+
+- **Opportunity list** at `/commerce` with open/closed/all filters and pipeline statistics.
+- **Five-stage pipeline** — À qualifier, En discussion, Proposition, Gagnée, Perdue — with server-side state transitions.
+- **Opportunity sheet** at `/commerce/[id]` with pipeline controls, edit and delete.
+- **Opportunity fields** — name, organisation (required), optional contact, estimated amount, expected close date and notes.
+- **Task and follow-up integration** — create a task or follow-up directly from an opportunity with the opportunity preselected; linked items are preserved on deletion (`ON DELETE SET NULL`).
+- **Organisation integration** — open opportunities listed on the organisation sheet.
+- **Workspace isolation** on all opportunity reads, writes and relationships.
+
+Deliberate V0.9 boundaries:
+
+- No deal scoring or probability.
+- No forecasting or pipeline revenue projection.
+- No marketing automation.
+- No invoicing, quoting or ERP integration.
+- Commerce does not add a relance or next-action engine; this stays with Tasks and Follow-ups.
+
+---
+
 ## Next
 
-Candidates after V0.8, ordered by observed product need rather than by commitment:
+Candidates after V0.9, ordered by observed product need rather than by commitment:
 
 - CSV import/export for contacts.
 - Better search indexes (`pg_trgm`) when workspace size justifies them.
@@ -117,7 +141,7 @@ Candidates after V0.8, ordered by observed product need rather than by commitmen
 
 ## Explicitly out of scope for a long time
 
-- Sales pipelines, stages, deal scoring and forecasting.
+- Deal scoring, revenue forecasting and pipeline analytics.
 - Marketing automation and campaigns.
 - Plugin ecosystems.
 - Native mobile application.
