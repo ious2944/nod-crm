@@ -3,7 +3,7 @@ import "server-only";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
 import { getWorkspaceIdForPage } from "@/lib/workspace";
-import type { TaskBucket } from "./domain";
+import { computeTaskTiming, type TaskBucket } from "./domain";
 import type { TaskFilter } from "./filters";
 import { toTaskView, type TaskView } from "./view";
 
@@ -119,6 +119,31 @@ export async function getActionableTasks(endOfToday: Date): Promise<TaskView[]> 
   });
 
   return records.map((record) => toTaskView(record, now, APP_TIME_ZONE));
+}
+
+/**
+ * Tâches non terminées dans la fenêtre `[passé, endOfWindow]`, pour le calcul
+ * des compteurs KPI de la page « Aujourd'hui ».
+ *
+ * Retourne uniquement le `bucket` (« overdue » / « today » / « upcoming ») —
+ * suffisant pour incrémenter les compteurs, sans charger le contact ni le suivi.
+ *
+ * `endOfWindow` doit couvrir la fenêtre « À venir » (typiquement
+ * `endOfDay(today + UPCOMING_WINDOW_DAYS)`), pas seulement aujourd'hui, pour
+ * que le KPI « À venir » intègre bien les tâches futures proches.
+ */
+export async function getTasksForKpi(endOfWindow: Date): Promise<{ bucket: TaskBucket }[]> {
+  const workspaceId = await getWorkspaceIdForPage();
+  const now = new Date();
+
+  const records = (await prisma.task.findMany({
+    where: { workspaceId, completedAt: null, dueAt: { lte: endOfWindow } },
+    select: { dueAt: true },
+  })) as { dueAt: Date }[];
+
+  return records.map(({ dueAt }) => ({
+    bucket: computeTaskTiming({ dueAt, completedAt: null }, now, APP_TIME_ZONE).bucket as TaskBucket,
+  }));
 }
 
 export interface FollowUpPickerOption {

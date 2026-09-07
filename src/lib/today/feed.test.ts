@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import { startOfDay } from "@/lib/date";
+import type { AttentionCounters } from "@/lib/cockpit/filters";
 import { toFollowUpView } from "@/lib/follow-ups/view";
 import { toTaskView } from "@/lib/tasks/view";
-import { buildTodayFeed, cockpitHeadline } from "./feed";
+import {
+  buildTodayFeed,
+  cockpitHeadline,
+  computeTaskKpiCounts,
+  mergeAttentionCounters,
+  type TaskKpiCounts,
+} from "./feed";
 
 const PARIS = "Europe/Paris";
 const NOW = new Date("2026-06-10T09:00:00+02:00");
@@ -92,5 +99,136 @@ describe("cockpitHeadline", () => {
     expect(cockpitHeadline(0)).toBe("Tout est sous contrôle.");
     expect(cockpitHeadline(1)).toBe("1 élément à traiter aujourd'hui.");
     expect(cockpitHeadline(5)).toBe("5 éléments à traiter aujourd'hui.");
+  });
+});
+
+// ─── computeTaskKpiCounts ────────────────────────────────────────────────────
+
+describe("computeTaskKpiCounts", () => {
+  it("range une tâche du jour dans « today »", () => {
+    const counts = computeTaskKpiCounts([{ bucket: "today" }]);
+    expect(counts).toEqual({ overdue: 0, today: 1, upcoming: 0 });
+  });
+
+  it("range une tâche en retard dans « overdue »", () => {
+    const counts = computeTaskKpiCounts([{ bucket: "overdue" }]);
+    expect(counts).toEqual({ overdue: 1, today: 0, upcoming: 0 });
+  });
+
+  it("range une tâche future dans « upcoming »", () => {
+    const counts = computeTaskKpiCounts([{ bucket: "upcoming" }]);
+    expect(counts).toEqual({ overdue: 0, today: 0, upcoming: 1 });
+  });
+
+  it("n'intègre pas une tâche terminée", () => {
+    const counts = computeTaskKpiCounts([{ bucket: "completed" as "overdue" }]);
+    // « completed » n'incrémente aucun compteur
+    expect(counts).toEqual({ overdue: 0, today: 0, upcoming: 0 });
+  });
+
+  it("mêle tâche en retard + tâche du jour → overdue:1, today:1", () => {
+    const counts = computeTaskKpiCounts([{ bucket: "overdue" }, { bucket: "today" }]);
+    expect(counts).toEqual({ overdue: 1, today: 1, upcoming: 0 });
+  });
+
+  it("retourne tout à zéro quand la liste est vide", () => {
+    expect(computeTaskKpiCounts([])).toEqual({ overdue: 0, today: 0, upcoming: 0 });
+  });
+});
+
+// ─── mergeAttentionCounters ──────────────────────────────────────────────────
+
+describe("mergeAttentionCounters", () => {
+  function followUpCounters(overrides: Partial<AttentionCounters> = {}): AttentionCounters {
+    return { late: 0, today: 0, upcoming: 0, waiting: 0, ...overrides };
+  }
+
+  function taskCounts(overrides: Partial<TaskKpiCounts> = {}): TaskKpiCounts {
+    return { overdue: 0, today: 0, upcoming: 0, ...overrides };
+  }
+
+  // Scénario 1 : tâche du jour ⇒ +1 dans Aujourd'hui
+  it("1. tâche due aujourd'hui → +1 dans Aujourd'hui", () => {
+    const merged = mergeAttentionCounters(followUpCounters(), taskCounts({ today: 1 }));
+    expect(merged.today).toBe(1);
+    expect(merged.late).toBe(0);
+    expect(merged.upcoming).toBe(0);
+  });
+
+  // Scénario 2 : suivi du jour ⇒ +1 dans Aujourd'hui (via followUpCounters)
+  it("2. suivi dû aujourd'hui → +1 dans Aujourd'hui", () => {
+    const merged = mergeAttentionCounters(followUpCounters({ today: 1 }), taskCounts());
+    expect(merged.today).toBe(1);
+  });
+
+  // Scénario 3 : tâche + suivi dus aujourd'hui → Aujourd'hui = 2
+  it("3. tâche + suivi dus aujourd'hui → Aujourd'hui = 2", () => {
+    const merged = mergeAttentionCounters(followUpCounters({ today: 1 }), taskCounts({ today: 1 }));
+    expect(merged.today).toBe(2);
+  });
+
+  // Scénario 4 : tâche en retard ⇒ +1 dans En retard
+  it("4. tâche en retard → +1 dans En retard", () => {
+    const merged = mergeAttentionCounters(followUpCounters(), taskCounts({ overdue: 1 }));
+    expect(merged.late).toBe(1);
+    expect(merged.today).toBe(0);
+  });
+
+  // Scénario 5 : suivi en retard ⇒ +1 dans En retard
+  it("5. suivi en retard → +1 dans En retard", () => {
+    const merged = mergeAttentionCounters(followUpCounters({ late: 1 }), taskCounts());
+    expect(merged.late).toBe(1);
+  });
+
+  // Scénario 6 : tâche future ⇒ +1 dans À venir
+  it("6. tâche future → +1 dans À venir", () => {
+    const merged = mergeAttentionCounters(followUpCounters(), taskCounts({ upcoming: 1 }));
+    expect(merged.upcoming).toBe(1);
+  });
+
+  // Scénario 7 : suivi futur ⇒ +1 dans À venir
+  it("7. suivi futur → +1 dans À venir", () => {
+    const merged = mergeAttentionCounters(followUpCounters({ upcoming: 1 }), taskCounts());
+    expect(merged.upcoming).toBe(1);
+  });
+
+  // Scénario 8 : tâche terminée ⇒ non comptée
+  it("8. tâche terminée → non comptée", () => {
+    // computeTaskKpiCounts écarte les tâches complétées (bucket = "completed")
+    const counts = computeTaskKpiCounts([{ bucket: "completed" as "overdue" }]);
+    const merged = mergeAttentionCounters(followUpCounters(), counts);
+    expect(merged.late + merged.today + merged.upcoming).toBe(0);
+  });
+
+  // Scénario 9 : suivi terminé ⇒ non compté (géré par getCockpit côté suivis)
+  it("9. suivi terminé → non compté dans les compteurs de suivi", () => {
+    // getCockpit filtre status: "OPEN", donc les suivis clos ne sont jamais
+    // dans followUpCounters. Ce test vérifie que mergeAttentionCounters ne les
+    // réintroduit pas.
+    const merged = mergeAttentionCounters(followUpCounters({ today: 0 }), taskCounts());
+    expect(merged.today).toBe(0);
+  });
+
+  // Scénario 10 : pas de double comptage entre En retard / Aujourd'hui / À venir
+  it("10. absence de double comptage entre En retard / Aujourd'hui / À venir", () => {
+    // Un élément ne peut appartenir qu'à un seul bucket.
+    const merged = mergeAttentionCounters(
+      followUpCounters({ late: 1, today: 1, upcoming: 1 }),
+      taskCounts({ overdue: 1, today: 1, upcoming: 1 }),
+    );
+    // Chaque bucket compte exactement 2 (1 suivi + 1 tâche), sans recouvrement.
+    expect(merged.late).toBe(2);
+    expect(merged.today).toBe(2);
+    expect(merged.upcoming).toBe(2);
+    // La somme est exactement 6, sans aucun élément compté deux fois.
+    expect(merged.late + merged.today + merged.upcoming).toBe(6);
+  });
+
+  it("préserve le compteur « Chez eux » inchangé (pas de balle pour les tâches)", () => {
+    const merged = mergeAttentionCounters(
+      followUpCounters({ waiting: 3 }),
+      taskCounts({ overdue: 5, today: 5, upcoming: 5 }),
+    );
+    expect(merged.waiting).toBe(3);
   });
 });

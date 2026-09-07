@@ -1,5 +1,5 @@
 /**
- * Assemblage du feed « Aujourd'hui ».
+ * Assemblage du feed « Aujourd'hui » et compteurs KPI combinés.
  *
  * Le cockpit répond à une seule question — *qu'est-ce qui demande une action
  * maintenant ?* — et deux objets peuvent y répondre :
@@ -11,9 +11,13 @@
  * Rien ici ne synchronise leurs états — terminer une tâche ne touche pas au
  * suivi qu'elle cite, et réciproquement.
  *
+ * Les KPI (En retard / Aujourd'hui / À venir) comptent les deux types.
+ * « Chez eux » reste propre aux suivis : aucune tâche n'a de notion de balle.
+ *
  * Fonctions pures : testées dans `feed.test.ts`.
  */
 
+import type { AttentionCounters } from "@/lib/cockpit/filters";
 import type { FollowUpView } from "@/lib/follow-ups/view";
 import type { TaskView } from "@/lib/tasks/view";
 
@@ -75,4 +79,70 @@ export function cockpitHeadline(count: number): string {
   if (count === 0) return "Tout est sous contrôle.";
   if (count === 1) return "1 élément à traiter aujourd'hui.";
   return `${count} éléments à traiter aujourd'hui.`;
+}
+
+// ─── Compteurs KPI combinés ───────────────────────────────────────────────────
+
+/**
+ * Répartition des tâches non terminées dans les trois catégories temporelles
+ * des KPI du cockpit.
+ *
+ * La requête qui alimente cette fonction filtre déjà `dueAt <= endOfWindow`,
+ * donc toute tâche avec `bucket === "upcoming"` est garantie dans la fenêtre.
+ */
+export interface TaskKpiCounts {
+  overdue: number;
+  today: number;
+  upcoming: number;
+}
+
+/**
+ * Compte les tâches non terminées par catégorie KPI.
+ *
+ * Entrée : tableau de `TaskView` dont `bucket` est déjà calculé et dont
+ * `completedAt === null` est garanti par la requête amont.
+ *
+ * Le champ `bucket` de `TaskView` vaut `"overdue"`, `"today"` ou `"upcoming"`
+ * pour les tâches actives ; `"completed"` ne peut apparaître ici que par
+ * erreur, et est simplement ignoré.
+ */
+export function computeTaskKpiCounts(
+  tasks: readonly Pick<TaskView, "bucket">[],
+): TaskKpiCounts {
+  let overdue = 0;
+  let today = 0;
+  let upcoming = 0;
+
+  for (const task of tasks) {
+    if (task.bucket === "overdue") overdue++;
+    else if (task.bucket === "today") today++;
+    else if (task.bucket === "upcoming") upcoming++;
+    // "completed" ignoré : ne doit pas arriver, mais ne casse rien s'il arrive.
+  }
+
+  return { overdue, today, upcoming };
+}
+
+/**
+ * Fusionne les compteurs KPI des suivis (source : cockpit) et des tâches.
+ *
+ * Règle métier :
+ * - « En retard » = suivis en retard + tâches en retard
+ * - « Aujourd'hui » = suivis du jour + tâches du jour
+ * - « À venir » = suivis à venir + tâches à venir (dans la même fenêtre)
+ * - « Chez eux » = suivis chez eux uniquement — les tâches n'ont pas de balle.
+ *
+ * Les trois premières catégories sont mutuellement exclusives : un élément ne
+ * peut appartenir qu'à l'une d'elles, donc il n'y a pas de double comptage.
+ */
+export function mergeAttentionCounters(
+  followUpCounters: AttentionCounters,
+  taskCounts: TaskKpiCounts,
+): AttentionCounters {
+  return {
+    late: followUpCounters.late + taskCounts.overdue,
+    today: followUpCounters.today + taskCounts.today,
+    upcoming: followUpCounters.upcoming + taskCounts.upcoming,
+    waiting: followUpCounters.waiting, // inchangé : pas de balle pour les tâches
+  };
 }

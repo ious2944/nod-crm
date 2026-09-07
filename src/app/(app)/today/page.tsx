@@ -14,7 +14,9 @@ import { getCockpit } from "@/lib/cockpit/queries";
 import { todayLabel } from "@/lib/cockpit/view";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { addDaysToKey, dayKey, endOfDay } from "@/lib/date";
-import { getActionableTasks } from "@/lib/tasks/queries";
+import { computeTaskKpiCounts, mergeAttentionCounters } from "@/lib/today/feed";
+import { getActionableTasks, getTasksForKpi } from "@/lib/tasks/queries";
+import { UPCOMING_WINDOW_DAYS } from "@/lib/cockpit/domain";
 import Link from "next/link";
 
 export const metadata = {
@@ -30,10 +32,22 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
   const filter = parseCockpitFilter(params.f);
   const today = dayKey(new Date(), APP_TIME_ZONE);
 
-  const [cockpit, actionableTasks] = await Promise.all([
+  // `endOfKpiWindow` couvre la fenêtre « À venir » (UPCOMING_WINDOW_DAYS jours)
+  // pour que le KPI « À venir » intègre les tâches futures proches, exactement
+  // comme il le fait pour les suivis.
+  const endOfKpiWindow = endOfDay(addDaysToKey(today, UPCOMING_WINDOW_DAYS), APP_TIME_ZONE);
+
+  const [cockpit, actionableTasks, tasksForKpi] = await Promise.all([
     getCockpit(filter),
     getActionableTasks(endOfDay(today, APP_TIME_ZONE)),
+    getTasksForKpi(endOfKpiWindow),
   ]);
+
+  // Compteurs combinés suivis + tâches pour les 4 KPI.
+  const counters = mergeAttentionCounters(
+    cockpit.counters,
+    computeTaskKpiCounts(tasksForKpi),
+  );
 
   return (
     <div className="flex min-h-full flex-col">
@@ -61,7 +75,7 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
       <div className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 sm:px-6 sm:py-8">
         {/* Indicateurs d'attention */}
         <section aria-label="Indicateurs d'attention">
-          <AttentionSummary counters={cockpit.counters} filter={filter} />
+          <AttentionSummary counters={counters} filter={filter} />
 
           {actionableTasks.length > 0 && (
             <p className="mt-3 text-sm text-muted">
