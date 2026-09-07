@@ -14,8 +14,8 @@ import { getCockpit } from "@/lib/cockpit/queries";
 import { todayLabel } from "@/lib/cockpit/view";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { addDaysToKey, dayKey, endOfDay } from "@/lib/date";
-import { computeTaskKpiCounts, mergeAttentionCounters } from "@/lib/today/feed";
-import { getActionableTasks, getTasksForKpi } from "@/lib/tasks/queries";
+import { computeTaskKpiCounts, filterTasksForKpi, mergeAttentionCounters } from "@/lib/today/feed";
+import { getTasksForKpi } from "@/lib/tasks/queries";
 import { UPCOMING_WINDOW_DAYS } from "@/lib/cockpit/domain";
 import Link from "next/link";
 
@@ -37,17 +37,21 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
   // comme il le fait pour les suivis.
   const endOfKpiWindow = endOfDay(addDaysToKey(today, UPCOMING_WINDOW_DAYS), APP_TIME_ZONE);
 
-  const [cockpit, actionableTasks, tasksForKpi] = await Promise.all([
+  const [cockpit, tasksInWindow] = await Promise.all([
     getCockpit(filter),
-    getActionableTasks(endOfDay(today, APP_TIME_ZONE)),
     getTasksForKpi(endOfKpiWindow),
   ]);
 
   // Compteurs combinés suivis + tâches pour les 4 KPI.
   const counters = mergeAttentionCounters(
     cockpit.counters,
-    computeTaskKpiCounts(tasksForKpi),
+    computeTaskKpiCounts(tasksInWindow),
   );
+
+  // Tâches à afficher selon le filtre actif — cohérence avec le compteur affiché.
+  const displayTasks = filterTasksForKpi(tasksInWindow, filter);
+  // Nombre de tâches actionnables (en retard + aujourd'hui) pour le lien résumé.
+  const actionableTaskCount = tasksInWindow.filter((t) => t.isActionable).length;
 
   return (
     <div className="flex min-h-full flex-col">
@@ -77,12 +81,12 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
         <section aria-label="Indicateurs d'attention">
           <AttentionSummary counters={counters} filter={filter} />
 
-          {actionableTasks.length > 0 && (
+          {actionableTaskCount > 0 && (
             <p className="mt-3 text-sm text-muted">
               <Link href="/tasks" className="font-semibold text-ink hover:underline">
-                {actionableTasks.length === 1
+                {actionableTaskCount === 1
                   ? "1 tâche à traiter"
-                  : `${actionableTasks.length} tâches à traiter`}
+                  : `${actionableTaskCount} tâches à traiter`}
               </Link>
             </p>
           )}
@@ -94,13 +98,13 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
           <div className="min-w-0 space-y-6">
             <PriorityFeed section={cockpit.feed} filter={filter} />
 
-            {actionableTasks.length > 0 && (
+            {displayTasks.length > 0 && (
               <section aria-label="Tâches à traiter">
                 <h2 className="mb-3 px-0.5 text-[11px] font-semibold uppercase tracking-widest text-muted">
                   Tâches
                 </h2>
                 <ul className="space-y-2">
-                  {actionableTasks.map((task) => (
+                  {displayTasks.map((task) => (
                     <li key={task.id}>
                       <TaskRow item={task} />
                     </li>

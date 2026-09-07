@@ -8,6 +8,7 @@ import {
   buildTodayFeed,
   cockpitHeadline,
   computeTaskKpiCounts,
+  filterTasksForKpi,
   mergeAttentionCounters,
   type TaskKpiCounts,
 } from "./feed";
@@ -99,6 +100,99 @@ describe("cockpitHeadline", () => {
     expect(cockpitHeadline(0)).toBe("Tout est sous contrôle.");
     expect(cockpitHeadline(1)).toBe("1 élément à traiter aujourd'hui.");
     expect(cockpitHeadline(5)).toBe("5 éléments à traiter aujourd'hui.");
+  });
+});
+
+// ─── filterTasksForKpi ──────────────────────────────────────────────────────
+
+describe("filterTasksForKpi", () => {
+  // NOW = 2026-06-10 → "2026-06-05" = overdue, "2026-06-10" = today, "2026-06-15" = upcoming
+
+  it("filtre today → tâche aujourd'hui visible", () => {
+    const tasks = [task("today-task", "2026-06-10"), task("overdue-task", "2026-06-05")];
+    const result = filterTasksForKpi(tasks, "today");
+    expect(result.map((t) => t.title)).toEqual(["today-task"]);
+  });
+
+  it("filtre today → suivi aujourd'hui visible (suivis gérés séparément, tâche du jour seule)", () => {
+    // La fonction ne filtre que les tâches ; ce test vérifie que seule la tâche du jour passe.
+    const tasks = [task("today-task", "2026-06-10"), task("upcoming-task", "2026-06-15")];
+    const result = filterTasksForKpi(tasks, "today");
+    expect(result.map((t) => t.title)).toEqual(["today-task"]);
+  });
+
+  it("filtre late → tâche en retard visible", () => {
+    const tasks = [task("overdue-task", "2026-06-05"), task("today-task", "2026-06-10")];
+    const result = filterTasksForKpi(tasks, "late");
+    expect(result.map((t) => t.title)).toEqual(["overdue-task"]);
+  });
+
+  it("filtre late → tâche du jour non affichée", () => {
+    const tasks = [task("today-task", "2026-06-10")];
+    const result = filterTasksForKpi(tasks, "late");
+    expect(result).toEqual([]);
+  });
+
+  it("filtre upcoming → tâche future visible", () => {
+    const tasks = [task("upcoming-task", "2026-06-15"), task("today-task", "2026-06-10")];
+    const result = filterTasksForKpi(tasks, "upcoming");
+    expect(result.map((t) => t.title)).toEqual(["upcoming-task"]);
+  });
+
+  it("filtre upcoming → suivi futur visible (suivis gérés séparément, tâche future seule)", () => {
+    const tasks = [task("upcoming-task", "2026-06-15"), task("overdue-task", "2026-06-05")];
+    const result = filterTasksForKpi(tasks, "upcoming");
+    expect(result.map((t) => t.title)).toEqual(["upcoming-task"]);
+  });
+
+  it("filtre waiting → aucune tâche (pas de notion de balle)", () => {
+    const tasks = [
+      task("overdue-task", "2026-06-05"),
+      task("today-task", "2026-06-10"),
+      task("upcoming-task", "2026-06-15"),
+    ];
+    const result = filterTasksForKpi(tasks, "waiting");
+    expect(result).toEqual([]);
+  });
+
+  it("tâche terminée non affichée (complétées exclues par la requête en amont)", () => {
+    // getTasksForKpi filtre completedAt: null, donc les complétées n'arrivent pas ici.
+    // On vérifie quand même que filterTasksForKpi ne remonte jamais bucket=completed.
+    const tasks = [task("today-task", "2026-06-10")];
+    const result = filterTasksForKpi(tasks, "all");
+    expect(result.every((t) => t.bucket !== "completed")).toBe(true);
+  });
+
+  it("filtre all → tâches actionnables (en retard + aujourd'hui) uniquement", () => {
+    const tasks = [
+      task("overdue-task", "2026-06-05"),
+      task("today-task", "2026-06-10"),
+      task("upcoming-task", "2026-06-15"),
+    ];
+    const result = filterTasksForKpi(tasks, "all");
+    expect(result.map((t) => t.title).sort()).toEqual(["overdue-task", "today-task"]);
+  });
+
+  it("aucun élément hors du bucket demandé (filtre late → pas d'upcoming ni today)", () => {
+    const tasks = [
+      task("overdue-task", "2026-06-05"),
+      task("today-task", "2026-06-10"),
+      task("upcoming-task", "2026-06-15"),
+    ];
+    const result = filterTasksForKpi(tasks, "late");
+    expect(result.every((t) => t.bucket === "overdue")).toBe(true);
+  });
+
+  it("compteur N correspond au nombre d'éléments filtrés (filtre today)", () => {
+    const tasks = [
+      task("overdue-task", "2026-06-05"),
+      task("today-1", "2026-06-10"),
+      task("today-2", "2026-06-10"),
+      task("upcoming-task", "2026-06-15"),
+    ];
+    const counts = computeTaskKpiCounts(tasks);
+    const filtered = filterTasksForKpi(tasks, "today");
+    expect(filtered.length).toBe(counts.today);
   });
 });
 

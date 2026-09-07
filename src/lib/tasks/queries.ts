@@ -3,7 +3,7 @@ import "server-only";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
 import { getWorkspaceIdForPage } from "@/lib/workspace";
-import { computeTaskTiming, type TaskBucket } from "./domain";
+import type { TaskBucket } from "./domain";
 import type { TaskFilter } from "./filters";
 import { toTaskView, type TaskView } from "./view";
 
@@ -122,28 +122,27 @@ export async function getActionableTasks(endOfToday: Date): Promise<TaskView[]> 
 }
 
 /**
- * Tâches non terminées dans la fenêtre `[passé, endOfWindow]`, pour le calcul
- * des compteurs KPI de la page « Aujourd'hui ».
+ * Tâches non terminées dans la fenêtre `[passé, endOfWindow]`, pour les KPI
+ * et la section filtrée de la page « Aujourd'hui ».
  *
- * Retourne uniquement le `bucket` (« overdue » / « today » / « upcoming ») —
- * suffisant pour incrémenter les compteurs, sans charger le contact ni le suivi.
+ * Retourne des `TaskView` complets — suffisants à la fois pour incrémenter les
+ * compteurs KPI et pour alimenter la section « Tâches » filtrée par bucket.
  *
  * `endOfWindow` doit couvrir la fenêtre « À venir » (typiquement
  * `endOfDay(today + UPCOMING_WINDOW_DAYS)`), pas seulement aujourd'hui, pour
  * que le KPI « À venir » intègre bien les tâches futures proches.
  */
-export async function getTasksForKpi(endOfWindow: Date): Promise<{ bucket: TaskBucket }[]> {
+export async function getTasksForKpi(endOfWindow: Date): Promise<TaskView[]> {
   const workspaceId = await getWorkspaceIdForPage();
   const now = new Date();
 
-  const records = (await prisma.task.findMany({
+  const records = await prisma.task.findMany({
     where: { workspaceId, completedAt: null, dueAt: { lte: endOfWindow } },
-    select: { dueAt: true },
-  })) as { dueAt: Date }[];
+    orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
+    include: TASK_INCLUDE,
+  });
 
-  return records.map(({ dueAt }) => ({
-    bucket: computeTaskTiming({ dueAt, completedAt: null }, now, APP_TIME_ZONE).bucket as TaskBucket,
-  }));
+  return records.map((record) => toTaskView(record, now, APP_TIME_ZONE));
 }
 
 export interface FollowUpPickerOption {

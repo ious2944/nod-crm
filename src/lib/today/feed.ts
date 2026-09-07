@@ -17,7 +17,7 @@
  * Fonctions pures : testées dans `feed.test.ts`.
  */
 
-import type { AttentionCounters } from "@/lib/cockpit/filters";
+import type { AttentionCounters, CockpitFilter } from "@/lib/cockpit/filters";
 import type { FollowUpView } from "@/lib/follow-ups/view";
 import type { TaskView } from "@/lib/tasks/view";
 
@@ -121,6 +121,38 @@ export function computeTaskKpiCounts(
   }
 
   return { overdue, today, upcoming };
+}
+
+/**
+ * Filtre les tâches à afficher selon le filtre KPI actif.
+ *
+ * Règle de cohérence : la section « Tâches » de la page Aujourd'hui doit
+ * afficher exactement les tâches qui ont été comptées dans le KPI activé.
+ *
+ * - `all`      → tâches actionnables (en retard + aujourd'hui)
+ * - `late`     → tâches en retard uniquement
+ * - `today`    → tâches dues aujourd'hui uniquement
+ * - `upcoming` → tâches à venir (dans la fenêtre de UPCOMING_WINDOW_DAYS jours)
+ * - `waiting`  → aucune tâche (« Chez eux » est un concept de suivi)
+ */
+export function filterTasksForKpi(
+  tasks: readonly TaskView[],
+  filter: CockpitFilter,
+): TaskView[] {
+  switch (filter) {
+    case "all":
+      return tasks.filter((t) => t.isActionable);
+    case "late":
+      return tasks.filter((t) => t.bucket === "overdue");
+    case "today":
+      return tasks.filter((t) => t.bucket === "today");
+    case "upcoming":
+      return tasks.filter((t) => t.bucket === "upcoming");
+    case "waiting":
+      return [];
+    default:
+      return [];
+  }
 }
 
 /**
