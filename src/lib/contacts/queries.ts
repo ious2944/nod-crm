@@ -141,7 +141,17 @@ function buildWhere(
   if (params.organization === NO_ORGANIZATION) {
     and.push({ OR: [{ organizationName: null }, { organizationName: "" }] });
   } else if (params.organization) {
-    and.push({ organizationName: params.organization });
+    // Filtre via la relation V0.5 (organizationId) en priorité, avec repli sur le
+    // champ texte pour les contacts non encore migrés (organizationId null).
+    // Remarque : les contacts sans organizationId dont le nom d'organisation
+    // ne figure plus dans la table organization n'apparaîtront pas dans le filtre ;
+    // voir les notes de migration dans la réponse de lot B.
+    and.push({
+      OR: [
+        { organization: { name: params.organization } },
+        { organizationId: null, organizationName: params.organization },
+      ],
+    });
   }
 
   switch (params.followUp) {
@@ -339,30 +349,26 @@ export async function getContactDetail(id: string): Promise<ContactDetail | null
 }
 
 /**
- * Organisations distinctes du workspace, pour le filtre.
+ * Organisations du workspace, pour le filtre de la liste Contacts.
  *
- * `DISTINCT` côté PostgreSQL, plafonné : le filtre est une commodité, pas un
- * annuaire. Le jour où une table `organizations` existera, cette fonction sera
- * la seule à changer.
+ * Interroge désormais la vraie table `organization` (V0.5) plutôt que de
+ * dédupliquer le champ texte `organizationName` des contacts. Les noms sont
+ * donc stables, liés à un identifiant et non pollués par des variantes de
+ * saisie. Les contacts non encore migrés (organizationId null mais
+ * organizationName renseigné) peuvent référencer des noms absents de la table
+ * organization ; le filtre de `buildWhere` les couvre via un repli sur le
+ * champ texte historique.
  */
 export async function listOrganizationOptions(): Promise<string[]> {
   const workspaceId = await getWorkspaceIdForPage();
 
-  const rows = await prisma.contact.findMany({
-    where: {
-      workspaceId,
-      archivedAt: null,
-      organizationName: { not: null },
-    },
-    distinct: ["organizationName"],
-    orderBy: { organizationName: "asc" },
-    select: { organizationName: true },
-    take: 200,
+  const rows = await prisma.organization.findMany({
+    where: { workspaceId, archivedAt: null },
+    select: { name: true },
+    orderBy: { name: "asc" },
   });
 
-  return rows
-    .map((row) => row.organizationName)
-    .filter((name): name is string => Boolean(name));
+  return rows.map((row) => row.name);
 }
 
 /**

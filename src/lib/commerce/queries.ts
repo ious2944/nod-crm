@@ -28,6 +28,9 @@ import {
 /** Nombre de suggestions renvoyées au sélecteur. */
 const OPPORTUNITY_PICKER_LIMIT = 8;
 
+/** Taille de page de la liste Commerce. */
+export const COMMERCE_PAGE_SIZE = 25;
+
 const OPPORTUNITY_INCLUDE = {
   organization: { select: { id: true, name: true } },
   contact: {
@@ -44,28 +47,59 @@ function toAmount(
   return Number.isFinite(n) ? n : null;
 }
 
-/** Liste des opportunités filtrées par statut. */
+/** Résultat paginé de la liste Commerce. */
+export interface CommerceListPage {
+  items: OpportunityListItem[];
+  total: number;
+  page: number;
+  pageCount: number;
+}
+
+/**
+ * Liste des opportunités paginée, filtrée par statut.
+ *
+ * Tri stable : `expectedCloseAt ASC NULLS LAST, id ASC`. Ce tri garantit qu'un
+ * enregistrement ne saute ni ne se répète entre deux pages (contrairement à
+ * `updatedAt DESC` qui bougait dès qu'une opportunité était modifiée pendant la
+ * navigation). Les opportunités sans date de clôture prévue arrivent en fin de
+ * liste.
+ */
 export async function listOpportunities(
   filter: StatusFilter,
-): Promise<OpportunityListItem[]> {
+  page: number = 1,
+): Promise<CommerceListPage> {
   const workspaceId = await getWorkspaceIdForPage();
   const statuses = filterToStatuses(filter);
+  const where = {
+    workspaceId,
+    ...(statuses ? { status: { in: statuses } } : {}),
+  };
 
-  const records = await prisma.opportunity.findMany({
-    where: {
-      workspaceId,
-      ...(statuses ? { status: { in: statuses } } : {}),
-    },
-    orderBy: [{ updatedAt: "desc" }],
-    include: OPPORTUNITY_INCLUDE,
-  });
+  const [total, records] = await Promise.all([
+    prisma.opportunity.count({ where }),
+    prisma.opportunity.findMany({
+      where,
+      orderBy: [
+        { expectedCloseAt: { sort: "asc", nulls: "last" } },
+        { id: "asc" },
+      ],
+      skip: (page - 1) * COMMERCE_PAGE_SIZE,
+      take: COMMERCE_PAGE_SIZE,
+      include: OPPORTUNITY_INCLUDE,
+    }),
+  ]);
 
-  return records.map((record) =>
-    toOpportunityListItem(
-      { ...record, estimatedAmount: toAmount(record.estimatedAmount) },
-      APP_TIME_ZONE,
+  return {
+    items: records.map((record) =>
+      toOpportunityListItem(
+        { ...record, estimatedAmount: toAmount(record.estimatedAmount) },
+        APP_TIME_ZONE,
+      ),
     ),
-  );
+    total,
+    page,
+    pageCount: Math.max(1, Math.ceil(total / COMMERCE_PAGE_SIZE)),
+  };
 }
 
 /**
