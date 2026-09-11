@@ -18,6 +18,7 @@ export default async function AuthenticatedLayout({ children }: LayoutProps<"/">
       appName={APP_NAME}
       sourceUrl={APP_SOURCE_URL}
       userLabel={user.displayName || user.email}
+      userEmail={user.email}
       workspaceName={user.workspaceName}
     >
       {children}

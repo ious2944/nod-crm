@@ -18,6 +18,7 @@ import { computeTaskKpiCounts, filterTasksForKpi, mergeAttentionCounters } from 
 import { getTasksForKpi } from "@/lib/tasks/queries";
 import { UPCOMING_WINDOW_DAYS } from "@/lib/cockpit/domain";
 import Link from "next/link";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export const metadata = {
   title: "Aujourd'hui — NOD CRM",
@@ -77,6 +78,13 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
 
       {/* Contenu scrollable */}
       <div className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+        {cockpit.openTotal === 0 && tasksInWindow.length === 0 && (
+          <EmptyState
+            title="Votre espace est prêt"
+            description="Commencez par créer un suivi ou une tâche. Tout ce qui requiert votre attention apparaîtra ici au fil du temps."
+            action={{ label: "Créer un suivi", href: "/follow-ups" }}
+          />
+        )}
         {/* Indicateurs d'attention */}
         <section aria-label="Indicateurs d'attention">
           <AttentionSummary counters={counters} filter={filter} />

@@ -2,6 +2,7 @@ import { connection } from "next/server";
 
 import { createPrivacyRequest, updatePrivacyRequest } from "@/app/(app)/rgpd/actions";
 import { PrivacyPageHeader } from "@/components/privacy/privacy-nav";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { REQUEST_STATUSES, REQUEST_TYPES, labelFor } from "@/lib/privacy/constants";
 import { listPrivacyContactOptions, listPrivacyRequests } from "@/lib/privacy/queries";
 
@@ -35,7 +36,15 @@ export default async function PrivacyRequestsPage() {
         title="Demandes RGPD"
         description="Suis les demandes d’accès, rectification, effacement, opposition, limitation ou portabilité."
       />
-      <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+      <div className="mx-auto w-full max-w-5xl px-4 pt-4 sm:px-6">
+        <Breadcrumb
+          items={[
+            { label: "Conformité RGPD", href: "/rgpd" },
+            { label: "Demandes RGPD" },
+          ]}
+        />
+      </div>
+      <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-4 sm:px-6 sm:py-6">
         <details className="rounded-xl border border-border-subtle bg-surface p-4 shadow-card">
           <summary className="cursor-pointer font-semibold text-ink">+ Enregistrer une demande</summary>
           <RequestForm action={createPrivacyRequest} contacts={contacts} now={now} />

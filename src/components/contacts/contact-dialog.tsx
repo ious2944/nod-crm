@@ -26,6 +26,9 @@ import { ContactAvatar } from "./contact-avatar";
  * Le dialogue est *contrôlé* (`open` / `onClose`) parce que son déclencheur
  * n'est pas toujours à côté de lui : dans la liste, il est dans le menu `⋮`,
  * qui se ferme au clic — un état interne aurait disparu avec lui.
+ *
+ * Disposition photo : en tête de formulaire, centrée sur mobile ; colonne
+ * droite (1/3) sur desktop pour une lecture gauche → droite plus naturelle.
  */
 
 function SubmitButton({ label }: { label: string }) {
@@ -121,129 +124,145 @@ export function ContactDialog({
         <form action={formAction} className="space-y-4">
           {contact && <input type="hidden" name="id" value={contact.id} />}
 
-          <fieldset className="grid gap-3 sm:grid-cols-2">
-            <legend className="sr-only">Identité</legend>
-            <div>
-              <label className={LABEL} htmlFor="firstName">
-                Prénom
-              </label>
-              <input
-                id="firstName"
-                name="firstName"
-                autoFocus
-                maxLength={CONTACT_LIMITS.firstName}
-                defaultValue={contact?.firstName ?? ""}
-                className={`mt-1 ${FIELD}`}
-              />
-              <FieldError message={errors.firstName} />
-            </div>
-            <div>
-              <label className={LABEL} htmlFor="lastName">
-                Nom
-              </label>
-              <input
-                id="lastName"
-                name="lastName"
-                maxLength={CONTACT_LIMITS.lastName}
-                defaultValue={contact?.lastName ?? ""}
-                className={`mt-1 ${FIELD}`}
-              />
-              <FieldError message={errors.lastName} />
-            </div>
-          </fieldset>
+          {/*
+           * Layout photo :
+           * — Mobile (flex-col) : photo en premier visuellement (order -1),
+           *   champs en dessous.
+           * — Desktop (sm:flex-row) : champs à gauche (2/3), photo à droite
+           *   (1/3). L'ordre DOM correspond à l'ordre visuel desktop pour une
+           *   navigation clavier cohérente.
+           */}
+          <div className="flex flex-col gap-4 sm:flex-row sm:gap-6">
 
-          <div>
-            {/* Un `<label for>`, pas un `<span>` : sans lui le sélecteur de
-                fichier n'a aucun nom accessible — un lecteur d'écran annonce
-                « bouton Parcourir », sans dire de quoi il s'agit. */}
-            <label className={LABEL} htmlFor="photo">
-              Photo (facultatif)
-            </label>
-            <div className="mt-1 flex items-center gap-3">
-              <ContactAvatar
-                initials={initialsPreview(contact)}
-                photoUrl={showPhoto ? contact!.photoUrl : null}
-              />
-              <div className="min-w-0 flex-1">
+            {/* Photo — en tête sur mobile via order, colonne droite sur desktop */}
+            <div className="-order-1 flex flex-col items-center gap-2 sm:order-none sm:w-[140px] sm:shrink-0 sm:items-start sm:pt-1">
+              <label className={`${LABEL} self-start sm:self-auto`} htmlFor="photo">
+                Photo (facultatif)
+              </label>
+              <div className="flex flex-col items-center gap-2">
+                {/* Aperçu circulaire façon avatar */}
+                <div className="h-20 w-20">
+                  <ContactAvatar
+                    initials={initialsPreview(contact)}
+                    photoUrl={showPhoto ? contact!.photoUrl : null}
+                  />
+                </div>
+                {/* Un `<label for>`, pas un `<span>` : sans lui le sélecteur de
+                    fichier n'a aucun nom accessible — un lecteur d'écran annonce
+                    « bouton Parcourir », sans dire de quoi il s'agit. */}
                 <input
                   id="photo"
                   name="photo"
                   type="file"
                   accept={ACCEPTED_PHOTO_MIME_TYPES.join(",")}
-                  className="block w-full text-xs text-muted file:mr-3 file:rounded-lg file:border file:border-border-strong file:bg-surface file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-ink hover:file:bg-surface-muted"
+                  className="block w-full max-w-[140px] text-xs text-muted file:mr-2 file:rounded-lg file:border file:border-border-strong file:bg-surface file:px-2 file:py-1 file:text-xs file:font-medium file:text-ink hover:file:bg-surface-muted"
                 />
-                <p className="mt-1 text-[11px] text-muted">JPEG, PNG, GIF ou WebP — 2 Mo max.</p>
+                <p className="text-center text-[11px] text-muted">JPEG, PNG, GIF ou WebP — 2 Mo max.</p>
                 <FieldError message={errors.photo} />
+                {contact?.photoUrl && (
+                  <label className="inline-flex items-center gap-2 text-xs text-muted">
+                    <input
+                      type="checkbox"
+                      name="removePhoto"
+                      value="1"
+                      checked={removePhoto}
+                      onChange={(event) => setRemovePhoto(event.target.checked)}
+                    />
+                    Retirer la photo
+                  </label>
+                )}
               </div>
             </div>
-            {contact?.photoUrl && (
-              <label className="mt-2 inline-flex items-center gap-2 text-xs text-muted">
-                <input
-                  type="checkbox"
-                  name="removePhoto"
-                  value="1"
-                  checked={removePhoto}
-                  onChange={(event) => setRemovePhoto(event.target.checked)}
+
+            {/* Champs texte — colonne gauche principale */}
+            <div className="min-w-0 flex-1 space-y-4">
+              <fieldset className="grid gap-3 sm:grid-cols-2">
+                <legend className="sr-only">Identité</legend>
+                <div>
+                  <label className={LABEL} htmlFor="firstName">
+                    Prénom
+                  </label>
+                  <input
+                    id="firstName"
+                    name="firstName"
+                    autoFocus
+                    maxLength={CONTACT_LIMITS.firstName}
+                    defaultValue={contact?.firstName ?? ""}
+                    className={`mt-1 ${FIELD}`}
+                  />
+                  <FieldError message={errors.firstName} />
+                </div>
+                <div>
+                  <label className={LABEL} htmlFor="lastName">
+                    Nom
+                  </label>
+                  <input
+                    id="lastName"
+                    name="lastName"
+                    maxLength={CONTACT_LIMITS.lastName}
+                    defaultValue={contact?.lastName ?? ""}
+                    className={`mt-1 ${FIELD}`}
+                  />
+                  <FieldError message={errors.lastName} />
+                </div>
+              </fieldset>
+
+              <fieldset className="grid gap-3">
+                <legend className="sr-only">Informations professionnelles</legend>
+                {/* Sélecteur d'organisation V0.5 — remplace le champ texte libre */}
+                <OrganizationPicker
+                  organizationId={contact?.organizationId ?? null}
+                  organizationName={contact?.organizationName ?? null}
                 />
-                Retirer la photo actuelle
-              </label>
-            )}
+                <FieldError message={errors.organizationId} />
+                <div>
+                  <label className={LABEL} htmlFor="jobTitle">
+                    Fonction
+                  </label>
+                  <input
+                    id="jobTitle"
+                    name="jobTitle"
+                    maxLength={CONTACT_LIMITS.jobTitle}
+                    defaultValue={contact?.jobTitle ?? ""}
+                    className={`mt-1 ${FIELD}`}
+                  />
+                  <FieldError message={errors.jobTitle} />
+                </div>
+              </fieldset>
+
+              <fieldset className="grid gap-3 sm:grid-cols-2">
+                <legend className="sr-only">Coordonnées</legend>
+                <div>
+                  <label className={LABEL} htmlFor="email">
+                    Email
+                  </label>
+                  <input
+                    id="email"
+                    name="email"
+                    type="email"
+                    maxLength={CONTACT_LIMITS.email}
+                    defaultValue={contact?.email ?? ""}
+                    className={`mt-1 ${FIELD}`}
+                  />
+                  <FieldError message={errors.email} />
+                </div>
+                <div>
+                  <label className={LABEL} htmlFor="phone">
+                    Téléphone
+                  </label>
+                  <input
+                    id="phone"
+                    name="phone"
+                    type="tel"
+                    maxLength={CONTACT_LIMITS.phone}
+                    defaultValue={contact?.phone ?? ""}
+                    className={`mt-1 ${FIELD}`}
+                  />
+                  <FieldError message={errors.phone} />
+                </div>
+              </fieldset>
+            </div>
           </div>
-
-          <fieldset className="grid gap-3">
-            <legend className="sr-only">Informations professionnelles</legend>
-            {/* Sélecteur d'organisation V0.5 — remplace le champ texte libre */}
-            <OrganizationPicker
-              organizationId={contact?.organizationId ?? null}
-              organizationName={contact?.organizationName ?? null}
-            />
-            <FieldError message={errors.organizationId} />
-            <div>
-              <label className={LABEL} htmlFor="jobTitle">
-                Fonction
-              </label>
-              <input
-                id="jobTitle"
-                name="jobTitle"
-                maxLength={CONTACT_LIMITS.jobTitle}
-                defaultValue={contact?.jobTitle ?? ""}
-                className={`mt-1 ${FIELD}`}
-              />
-              <FieldError message={errors.jobTitle} />
-            </div>
-          </fieldset>
-
-          <fieldset className="grid gap-3 sm:grid-cols-2">
-            <legend className="sr-only">Coordonnées</legend>
-            <div>
-              <label className={LABEL} htmlFor="email">
-                Email
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                maxLength={CONTACT_LIMITS.email}
-                defaultValue={contact?.email ?? ""}
-                className={`mt-1 ${FIELD}`}
-              />
-              <FieldError message={errors.email} />
-            </div>
-            <div>
-              <label className={LABEL} htmlFor="phone">
-                Téléphone
-              </label>
-              <input
-                id="phone"
-                name="phone"
-                type="tel"
-                maxLength={CONTACT_LIMITS.phone}
-                defaultValue={contact?.phone ?? ""}
-                className={`mt-1 ${FIELD}`}
-              />
-              <FieldError message={errors.phone} />
-            </div>
-          </fieldset>
 
           <div>
             <label className={LABEL} htmlFor="notes">

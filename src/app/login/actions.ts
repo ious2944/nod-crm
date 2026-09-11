@@ -92,5 +92,5 @@ export async function logout(): Promise<void> {
     logAuthEvent("logout", { email: user.email, ip: await getClientIp() });
   }
 
-  redirect("/login");
+  redirect("/login?logged_out=1");
 }
