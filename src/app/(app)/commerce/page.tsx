@@ -3,6 +3,7 @@ import { connection } from "next/server";
 
 import { NewOpportunityDialog } from "@/components/commerce/new-opportunity-dialog";
 import { StatusBadge } from "@/components/commerce/status-badge";
+import { Pagination } from "@/components/ui/pagination";
 import { commerceHeadline } from "@/lib/commerce/domain";
 import {
   parseStatusFilter,
@@ -25,24 +26,43 @@ function formatFrenchDate(isoDate: string): string {
   }).format(new Date(`${isoDate}T00:00:00Z`));
 }
 
+/** Parse `?page=` sans coupler à un module externe. */
+function parsePage(value: string | string[] | undefined): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const n = Number.parseInt(typeof raw === "string" ? raw : "", 10);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(n, 10_000);
+}
+
+/** Construit l'URL Commerce en préservant le filtre actif. */
+function buildHref(filter: StatusFilter, page: number): string {
+  const params = new URLSearchParams({ f: filter });
+  if (page > 1) params.set("page", String(page));
+  return `/commerce?${params.toString()}`;
+}
+
 const FILTERS: StatusFilter[] = ["open", "closed", "all"];
 
 /**
  * Liste des opportunités commerciales.
  *
- * Trois filtres d'URL (`?f=open|closed|all`), défaut « open ».
- * Aucune pagination pour l'instant : un pipeline de quelques dizaines d'affaires
- * ne justifie pas la complexité. On ajoutera une limite et un curseur si besoin.
+ * Pagination par `?page=N` avec tri stable `expectedCloseAt ASC, id ASC`.
+ * Changer de filtre repart toujours de la page 1 (les liens de filtre
+ * n'incluent pas de numéro de page).
  */
 export default async function CommercePage({ searchParams }: PageProps<"/commerce">) {
   await connection();
 
-  const rawFilter = (await searchParams).f;
-  const filter = parseStatusFilter(Array.isArray(rawFilter) ? rawFilter[0] : rawFilter);
-  const [items, stats] = await Promise.all([
-    listOpportunities(filter),
+  const rawParams = await searchParams;
+  const filter = parseStatusFilter(Array.isArray(rawParams.f) ? rawParams.f[0] : rawParams.f);
+  const page = parsePage(rawParams.page);
+
+  const [result, stats] = await Promise.all([
+    listOpportunities(filter, page),
     getCommerceStats(),
   ]);
+
+  const { items, total, pageCount } = result;
 
   return (
     <div className="flex min-h-full flex-col">
@@ -63,7 +83,7 @@ export default async function CommercePage({ searchParams }: PageProps<"/commerc
 
       {/* Contenu */}
       <div className="mx-auto w-full max-w-4xl flex-1 space-y-6 px-4 py-6 sm:px-6 sm:py-8">
-        {/* Filtres */}
+        {/* Filtres — cliquer un filtre repart toujours de la page 1 */}
         <nav aria-label="Filtres" className="-mx-1 flex flex-wrap gap-1.5 px-1">
           {FILTERS.map((key) => {
             const active = filter === key;
@@ -98,42 +118,52 @@ export default async function CommercePage({ searchParams }: PageProps<"/commerc
                 : "Aucune opportunité."}
           </p>
         ) : (
-          <ul className="space-y-2">
-            {items.map((item) => (
-              <li key={item.id}>
-                <Link
-                  href={`/commerce/${item.id}`}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-subtle bg-surface px-4 py-3 shadow-card transition-all hover:border-border-strong hover:shadow-card-hover"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="truncate font-medium text-ink">{item.name}</p>
-                      <StatusBadge
-                        label={item.statusLabel}
-                        variant={item.statusVariant}
-                      />
+          <>
+            <ul className="space-y-2">
+              {items.map((item) => (
+                <li key={item.id}>
+                  <Link
+                    href={`/commerce/${item.id}`}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-subtle bg-surface px-4 py-3 shadow-card transition-all hover:border-border-strong hover:shadow-card-hover"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate font-medium text-ink">{item.name}</p>
+                        <StatusBadge
+                          label={item.statusLabel}
+                          variant={item.statusVariant}
+                        />
+                      </div>
+                      <p className="mt-0.5 truncate text-sm text-muted">
+                        {item.organizationName}
+                        {item.contactName && ` — ${item.contactName}`}
+                      </p>
                     </div>
-                    <p className="mt-0.5 truncate text-sm text-muted">
-                      {item.organizationName}
-                      {item.contactName && ` — ${item.contactName}`}
-                    </p>
-                  </div>
 
-                  <div className="shrink-0 text-right text-xs text-muted">
-                    {item.estimatedAmount && (
-                      <p className="font-semibold text-ink">{item.estimatedAmount}</p>
-                    )}
-                    {item.expectedCloseDate && (
-                      <p>Prévu le {formatFrenchDate(item.expectedCloseDate)}</p>
-                    )}
-                    {!item.isOpen && item.closedDate && (
-                      <p>Clos le {formatFrenchDate(item.closedDate)}</p>
-                    )}
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
+                    <div className="shrink-0 text-right text-xs text-muted">
+                      {item.estimatedAmount && (
+                        <p className="font-semibold text-ink">{item.estimatedAmount}</p>
+                      )}
+                      {item.expectedCloseDate && (
+                        <p>Prévu le {formatFrenchDate(item.expectedCloseDate)}</p>
+                      )}
+                      {!item.isOpen && item.closedDate && (
+                        <p>Clos le {formatFrenchDate(item.closedDate)}</p>
+                      )}
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+
+            <Pagination
+              page={page}
+              pageCount={pageCount}
+              total={total}
+              buildHref={(p) => buildHref(filter, p)}
+              noun="opportunité"
+            />
+          </>
         )}
       </div>
     </div>
