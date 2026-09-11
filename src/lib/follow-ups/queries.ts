@@ -1,9 +1,10 @@
 import "server-only";
 
 import { APP_TIME_ZONE } from "@/lib/config";
+import { dayKey, endOfDay } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
 import { getWorkspaceIdForPage } from "@/lib/workspace";
-import { matchesOpenFilter, type FollowUpFilter } from "./filters";
+import { type FollowUpFilter } from "./filters";
 import { toFollowUpView, type FollowUpView } from "./view";
 
 const CONTACT_SELECTION = {
@@ -36,13 +37,17 @@ export interface FollowUpBoard {
 /**
  * Charge le tableau de bord des suivis.
  *
- * Les compteurs (`stats`) sont toujours calculés sur la totalité des suivis
- * ouverts du workspace, sans égard pour la recherche : ils reflètent la
- * situation réelle. Seule la liste d'items est réduite par la recherche.
+ * Les compteurs (`stats`) sont calculés par des requêtes COUNT SQL sur la
+ * totalité des suivis du workspace — sans égard pour la recherche et sans
+ * charger les enregistrements en mémoire. Seule la liste d'items reflète le
+ * filtre actif et la recherche textuelle.
  *
  * La recherche textuelle (`query`) porte sur `title` et `description` en
- * mode insensible à la casse (ILIKE côté PostgreSQL pour les terminés ;
- * filtre mémoire pour les ouverts, déjà tous chargés pour les stats).
+ * mode insensible à la casse (ILIKE côté PostgreSQL pour les ouverts et les
+ * terminés).
+ *
+ * `needsAttention` = `dueAt <= fin du jour courant (APP_TIME_ZONE)`,
+ * ce qui correspond à `overdueDays >= 0` du domaine métier.
  */
 export async function getFollowUpBoard(
   filter: FollowUpFilter,
@@ -50,26 +55,40 @@ export async function getFollowUpBoard(
 ): Promise<FollowUpBoard> {
   const workspaceId = await getWorkspaceIdForPage();
   const now = new Date();
+  const todayKey = dayKey(now, APP_TIME_ZONE);
+  const endOfToday = endOfDay(todayKey, APP_TIME_ZONE);
 
-  // Tous les suivis ouverts — servant à la fois aux compteurs et à la liste.
-  const openRecords = await prisma.followUp.findMany({
-    where: { workspaceId, status: "OPEN" },
-    orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
-    include: { contact: CONTACT_SELECTION },
-  });
+  // Compteurs via SQL — aucun chargement de lignes en mémoire.
+  const [open, ballWithMe, ballWithThem, toNudge, needsAttentionCount, completed] =
+    await prisma.$transaction([
+      prisma.followUp.count({ where: { workspaceId, status: "OPEN" } }),
+      prisma.followUp.count({ where: { workspaceId, status: "OPEN", ballOwner: "ME" } }),
+      prisma.followUp.count({ where: { workspaceId, status: "OPEN", ballOwner: "THEM" } }),
+      // toNudge : balle chez eux + échéance passée (= matchesOpenFilter("nudge"))
+      prisma.followUp.count({
+        where: {
+          workspaceId,
+          status: "OPEN",
+          ballOwner: "THEM",
+          dueAt: { lte: endOfToday },
+        },
+      }),
+      // needsAttention : échéance atteinte ou passée (= overdueDays >= 0)
+      prisma.followUp.count({
+        where: { workspaceId, status: "OPEN", dueAt: { lte: endOfToday } },
+      }),
+      prisma.followUp.count({
+        where: { workspaceId, status: { in: ["COMPLETED", "ABANDONED"] } },
+      }),
+    ]);
 
-  const allOpen = openRecords.map((record) => toFollowUpView(record, now, APP_TIME_ZONE));
-
-  // Les stats ignorent la recherche : elles donnent le vrai état du workspace.
   const stats: FollowUpStats = {
-    open: allOpen.length,
-    ballWithMe: allOpen.filter((item) => item.ballOwner === "ME").length,
-    ballWithThem: allOpen.filter((item) => item.ballOwner === "THEM").length,
-    toNudge: allOpen.filter((item) => matchesOpenFilter("nudge", item)).length,
-    needsAttention: allOpen.filter((item) => item.needsAttention).length,
-    completed: await prisma.followUp.count({
-      where: { workspaceId, status: { in: ["COMPLETED", "ABANDONED"] } },
-    }),
+    open,
+    ballWithMe,
+    ballWithThem,
+    toNudge,
+    needsAttention: needsAttentionCount,
+    completed,
   };
 
   if (filter === "done") {
@@ -88,17 +107,62 @@ export async function getFollowUpBoard(
     };
   }
 
-  // Pour les ouverts : filtre + recherche en mémoire (tous déjà chargés pour les stats).
-  const q = query.trim().toLowerCase();
-  const items = allOpen.filter(
-    (item) =>
-      matchesOpenFilter(filter, item) &&
-      (q === "" ||
-        item.title.toLowerCase().includes(q) ||
-        (item.description?.toLowerCase().includes(q) ?? false)),
-  );
+  // Pour les ouverts : filtre côté DB selon l'onglet actif, recherche côté DB.
+  const openWhere = buildOpenWhere(workspaceId, filter, query, endOfToday);
+  const openRecords = await prisma.followUp.findMany({
+    where: openWhere,
+    orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
+    include: { contact: CONTACT_SELECTION },
+  });
 
-  return { stats, items };
+  return {
+    stats,
+    items: openRecords.map((record) => toFollowUpView(record, now, APP_TIME_ZONE)),
+  };
+}
+
+/**
+ * Construit le `where` Prisma pour les suivis ouverts, en appliquant le filtre
+ * d'onglet et la recherche textuelle directement en SQL.
+ *
+ * Les filtres par onglet correspondent aux prédicats de `matchesOpenFilter` :
+ * on ne charge que les enregistrements utiles plutôt que tout en mémoire.
+ */
+function buildOpenWhere(
+  workspaceId: string,
+  filter: FollowUpFilter,
+  query: string,
+  endOfToday: Date,
+): object {
+  const base: Record<string, unknown> = { workspaceId, status: "OPEN" };
+
+  switch (filter) {
+    case "me":
+      base.ballOwner = "ME";
+      break;
+    case "them":
+      base.ballOwner = "THEM";
+      break;
+    case "nudge":
+      // Balle chez eux ET délai passé — identique à matchesOpenFilter("nudge").
+      base.ballOwner = "THEM";
+      base.dueAt = { lte: endOfToday };
+      break;
+    case "all":
+    default:
+      break;
+  }
+
+  const q = query.trim();
+  if (!q) return base;
+
+  return {
+    ...base,
+    OR: [
+      { title: { contains: q, mode: "insensitive" } },
+      { description: { contains: q, mode: "insensitive" } },
+    ],
+  };
 }
 
 /**
