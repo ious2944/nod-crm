@@ -10,20 +10,11 @@ import {
   type StatusFilter,
 } from "@/lib/commerce/filters";
 import { getCommerceStats, listOpportunities } from "@/lib/commerce/queries";
+import { formatFrenchDate } from "@/lib/format/date";
 
 export const metadata = {
   title: "Commerce — NOD CRM",
 };
-
-/** Formate une date YYYY-MM-DD en locale française courte (ex. « 31 déc. 2026 »). */
-function formatFrenchDate(isoDate: string): string {
-  return new Intl.DateTimeFormat("fr-FR", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(`${isoDate}T00:00:00Z`));
-}
 
 const FILTERS: StatusFilter[] = ["open", "closed", "all"];
 
