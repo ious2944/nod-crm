@@ -2,10 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { logout } from "@/app/login/actions";
 import { NAV_SECTIONS, type NavItem } from "./navigation";
+
+/** Initiales à partir du label utilisateur (prénom nom ou email). */
+function getInitials(label: string): string {
+  const parts = label.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return label.slice(0, 2).toUpperCase();
+}
 
 function LogoutButton() {
   return (
@@ -17,6 +26,73 @@ function LogoutButton() {
         Déconnexion
       </button>
     </form>
+  );
+}
+
+/** Drawer mobile — avatar cliquable ouvre un bottom-sheet avec identité + déconnexion. */
+function MobileUserDrawer({
+  userLabel,
+  userEmail,
+  open,
+  onClose,
+}: {
+  userLabel: string;
+  userEmail: string;
+  open: boolean;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <>
+      {/* Overlay */}
+      <div
+        aria-hidden
+        className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      {/* Bottom sheet */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Compte utilisateur"
+        className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t border-border-subtle bg-surface p-6 shadow-dialog"
+      >
+        {/* Poignée */}
+        <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-border-strong" />
+        {/* Identité */}
+        <div className="mb-5 flex items-center gap-3">
+          <span
+            aria-hidden
+            className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-accent text-base font-bold text-accent-contrast"
+          >
+            {getInitials(userLabel)}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-semibold text-ink">{userLabel}</p>
+            {userEmail && userEmail !== userLabel && (
+              <p className="truncate text-sm text-muted">{userEmail}</p>
+            )}
+          </div>
+        </div>
+        {/* Déconnexion — même Server Action que la sidebar desktop */}
+        <form action={logout} className="w-full">
+          <button
+            type="submit"
+            className="w-full rounded-lg border border-border-strong px-4 py-2.5 text-sm font-semibold text-critical-fg hover:bg-critical-bg transition-colors"
+          >
+            Déconnexion
+          </button>
+        </form>
+        {/* Fermer */}
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-3 w-full rounded-lg px-4 py-2.5 text-sm text-muted hover:bg-surface-muted transition-colors"
+        >
+          Fermer
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -42,6 +118,7 @@ function Brand({ appName, workspaceName }: { appName: string; workspaceName: str
 function NavEntry({ item, active }: { item: NavItem; active: boolean }) {
   const base =
     "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors";
+  const Icon = item.icon;
 
   if (!item.available || !item.href) {
     return (
@@ -50,9 +127,7 @@ function NavEntry({ item, active }: { item: NavItem; active: boolean }) {
         title="Module à venir"
         className={`${base} cursor-not-allowed text-muted/50`}
       >
-        <span aria-hidden className="w-4 shrink-0 text-center text-base opacity-60">
-          {item.icon}
-        </span>
+        <Icon className="w-4 h-4 shrink-0 opacity-60" />
         <span className="flex-1 truncate">{item.label}</span>
         <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-muted/70">
           bientôt
@@ -78,9 +153,7 @@ function NavEntry({ item, active }: { item: NavItem; active: boolean }) {
           className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-accent"
         />
       )}
-      <span aria-hidden className="w-4 shrink-0 text-center text-base">
-        {item.icon}
-      </span>
+      <Icon className="w-4 h-4 shrink-0" />
       <span className="flex-1 truncate">{item.label}</span>
     </Link>
   );
@@ -91,17 +164,23 @@ export function AppShell({
   appName,
   sourceUrl,
   userLabel,
+  userEmail,
   workspaceName,
 }: {
   children: ReactNode;
   appName: string;
   sourceUrl: string;
   userLabel: string;
+  userEmail?: string;
   workspaceName: string;
 }) {
   const pathname = usePathname();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   const isActive = (item: NavItem) =>
     Boolean(item.href) && pathname.startsWith(item.href!);
+
+  const resolvedEmail = userEmail ?? "";
 
   return (
     <div className="flex min-h-dvh flex-col md:flex-row">
@@ -109,7 +188,16 @@ export function AppShell({
       <header className="sticky top-0 z-20 flex flex-col gap-2 border-b border-border-subtle bg-surface/95 px-4 py-3 backdrop-blur-sm md:hidden">
         <div className="flex items-center justify-between gap-3">
           <Brand appName={appName} workspaceName={workspaceName} />
-          <LogoutButton />
+
+          {/* Avatar cliquable — ouvre le drawer utilisateur */}
+          <button
+            type="button"
+            aria-label="Ouvrir le menu utilisateur"
+            onClick={() => setMobileMenuOpen(true)}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent text-xs font-bold text-accent-contrast shadow-sm hover:bg-accent-hover transition-colors"
+          >
+            {getInitials(userLabel)}
+          </button>
         </div>
         <nav aria-label="Modules" className="flex flex-wrap items-center gap-1">
           {NAV_SECTIONS.flatMap((section) => section.items)
@@ -127,13 +215,20 @@ export function AppShell({
                       : "text-muted hover:bg-surface-muted hover:text-ink"
                   }`}
                 >
-                  <span aria-hidden>{item.icon}</span>{" "}
                   {item.label}
                 </Link>
               );
             })}
         </nav>
       </header>
+
+      {/* Drawer mobile utilisateur */}
+      <MobileUserDrawer
+        userLabel={userLabel}
+        userEmail={resolvedEmail}
+        open={mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
+      />
 
       {/* ── Desktop : barre latérale ────────────────────────────────────────── */}
       <aside className="hidden w-64 shrink-0 border-r border-border-subtle bg-surface md:flex md:flex-col">

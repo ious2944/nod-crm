@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { restoreProcessor } from "@/app/(app)/rgpd/archive-actions";
 import { archiveProcessor, createProcessor, updateProcessor } from "@/app/(app)/rgpd/actions";
 import { PrivacyPageHeader } from "@/components/privacy/privacy-nav";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { DPA_STATUSES, EEA_STATUSES, TRI_STATES, labelFor } from "@/lib/privacy/constants";
 import { listArchivedPrivacyProcessors, listPrivacyProcessors } from "@/lib/privacy/queries";
 
@@ -29,7 +30,15 @@ export default async function PrivacyProcessorsPage() {
         title="Sous-traitants"
         description="Suis les prestataires qui traitent des données pour ton organisation et les vérifications à maintenir."
       />
-      <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+      <div className="mx-auto w-full max-w-5xl px-4 pt-4 sm:px-6">
+        <Breadcrumb
+          items={[
+            { label: "Conformité RGPD", href: "/rgpd" },
+            { label: "Sous-traitants" },
+          ]}
+        />
+      </div>
+      <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-4 sm:px-6 sm:py-6">
         <details className="rounded-xl border border-border-subtle bg-surface p-4 shadow-card">
           <summary className="cursor-pointer font-semibold text-ink">+ Ajouter un sous-traitant</summary>
           <ProcessorForm action={createProcessor} />

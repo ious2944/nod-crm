@@ -4,6 +4,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { ContactRow } from "@/components/contacts/contact-row";
 import { ContactToolbar } from "@/components/contacts/contact-toolbar";
 import { NewContactButton } from "@/components/contacts/new-contact-button";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   buildContactListHref,
   DEFAULT_CONTACT_LIST_PARAMS,
@@ -59,19 +60,18 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
         {/* Liste */}
         <section aria-label="Contacts">
           {page.items.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border-strong bg-surface px-6 py-14 text-center shadow-card">
-              <p aria-hidden className="text-3xl">
-                {isFiltered ? "🔍" : "◍"}
-              </p>
-              <p className="mt-3 text-base font-semibold text-ink">
-                {isFiltered ? "Aucun contact ne correspond" : "Aucun contact"}
-              </p>
-              <p className="mt-1 text-sm text-muted">
-                {isFiltered
-                  ? "Essaie un autre mot, ou relâche un filtre."
-                  : "Crée ton premier contact : un nom suffit pour démarrer."}
-              </p>
-            </div>
+            isFiltered ? (
+              <div className="rounded-xl border border-dashed border-border-strong bg-surface px-6 py-14 text-center shadow-card">
+                <p aria-hidden className="text-3xl">🔍</p>
+                <p className="mt-3 text-base font-semibold text-ink">Aucun contact ne correspond</p>
+                <p className="mt-1 text-sm text-muted">Essaie un autre mot, ou relâche un filtre.</p>
+              </div>
+            ) : (
+              <EmptyState
+                title="Aucun contact pour l'instant"
+                description="Crée ton premier contact : un nom suffit pour démarrer. Tu pourras y associer un suivi, une organisation et des coordonnées."
+              />
+            )
           ) : (
             <>
               <ul className="space-y-2.5">

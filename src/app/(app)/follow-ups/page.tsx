@@ -5,10 +5,11 @@ import {
   FilterTabs,
   StatTiles,
 } from "@/components/follow-ups/board-header";
-import { EmptyState } from "@/components/follow-ups/empty-state";
+import { EmptyState as FollowUpsEmptyState } from "@/components/follow-ups/empty-state";
 import { FollowUpCard } from "@/components/follow-ups/follow-up-card";
 import { FollowUpSearchBar } from "@/components/follow-ups/follow-up-search-bar";
 import { NewFollowUpDialog } from "@/components/follow-ups/new-follow-up-dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { addDaysToKey, dayKey } from "@/lib/date";
 import { parseFilter, parseSearchQuery } from "@/lib/follow-ups/filters";
@@ -71,7 +72,14 @@ export default async function FollowUpsPage({ searchParams }: PageProps<"/follow
         {/* Liste des suivis */}
         <section aria-label="Suivis">
           {board.items.length === 0 ? (
-            <EmptyState filter={filter} hasQuery={query !== ""} />
+            filter === "all" && query === "" ? (
+              <EmptyState
+                title="Aucun suivi en cours"
+                description="Un suivi, c'est quelque chose à faire avancer avec quelqu'un. Crée ton premier suivi en cliquant sur le bouton en haut de page : un sujet, une personne, une échéance."
+              />
+            ) : (
+              <FollowUpsEmptyState filter={filter} hasQuery={query !== ""} />
+            )
           ) : (
             <ul className="space-y-3">
               {board.items.map((item) => (
