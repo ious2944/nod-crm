@@ -1,10 +1,11 @@
 import { connection } from "next/server";
 
-import { ContactPagination } from "@/components/contacts/contact-pagination";
+import { Pagination } from "@/components/ui/pagination";
 import { ContactRow } from "@/components/contacts/contact-row";
 import { ContactToolbar } from "@/components/contacts/contact-toolbar";
 import { NewContactButton } from "@/components/contacts/new-contact-button";
 import {
+  buildContactListHref,
   DEFAULT_CONTACT_LIST_PARAMS,
   parseContactListParams,
 } from "@/lib/contacts/filters";
@@ -81,11 +82,12 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
                 ))}
               </ul>
 
-              <ContactPagination
-                params={params}
+              <Pagination
                 page={page.page}
                 pageCount={page.pageCount}
                 total={page.total}
+                itemLabel={{ singular: "contact", plural: "contacts" }}
+                buildHref={(n) => buildContactListHref({ ...params, page: n })}
               />
             </>
           )}

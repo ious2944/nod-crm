@@ -1,9 +1,11 @@
 import { connection } from "next/server";
 
+import { Pagination } from "@/components/ui/pagination";
 import { NewOrganizationButton } from "@/components/organizations/new-organization-button";
 import { OrganizationRow } from "@/components/organizations/organization-row";
 import { OrganizationToolbar } from "@/components/organizations/organization-toolbar";
 import {
+  buildOrganizationListHref,
   DEFAULT_ORG_LIST_PARAMS,
   parseOrganizationListParams,
 } from "@/lib/organizations/filters";
@@ -77,33 +79,15 @@ export default async function OrganizationsPage({ searchParams }: PageProps<"/or
           )}
 
           {page.pageCount > 1 && (
-            <nav
-              aria-label="Pagination"
-              className="mt-6 flex items-center justify-between text-sm text-muted"
-            >
-              <p>
-                Page {page.page} / {page.pageCount} — {page.total} organisation
-                {page.total > 1 ? "s" : ""}
-              </p>
-              <div className="flex gap-2">
-                {page.page > 1 && (
-                  <a
-                    href={`/organizations?page=${page.page - 1}${params.search ? `&q=${encodeURIComponent(params.search)}` : ""}${params.archived ? "&archived=1" : ""}`}
-                    className="rounded-lg border border-border-strong px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-surface-muted"
-                  >
-                    ← Précédente
-                  </a>
-                )}
-                {page.page < page.pageCount && (
-                  <a
-                    href={`/organizations?page=${page.page + 1}${params.search ? `&q=${encodeURIComponent(params.search)}` : ""}${params.archived ? "&archived=1" : ""}`}
-                    className="rounded-lg border border-border-strong px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-surface-muted"
-                  >
-                    Suivante →
-                  </a>
-                )}
-              </div>
-            </nav>
+            <div className="mt-6">
+              <Pagination
+                page={page.page}
+                pageCount={page.pageCount}
+                total={page.total}
+                itemLabel={{ singular: "organisation", plural: "organisations" }}
+                buildHref={(n) => buildOrganizationListHref({ ...params, page: n })}
+              />
+            </div>
           )}
         </section>
       </div>

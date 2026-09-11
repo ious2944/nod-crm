@@ -13,10 +13,6 @@ export interface NavSection {
 
 export const NAV_SECTIONS: NavSection[] = [
   {
-    title: null,
-    items: [{ label: "Dashboard", available: false, icon: "◎" }],
-  },
-  {
     title: "Pilotage",
     items: [
       { label: "Aujourd'hui", href: "/today", available: true, icon: "☀" },
