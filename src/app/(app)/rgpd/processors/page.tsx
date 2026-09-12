@@ -1,8 +1,9 @@
 import { connection } from "next/server";
 
 import { restoreProcessor } from "@/app/(app)/rgpd/archive-actions";
-import { archiveProcessor, createProcessor, updateProcessor } from "@/app/(app)/rgpd/actions";
+import { archiveProcessor, createProcessor } from "@/app/(app)/rgpd/actions";
 import { PrivacyPageHeader } from "@/components/privacy/privacy-nav";
+import { ProcessorUpdateForm } from "@/components/privacy/processor-update-form";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { DPA_STATUSES, EEA_STATUSES, TRI_STATES, labelFor } from "@/lib/privacy/constants";
 import { listArchivedPrivacyProcessors, listPrivacyProcessors } from "@/lib/privacy/queries";
@@ -41,7 +42,7 @@ export default async function PrivacyProcessorsPage() {
       <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-4 sm:px-6 sm:py-6">
         <details className="rounded-xl border border-border-subtle bg-surface p-4 shadow-card">
           <summary className="cursor-pointer font-semibold text-ink">+ Ajouter un sous-traitant</summary>
-          <ProcessorForm action={createProcessor} />
+          <ProcessorForm />
         </details>
 
         {items.length === 0 ? (
@@ -68,7 +69,22 @@ export default async function PrivacyProcessorsPage() {
                 )}
                 <details className="mt-4 border-t border-border-subtle pt-3">
                   <summary className="cursor-pointer text-sm font-semibold text-accent">Modifier</summary>
-                  <ProcessorForm action={updateProcessor} item={item} />
+                  <ProcessorUpdateForm processor={{
+                    id: item.id,
+                    name: item.name,
+                    service: item.service,
+                    category: item.category,
+                    dataCategories: item.dataCategories,
+                    purpose: item.purpose,
+                    country: item.country,
+                    eeaStatus: item.eeaStatus,
+                    dpaStatus: item.dpaStatus,
+                    dpaUrl: item.dpaUrl,
+                    subprocessorsStatus: item.subprocessorsStatus,
+                    lastReviewedAt: dateValue(item.lastReviewedAt ?? null),
+                    nextReviewAt: dateValue(item.nextReviewAt ?? null),
+                    notes: item.notes,
+                  }} />
                   <form action={archiveProcessor} className="mt-3">
                     <input type="hidden" name="id" value={item.id} />
                     <button className="text-sm font-semibold text-critical-fg hover:underline">Archiver le sous-traitant</button>
@@ -105,30 +121,24 @@ export default async function PrivacyProcessorsPage() {
   );
 }
 
-function ProcessorForm({
-  action,
-  item,
-}: {
-  action: (formData: FormData) => Promise<void>;
-  item?: Awaited<ReturnType<typeof listPrivacyProcessors>>[number];
-}) {
+/** Formulaire de création uniquement (server component, pas de feedback nécessaire). */
+function ProcessorForm() {
   return (
-    <form action={action} className="mt-4 grid gap-4 sm:grid-cols-2">
-      {item && <input type="hidden" name="id" value={item.id} />}
-      <label className="text-sm font-medium text-ink">Prestataire<input required name="name" defaultValue={item?.name} className={inputClass} /></label>
-      <label className="text-sm font-medium text-ink">Service utilisé<input required name="service" defaultValue={item?.service} className={inputClass} /></label>
-      <label className="text-sm font-medium text-ink">Catégorie<input name="category" defaultValue={item?.category ?? ""} className={inputClass} /></label>
-      <label className="text-sm font-medium text-ink">Pays / localisation<input name="country" defaultValue={item?.country ?? ""} className={inputClass} /></label>
-      <label className="text-sm font-medium text-ink">Données concernées<textarea name="dataCategories" defaultValue={item?.dataCategories ?? ""} rows={2} className={inputClass} /></label>
-      <label className="text-sm font-medium text-ink">Finalité<textarea name="purpose" defaultValue={item?.purpose ?? ""} rows={2} className={inputClass} /></label>
-      <label className="text-sm font-medium text-ink">Traitement dans l’EEE<select name="eeaStatus" defaultValue={item?.eeaStatus ?? "UNKNOWN"} className={inputClass}>{EEA_STATUSES.map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></label>
-      <label className="text-sm font-medium text-ink">DPA<select name="dpaStatus" defaultValue={item?.dpaStatus ?? "TO_REVIEW"} className={inputClass}>{DPA_STATUSES.map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select><span className="mt-1 block text-xs font-normal text-muted">Contrat encadrant le traitement réalisé par le prestataire pour ton compte.</span></label>
-      <label className="sm:col-span-2 text-sm font-medium text-ink">URL / référence du DPA<input name="dpaUrl" defaultValue={item?.dpaUrl ?? ""} className={inputClass} /></label>
-      <label className="text-sm font-medium text-ink">Sous-traitants ultérieurs<select name="subprocessorsStatus" defaultValue={item?.subprocessorsStatus ?? "UNKNOWN"} className={inputClass}>{TRI_STATES.map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></label>
-      <label className="text-sm font-medium text-ink">Dernière vérification<input type="date" name="lastReviewedAt" defaultValue={dateValue(item?.lastReviewedAt ?? null)} className={inputClass} /></label>
-      <label className="text-sm font-medium text-ink">Prochaine revue<input type="date" name="nextReviewAt" defaultValue={dateValue(item?.nextReviewAt ?? null)} className={inputClass} /></label>
-      <label className="sm:col-span-2 text-sm font-medium text-ink">Notes<textarea name="notes" defaultValue={item?.notes ?? ""} rows={3} className={inputClass} /></label>
-      <div className="sm:col-span-2"><button className="rounded-lg bg-accent px-4 py-2 text-sm font-bold text-accent-contrast shadow-card hover:opacity-90">{item ? "Enregistrer" : "Créer le sous-traitant"}</button></div>
+    <form action={createProcessor} className="mt-4 grid gap-4 sm:grid-cols-2">
+      <label className="text-sm font-medium text-ink">Prestataire<input required name="name" className={inputClass} /></label>
+      <label className="text-sm font-medium text-ink">Service utilisé<input required name="service" className={inputClass} /></label>
+      <label className="text-sm font-medium text-ink">Catégorie<input name="category" className={inputClass} /></label>
+      <label className="text-sm font-medium text-ink">Pays / localisation<input name="country" className={inputClass} /></label>
+      <label className="text-sm font-medium text-ink">Données concernées<textarea name="dataCategories" rows={2} className={inputClass} /></label>
+      <label className="text-sm font-medium text-ink">Finalité<textarea name="purpose" rows={2} className={inputClass} /></label>
+      <label className="text-sm font-medium text-ink">Traitement dans l&apos;EEE<select name="eeaStatus" defaultValue="UNKNOWN" className={inputClass}>{EEA_STATUSES.map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></label>
+      <label className="text-sm font-medium text-ink">DPA<select name="dpaStatus" defaultValue="TO_REVIEW" className={inputClass}>{DPA_STATUSES.map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select><span className="mt-1 block text-xs font-normal text-muted">Contrat encadrant le traitement réalisé par le prestataire pour ton compte.</span></label>
+      <label className="sm:col-span-2 text-sm font-medium text-ink">URL / référence du DPA<input name="dpaUrl" className={inputClass} /></label>
+      <label className="text-sm font-medium text-ink">Sous-traitants ultérieurs<select name="subprocessorsStatus" defaultValue="UNKNOWN" className={inputClass}>{TRI_STATES.map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></label>
+      <label className="text-sm font-medium text-ink">Dernière vérification<input type="date" name="lastReviewedAt" className={inputClass} /></label>
+      <label className="text-sm font-medium text-ink">Prochaine revue<input type="date" name="nextReviewAt" className={inputClass} /></label>
+      <label className="sm:col-span-2 text-sm font-medium text-ink">Notes<textarea name="notes" rows={3} className={inputClass} /></label>
+      <div className="sm:col-span-2"><button className="rounded-lg bg-accent px-4 py-2 text-sm font-bold text-accent-contrast shadow-card hover:opacity-90">Créer le sous-traitant</button></div>
     </form>
   );
 }

@@ -1,10 +1,16 @@
 import { z } from "zod";
 
-const text = (max: number) => z.string().trim().max(max).transform((v) => v || undefined);
+// Renvoie `null` (et non `undefined`) pour une valeur vide.
+// `undefined` en Prisma signifie « ne pas toucher à la colonne » dans un UPDATE,
+// ce qui empêche d'effacer un champ déjà renseigné. `null` explicite l'effacement.
+// Pour un CREATE, `null` et `undefined` produisent identiquement NULL en base.
+const text = (max: number) => z.string().trim().max(max).transform((v) => v || null);
 const requiredText = (max: number) => z.string().trim().min(1).max(max);
+// Même raisonnement que `text()` : `null` pour permettre l'effacement d'une date
+// lors d'un UPDATE (la colonne est nullable pour toutes les entités concernées).
 const optionalDate = z.preprocess(
-  (value) => (value === "" || value == null ? undefined : value),
-  z.coerce.date().optional(),
+  (value) => (value === "" || value == null ? null : value),
+  z.coerce.date().nullable(),
 );
 const requiredDate = z.coerce.date();
 
@@ -94,9 +100,10 @@ export const incidentSchema = z.object({
   occurredAt: optionalDate,
   description: requiredText(6000),
   dataCategories: text(3000),
+  // `null` pour permettre l'effacement via UPDATE (même raison que `text()`).
   affectedCount: z.preprocess(
-    (value) => (value === "" || value == null ? undefined : value),
-    z.coerce.number().int().nonnegative().max(1_000_000_000).optional(),
+    (value) => (value === "" || value == null ? null : value),
+    z.coerce.number().int().nonnegative().max(1_000_000_000).nullable(),
   ),
   consequences: text(4000),
   measures: text(4000),

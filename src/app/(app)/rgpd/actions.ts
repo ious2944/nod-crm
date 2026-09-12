@@ -14,6 +14,7 @@ import {
   treatmentSchema,
   updateRequestSchema,
 } from "@/lib/privacy/schemas";
+import type { ProcessorFormState } from "@/lib/privacy/processor-form-state";
 import { getActorForAction } from "@/lib/workspace";
 
 // `.parse()` throws the raw ZodError straight into the Server Action's
@@ -320,37 +321,54 @@ export async function createProcessor(formData: FormData) {
   revalidatePrivacy("/rgpd/processors", "/rgpd/treatments");
 }
 
-export async function updateProcessor(formData: FormData) {
-  const { id: userId, workspaceId } = await getActorForAction();
+/**
+ * Met à jour un sous-traitant existant.
+ *
+ * Signature compatible avec `useActionState` : `(prevState, formData) => state`.
+ * Retourne un état explicite au lieu de lancer une exception, afin que le
+ * composant client puisse afficher le feedback directement.
+ */
+export async function updateProcessor(
+  _prevState: ProcessorFormState,
+  formData: FormData,
+): Promise<ProcessorFormState> {
+  try {
+    const { id: userId, workspaceId } = await getActorForAction();
 
-  const parsed = parseOrThrow(
-    processorSchema.extend({
-      id: privacyIdSchema,
-    }),
-    Object.fromEntries(formData),
-  );
+    const parsed = parseOrThrow(
+      processorSchema.extend({
+        id: privacyIdSchema,
+      }),
+      Object.fromEntries(formData),
+    );
 
-  const { id, ...data } = parsed;
+    const { id, ...data } = parsed;
 
-  const result = await prisma.privacyProcessor.updateMany({
-    where: {
-      id,
-      workspaceId,
-    },
-    data,
-  });
-
-  if (result.count > 0) {
-    await recordAudit({
-      workspaceId,
-      userId,
-      action: "UPDATE",
-      entityType: AUDIT_ENTITY_TYPES.PRIVACY_PROCESSOR,
-      entityId: id,
+    const result = await prisma.privacyProcessor.updateMany({
+      where: {
+        id,
+        workspaceId,
+      },
+      data,
     });
-  }
 
-  revalidatePrivacy("/rgpd/processors", "/rgpd/treatments");
+    if (result.count > 0) {
+      await recordAudit({
+        workspaceId,
+        userId,
+        action: "UPDATE",
+        entityType: AUDIT_ENTITY_TYPES.PRIVACY_PROCESSOR,
+        entityId: id,
+      });
+    }
+
+    revalidatePrivacy("/rgpd/processors", "/rgpd/treatments");
+    return { status: "success", message: "Modifications enregistrées." };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Une erreur inattendue est survenue.";
+    return { status: "error", message };
+  }
 }
 
 export async function archiveProcessor(formData: FormData) {
