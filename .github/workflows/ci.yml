@@ -18,6 +18,22 @@ env:
   NEXT_TELEMETRY_DISABLED: "1"
 
 jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Scans the full history on every run, not just the diff: a secret
+      # committed once and later removed is still in Git history and still a
+      # leak. gitleaks/gitleaks-action pins its own binary version.
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   quality:
     name: Lint, typecheck, unit tests, build
     runs-on: ubuntu-latest
@@ -30,6 +46,12 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # Fails the pipeline on any HIGH or CRITICAL advisory in the dependency
+      # tree, so a vulnerable package (like the next.js RCE this repo shipped
+      # with) can't merge silently again.
+      - name: Dependency audit (fails on HIGH/CRITICAL)
+        run: npm audit --audit-level=high
 
       # The Prisma client is generated into src/generated/, which is not
       # committed. Everything below imports it.

@@ -17,12 +17,12 @@ sudo ./deploy/backup/nod-crm-backup.sh
 
 The script aborts — **without leaving a partial archive** — if:
 
-- the environment file is missing or incomplete;
-- the PostgreSQL container is not running;
-- `pg_dump` fails;
-- the gzip archive does not verify;
-- the dump does not contain `CREATE TABLE public.follow_ups`;
-- the application container is not running, so the photos cannot be read.
+* the environment file is missing or incomplete;
+* the PostgreSQL container is not running;
+* `pg_dump` fails;
+* the gzip archive does not verify;
+* the dump does not contain `CREATE TABLE public.follow_ups`;
+* the application container is not running, so the photos cannot be read.
 
 That last one is a refusal, not a warning: a backup that quietly covers the
 database but not the photos is exactly the one you discover is incomplete on
@@ -43,7 +43,6 @@ container as an environment variable, never as a command-line argument — so it
 never appears in `ps`. The file is parsed literally rather than with `source`,
 because `source` executes its content: a password containing `$(…)` would be
 run as a shell command.
-
 
 ## Automating it
 
@@ -144,24 +143,60 @@ copy of your database on another host should not inherit live sessions.
 
 ## What backups do not cover
 
-- **`.env`.** It holds `AUTH_SECRET` and the database password, and it is not
+* **`.env`.** It holds `AUTH_SECRET` and the database password, and it is not
   in the dump and not in Git. Copy it into a password manager. Without it you
   can restore the data but not start the stack.
-- **The Docker image.** Rebuilt from the repository; nothing to back up.
-- **Uploaded files.** Since V0.2 there *are* some — contact photos — and they
+* **The Docker image.** Rebuilt from the repository; nothing to back up.
+* **Uploaded files.** Since V0.2 there *are* some — contact photos — and they
   **are** covered, by the second archive each run produces. Everything else
   under `NOD_UPLOAD_DIR` that NOD CRM did not write is not its business.
 
-## Residual risk
+## Recovery objectives (RTO/RPO)
 
-Backups written by these scripts live **on the same host as the database**. A
-disk or host failure takes both. Copying them off-site is left to you because
-the right destination is yours to pick:
+Documented so an incident isn't the first time these numbers get decided.
+
+* **RPO (Recovery Point Objective): 24 hours.** The backup runs once a day
+  (see the cron entry above). Anything written between two runs is at risk on
+  a full loss. If that gap is ever too wide for a given period, run the
+  script manually before/after the change rather than waiting for the next
+  scheduled run.
+* **RTO (Recovery Time Objective): 1 hour**, from "restore starts" to "the
+  application is back and answering requests". That covers: pulling the
+  latest archive from wherever it was verified (local or off-site), running
+  `nod-crm-restore.sh`, restoring the uploads archive, and restarting the
+  stack. It assumes the target host and Docker stack already exist — a
+  bare-metal rebuild is not in scope for this number.
+
+Both are targets, not guarantees — they hold only as long as the monthly
+`--verify` runs (above) keep passing and backups actually reach an off-site
+destination.
+
+## Off-site copy
+
+Backups written by these scripts live **on the same host as the database**.
+Left there alone, a disk or host failure — or a ransomware run — takes the
+data and its only copy in the same instant.
+
+Set `NOD_CRM_RCLONE_REMOTE` before running the script and the two archives
+from that run are pushed off-site right after they pass local verification —
+the same `rclone` remote already used for the Mirai and GED backups on this
+VPS works unchanged:
 
 ```bash
-# Example — adapt to your destination.
-rsync -a --chmod=600 /var/backups/nod-crm/ backup-host:/srv/backups/nod-crm/
+sudo NOD_CRM_RCLONE_REMOTE="b2:nodlab-backups-prod/nod-crm/" \
+     /opt/nod-crm/deploy/backup/nod-crm-backup.sh
 ```
 
-Whatever you choose, verify a restore from *that* copy at least once. An
-off-site backup nobody has ever restored has the same value as no backup.
+Or, in the cron entry:
+
+```cron
+17 3 * * * root NOD_CRM_RCLONE_REMOTE="b2:nodlab-backups-prod/nod-crm/" /opt/nod-crm/deploy/backup/nod-crm-backup.sh >> /var/log/nod-crm-backup.log 2>&1
+```
+
+A push failure is logged as a warning, not fatal — the local archive already
+passed its integrity checks and is not thrown away over a network hiccup.
+Left unset, the script behaves exactly as before: local-only.
+
+Whatever destination you use, verify a restore from *that* copy at least
+once. An off-site backup nobody has ever restored has the same value as no
+backup.
