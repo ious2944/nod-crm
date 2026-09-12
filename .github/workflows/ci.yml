@@ -31,6 +31,12 @@ jobs:
 
       - run: npm ci
 
+      # Fails the pipeline on any HIGH or CRITICAL advisory in the dependency
+      # tree, so a vulnerable package (like the next.js RCE this repo shipped
+      # with) can't merge silently again.
+      - name: Dependency audit (fails on HIGH/CRITICAL)
+        run: npm audit --audit-level=high
+
       # The Prisma client is generated into src/generated/, which is not
       # committed. Everything below imports it.
       - run: npm run db:generate
