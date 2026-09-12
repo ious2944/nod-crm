@@ -119,7 +119,7 @@ V0.7 is the visual system used by all modules, including RGPD Essentials:
 
 - Lumina Enterprise design system with semantic tokens and Electric Indigo (`#6366F1`) as the primary colour.
 - Geist typography and a consistent spacing, radius and elevation system.
-- Refreshed desktop sidebar and responsive mobile navigation.
+- Refreshed desktop sidebar and responsive mobile navigation, with Lucide vector icons in all navigation entries.
 - Sticky translucent page headers on application pages.
 - Consistent card surfaces, filter pills, form focus states and contact avatars.
 - Dark-mode token parity through `prefers-color-scheme`.
@@ -133,7 +133,7 @@ V0.7 is the visual system used by all modules, including RGPD Essentials:
 - **Self-hosting** — Docker Compose, PostgreSQL 16 and automatic Prisma migrations.
 - **Demo data** — fictional organisations, contacts, follow-ups and tasks for a dedicated demo workspace. Seeded business rows are identifiable as demo data where supported by the model.
 
-Not built yet, and deliberately shown as disabled in the navigation: Dashboard.
+Not built yet and not shown in the navigation: Dashboard.
 
 ---
 
@@ -313,7 +313,7 @@ Known and accepted in V0.9:
 - Password reset goes through the CLI, not self-service.
 - Multi-workspace isolation is enforced, but there is no UI to create or switch workspaces beyond the CLI.
 - “Nudge” records the nudge; it does not send an email. NOD CRM sends no application email today.
-- The Follow-up board has no pagination and loads every open follow-up. It is intended for modest workspace sizes; Contacts are paginated.
+- The Follow-up board has no pagination; items for the active filter tab are loaded fully from the database. Board statistics are computed by the database. Contacts and Commerce are paginated.
 - Follow-up search on open items is in memory; the completed tab uses PostgreSQL `ILIKE`. There is no full-text/trigram index yet.
 - Contact search uses `ILIKE`; `pg_trgm` is not shipped yet.
 - Contact photos live on a volume rather than in PostgreSQL. Backup includes them, but restore remains a manual step; see [docs/backup-restore.md](docs/backup-restore.md).

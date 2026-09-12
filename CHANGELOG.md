@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Post-V0.9 audit — 16 targeted fixes (F-01 to F-16).**
+
+No new module, no change to existing workflows. The fixes address keyboard
+accessibility, scalability of high-volume pages, technical consistency and
+several small UX gaps identified during an internal audit.
+
+### Fixed
+
+#### Accessibility
+
+- **Keyboard navigation in dialogs (F-01)** — pressing Tab or Shift+Tab inside
+  a dialog (create/edit follow-up, contact form, confirm dialog) now cycles
+  through the dialog's own controls and never escapes to the page behind it.
+  Pressing Escape closes the dialog and returns focus to the element that
+  opened it.
+- **Differentiated error messages (F-02)** — row-level actions (archive,
+  restore, quick-action transitions) now describe what went wrong: a conflict
+  with another change gives a context-specific message, a network issue
+  invites the user to retry, and unexpected errors show a reference identifier
+  for easier support.
+
+#### Performance and scalability
+
+- **Follow-up board statistics via database counts (F-03)** — the counters in
+  the board header (open, to nudge, my court, their court, needs attention,
+  completed) are now computed by the database rather than by loading every open
+  follow-up into memory. Items displayed for the active filter tab are fetched
+  directly with the tab's predicate applied at the database level.
+- **Organisation filter reads from the organisation table (F-04)** — the
+  organisation drop-down on the contact list now draws its values from the
+  canonical `Organizations` table instead of the contact text field. Filter
+  results are stable and consistent with the names shown on the organisation
+  pages. Contacts not yet linked to an organisation record continue to appear
+  under their historical name via a compatibility fallback.
+- **Pagination on the Commerce opportunity list (F-05)** — the opportunity list
+  now loads 25 items per page rather than all opportunities at once.
+  Page navigation preserves the active status filter.
+- **RGPD dashboard counters via database counts (F-06)** — the counts shown on
+  the privacy cockpit (treatments, processors, open requests, open incidents)
+  are now computed by the database. Alert queries fetch only the records that
+  could generate an alert (non-archived treatments and processors, open
+  requests near their deadline, open incidents), not the full history.
+
+#### Technical consistency
+
+- **Per-segment error boundaries (F-07)** — each application section now has an
+  independent error boundary. An unexpected error in one page or section no
+  longer causes a blank screen for the whole interface; it is caught and
+  displayed in place with a clear message and a recovery action.
+- **Dashboard entry removed from navigation (F-08)** — the "bientôt" Dashboard
+  entry that appeared as a disabled placeholder in the sidebar has been removed.
+  The navigation now only shows items that are actually available.
+- **Generic pagination component (F-10)** — contacts and organisations share the
+  same pagination component, with identical behaviour across both lists.
+- **Shared date-formatting utility (F-11)** — French date formatting is handled
+  by a single shared function. Date display is now consistent across Commerce
+  and any future page.
+
+#### User experience
+
+- **Lucide icons in the sidebar (F-09)** — navigation entries now use Lucide
+  vector icons instead of emoji. Icons are theme-aware and scale correctly at
+  all viewport sizes and zoom levels.
+- **Logout accessible on mobile (F-12)** — on narrow viewports, tapping the
+  avatar (initials) in the top bar opens a drawer showing the account email and
+  a Sign out button. Previously, disconnecting required a keyboard or a specific
+  gesture.
+- **Breadcrumb navigation in the RGPD section (F-13)** — the four RGPD
+  sub-pages (treatment register, processors, requests, incidents) now display a
+  breadcrumb ("Conformité RGPD › [page name]") that is fully keyboard- and
+  screen-reader-accessible.
+- **Illustrated empty states (F-14)** — when the contact list, the follow-up
+  board or the Aujourd'hui workspace is empty and no filter is active, a
+  visual prompt with a call-to-action replaces the blank space.
+- **Confirmation after sign-out (F-15)** — signing out now redirects to the
+  login page with a brief confirmation banner so users know the session has
+  ended and the page is no longer showing private data.
+- **Photo field at the top of the contact form (F-16)** — the photo upload is
+  now the first field in the contact creation and editing form. On desktop it
+  appears in the right column beside the text fields; on mobile it appears
+  above them.
+
+---
+
 **NOD CRM v0.7 — UI Refresh / Lumina Enterprise.**
 
 This release is a **visual refonte only**. No functional behaviour was added,
