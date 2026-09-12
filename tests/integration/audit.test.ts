@@ -247,11 +247,26 @@ describe("échecs de validation et de mutation : jamais de fausse ligne d'audit"
   });
 
   it("échec avant la transaction (sous-traitant introuvable) : ni traitement, ni ligne d'audit", async () => {
+    // treatmentSchema requires legalBasis, transferOutsideEea and status as
+    // mandatory enums, plus text() fields that must be strings (not undefined).
+    // Supply a fully-valid payload so that Zod validation passes and the call
+    // reaches assertProcessors(), which will throw "Sous-traitant introuvable."
+    // because the processorId does not belong to this workspace.
     await expect(
       createTreatment(
         formData({
           name: "Traitement test",
-          purpose: "Test",
+          purpose: "Test d'intégration",
+          description: "",
+          owner: "",
+          dataSubjects: "",
+          dataCategories: "",
+          legalBasis: "CONSENT",
+          retentionPeriod: "",
+          recipients: "",
+          transferOutsideEea: "NO",
+          securityMeasures: "",
+          status: "ACTIVE",
           processorId: "00000000-0000-0000-0000-000000000000",
         }),
       ),
@@ -264,7 +279,11 @@ describe("échecs de validation et de mutation : jamais de fausse ligne d'audit"
   it("panne DB au niveau de la mutation elle-même : rien n'est audité, l'erreur remonte", async () => {
     const spy = vi.spyOn(prisma.organization, "findFirst").mockRejectedValueOnce(new Error("DB down"));
 
-    await expect(create({ firstName: "X", organizationId: "does-not-matter" })).rejects.toThrow("DB down");
+    // "does-not-matter" is not a valid UUID, so the contact schema transforms it
+    // to null — the organization check is skipped and the spy is never called.
+    // Use a valid UUID so that the schema keeps the value, the findFirst call
+    // fires and the spy intercepts it, causing the expected DB error to propagate.
+    await expect(create({ firstName: "X", organizationId: "00000000-0000-0000-0000-000000000001" })).rejects.toThrow("DB down");
 
     spy.mockRestore();
     expect(await auditRows()).toHaveLength(0);
