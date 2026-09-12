@@ -96,6 +96,17 @@ jobs:
 
       - run: npm run db:generate
 
+      # Schema-level check, distinct from `migrate deploy` below: catches an
+      # invalid schema.prisma (bad relation, unknown attribute) even if the
+      # migration history already on disk would otherwise apply without
+      # complaint. Needs a resolvable datasource url, not a reachable one —
+      # reusing TEST_DATABASE_URL costs nothing since the job's own throwaway
+      # Postgres is already up at this point.
+      - name: Validate Prisma schema
+        run: npx prisma validate
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+
       - name: Apply migrations
         run: npm run db:deploy
         env:
