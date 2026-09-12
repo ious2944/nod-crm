@@ -6,9 +6,12 @@ import {
   createProcessor,
   createTreatment,
   updateIncident,
+  updateProcessor,
+  updatePrivacyRequest,
   updateTreatment,
 } from "@/app/(app)/rgpd/actions";
 import { prisma } from "@/lib/prisma";
+import { initialProcessorFormState } from "@/lib/privacy/processor-form-state";
 import { listPrivacyTreatments } from "@/lib/privacy/queries";
 
 import {
@@ -201,5 +204,209 @@ describe("RGPD Essentials — isolation workspace", () => {
       }),
     );
     expect(await prisma.privacyIncident.count({ where: { workspaceId: alice.workspaceId } })).toBe(1);
+  });
+});
+
+// ─── Bug « champ vidé qui revient » ────────────────────────────────────────
+//
+// Ces tests vérifient que les champs texte optionnels peuvent être effacés lors
+// d'un UPDATE. La cause initiale : `text()` retournait `undefined` pour `""`,
+// et Prisma interprète `undefined` comme « ne pas toucher à la colonne ».
+// Après correction, `text()` renvoie `null`, ce qui écrase explicitement la valeur.
+
+describe("RGPD — effacement des champs optionnels lors d'un UPDATE (bug clearing)", () => {
+  let alice: TestUser;
+
+  beforeEach(async () => {
+    await resetDatabase();
+    alice = await createWorkspaceWithUser("privacy-clearing");
+    await signIn(alice);
+  });
+
+  // ── PrivacyProcessor ────────────────────────────────────────────────────
+
+  it("PrivacyProcessor : notes → effacé après update avec notes = ''", async () => {
+    await createProcessor(processorData({ notes: "Texte initial" }));
+    const before = await prisma.privacyProcessor.findFirstOrThrow();
+    expect(before.notes).toBe("Texte initial");
+
+    await updateProcessor(
+      initialProcessorFormState,
+      processorData({ id: before.id, notes: "" }),
+    );
+
+    const after = await prisma.privacyProcessor.findFirstOrThrow();
+    expect(after.notes).toBeNull();
+  });
+
+  it("PrivacyProcessor : country → effacé après update avec country = ''", async () => {
+    await createProcessor(processorData({ country: "Allemagne" }));
+    const before = await prisma.privacyProcessor.findFirstOrThrow();
+    expect(before.country).toBe("Allemagne");
+
+    await updateProcessor(
+      initialProcessorFormState,
+      processorData({ id: before.id, country: "" }),
+    );
+
+    const after = await prisma.privacyProcessor.findFirstOrThrow();
+    expect(after.country).toBeNull();
+  });
+
+  it("PrivacyProcessor : modification normale notes 'Ancien' → 'Nouveau'", async () => {
+    await createProcessor(processorData({ notes: "Ancien" }));
+    const before = await prisma.privacyProcessor.findFirstOrThrow();
+
+    await updateProcessor(
+      initialProcessorFormState,
+      processorData({ id: before.id, notes: "Nouveau" }),
+    );
+
+    const after = await prisma.privacyProcessor.findFirstOrThrow();
+    expect(after.notes).toBe("Nouveau");
+  });
+
+  it("PrivacyProcessor : updateProcessor retourne status success", async () => {
+    await createProcessor(processorData());
+    const p = await prisma.privacyProcessor.findFirstOrThrow();
+
+    const state = await updateProcessor(
+      initialProcessorFormState,
+      processorData({ id: p.id, notes: "OK" }),
+    );
+
+    expect(state.status).toBe("success");
+  });
+
+  it("PrivacyProcessor : effacement génère un audit UPDATE", async () => {
+    await createProcessor(processorData({ notes: "Effacer" }));
+    const p = await prisma.privacyProcessor.findFirstOrThrow();
+    const auditBefore = await prisma.auditLog.count({
+      where: { entityType: "PrivacyProcessor", entityId: p.id },
+    });
+
+    await updateProcessor(initialProcessorFormState, processorData({ id: p.id, notes: "" }));
+
+    const auditAfter = await prisma.auditLog.count({
+      where: { entityType: "PrivacyProcessor", entityId: p.id },
+    });
+    expect(auditAfter).toBe(auditBefore + 1);
+  });
+
+  // ── PrivacyTreatment ────────────────────────────────────────────────────
+
+  it("PrivacyTreatment : description → effacée après update avec description = ''", async () => {
+    await createTreatment(treatmentData({ description: "Description initiale" }));
+    const before = await prisma.privacyTreatment.findFirstOrThrow();
+    expect(before.description).toBe("Description initiale");
+
+    await updateTreatment(treatmentData({ id: before.id, description: "" }));
+
+    const after = await prisma.privacyTreatment.findFirstOrThrow();
+    expect(after.description).toBeNull();
+  });
+
+  it("PrivacyTreatment : owner → effacé après update avec owner = ''", async () => {
+    await createTreatment(treatmentData({ owner: "DPO" }));
+    const before = await prisma.privacyTreatment.findFirstOrThrow();
+    expect(before.owner).toBe("DPO");
+
+    await updateTreatment(treatmentData({ id: before.id, owner: "" }));
+
+    const after = await prisma.privacyTreatment.findFirstOrThrow();
+    expect(after.owner).toBeNull();
+  });
+
+  // ── PrivacyRequest ──────────────────────────────────────────────────────
+
+  it("PrivacyRequest : notes → effacées après update avec notes = ''", async () => {
+    const contactId = await createContactRecord(alice.workspaceId, {
+      firstName: "Jean",
+      lastName: "Test",
+    });
+
+    await createPrivacyRequest(
+      formData({
+        contactId,
+        requesterName: "",
+        requesterEmail: "",
+        requestType: "ACCESS",
+        receivedAt: "2026-08-01",
+        dueAt: "2026-09-01",
+        status: "RECEIVED",
+        owner: "",
+        notes: "Note de demande initiale",
+      }),
+    );
+
+    const before = await prisma.privacyRequest.findFirstOrThrow();
+    expect(before.notes).toBe("Note de demande initiale");
+
+    await updatePrivacyRequest(
+      formData({
+        id: before.id,
+        contactId,
+        requesterName: "",
+        requesterEmail: "",
+        requestType: "ACCESS",
+        receivedAt: "2026-08-01",
+        dueAt: "2026-09-01",
+        status: "RECEIVED",
+        owner: "",
+        notes: "",
+      }),
+    );
+
+    const after = await prisma.privacyRequest.findFirstOrThrow();
+    expect(after.notes).toBeNull();
+  });
+
+  // ── PrivacyIncident ─────────────────────────────────────────────────────
+
+  it("PrivacyIncident : consequences → effacées après update avec consequences = ''", async () => {
+    await createIncident(
+      formData({
+        title: "Incident test",
+        discoveredAt: "2026-08-27",
+        occurredAt: "",
+        description: "Description de l'incident",
+        dataCategories: "",
+        affectedCount: "",
+        consequences: "Conséquences initiales",
+        measures: "",
+        riskLevel: "TO_ASSESS",
+        authorityNotification: "TO_ASSESS",
+        notifiedAt: "",
+        peopleInformed: "TO_ASSESS",
+        owner: "",
+        status: "OPEN",
+      }),
+    );
+
+    const before = await prisma.privacyIncident.findFirstOrThrow();
+    expect(before.consequences).toBe("Conséquences initiales");
+
+    await updateIncident(
+      formData({
+        id: before.id,
+        title: "Incident test",
+        discoveredAt: "2026-08-27",
+        occurredAt: "",
+        description: "Description de l'incident",
+        dataCategories: "",
+        affectedCount: "",
+        consequences: "",
+        measures: "",
+        riskLevel: "TO_ASSESS",
+        authorityNotification: "TO_ASSESS",
+        notifiedAt: "",
+        peopleInformed: "TO_ASSESS",
+        owner: "",
+        status: "OPEN",
+      }),
+    );
+
+    const after = await prisma.privacyIncident.findFirstOrThrow();
+    expect(after.consequences).toBeNull();
   });
 });
