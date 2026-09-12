@@ -1,4 +1,4 @@
-# Tasks (V0.4)
+# Tasks (V0.4 + post-V0.9 bugfixes)
 
 **A task is something to do. A follow-up is something to move forward with
 someone.**
@@ -19,13 +19,15 @@ management tool.
 | --- | --- |
 | `src/lib/tasks/domain.ts` | timing, buckets, sorting — pure, tested |
 | `src/lib/tasks/filters.ts` | the `?f=` parameter (`todo` \| `done`) |
-| `src/lib/tasks/schemas.ts` | Zod validation and field limits |
+| `src/lib/tasks/schemas.ts` | Zod validation and field limits (`createTaskSchema`, `updateTaskSchema`) |
 | `src/lib/tasks/queries.ts` | reads: list, actionable tasks, follow-up picker |
 | `src/lib/tasks/view.ts` | display shape handed to components, pure |
+| `src/lib/tasks/create-state.ts` | `CreateTaskState` type for the creation action |
+| `src/lib/tasks/edit-state.ts` | `EditTaskState` type for the update action |
 | `src/lib/today/feed.ts` | merges follow-ups and tasks into one feed, pure |
 | `src/lib/today/queries.ts` | the cockpit read |
-| `src/app/(app)/tasks/actions.ts` | mutations: create, complete, reopen, snooze |
-| `src/components/tasks/` | row, actions, create dialog, follow-up picker |
+| `src/app/(app)/tasks/actions.ts` | mutations: create, update, complete, reopen, snooze |
+| `src/components/tasks/` | row, actions, create dialog, edit dialog, follow-up picker |
 
 As everywhere else in NOD CRM there is no REST layer: reads are Server
 Components calling `src/lib/`, writes are Server Actions.
@@ -34,10 +36,11 @@ Components calling `src/lib/`, writes are Server Actions.
 | --- | --- |
 | `GET /tasks?state=` | `/tasks?f=todo\|done` → `getTaskList` |
 | `POST /tasks` | `createTask` action |
+| `POST /tasks/:id` | `updateTask` action |
 | `POST /tasks/:id/complete` | `applyTaskAction` with `intent=complete` |
 | `POST /tasks/:id/snooze` | `applyTaskAction` with `intent=snooze&days=N` |
 
-There is no delete. A task is completed or reopened; nothing is destroyed.
+There is no delete. A task is completed, edited or reopened; nothing is destroyed.
 
 ## Two states, and no more
 
@@ -108,6 +111,27 @@ the count of *actionable items today, follow-ups and tasks together* — exactly
 what the page lists underneath. The task page shows the number of tasks left to
 do. Three counters, three stated meanings, no overlap.
 
+## Editing a task
+
+A "Modifier" button on each task row opens the edit dialog (`EditTaskDialog`).
+
+**Editable fields:** title, due date, notes, linked contact.
+
+**Preserved on edit:** `followUpId` and `opportunityId` — neither appears in
+the edit form, and neither is touched by `updateTask`. Editing a task never
+changes which follow-up or opportunity it is linked to.
+
+The update uses a simple `where: { id, workspaceId }` predicate — it does not
+repeat `completedAt` or `dueAt` as `applyTaskAction` does. That is intentional:
+editing is a deliberate user action on a form they just opened; it should
+succeed regardless of the task's current state. The optimistic concurrency
+guard in `applyTaskAction` protects against double-clicks on quick actions, not
+general edits.
+
+The dialog closes on success and surfaces field-level validation errors if the
+form is incomplete. An audit row (`Task / UPDATE`) is written after every
+successful save.
+
 ## Multi-tenant boundary
 
 Same rules as the rest of the application, no exception:
@@ -119,9 +143,10 @@ Same rules as the rest of the application, no exception:
   re-checked against that workspace before use, so a cross-workspace link
   cannot be created and another workspace's task cannot be read or mutated —
   it simply is not found;
-- writes go through `updateMany` with the workspace in the `WHERE`, and the
-  clause repeats the state read a moment earlier, which makes each transition
-  atomic without an explicit transaction;
+- quick-action writes go through `updateMany` with the workspace and the exact
+  prior state in the `WHERE`, making each transition atomic without an explicit
+  transaction; edit writes use `where: { id, workspaceId }` only, which is the
+  right scope for a general update;
 - the create schema enumerates its fields, so an enriched form cannot set
   `workspace_id`, `completed_at` or `is_demo`.
 

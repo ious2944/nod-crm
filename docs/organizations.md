@@ -144,3 +144,8 @@ component in the contact form. It:
   open tasks from its contacts. Adding a direct `task.organization_id` would
   create a second data model with its own edge cases and UI surface; the
   indirect path is sufficient.
+
+- **Open opportunities are listed on the organisation sheet** (added in V0.9).
+  Each opportunity carries a direct `organization_id` FK, so the query is a
+  simple join with no indirection. Closed opportunities (Gagnée / Perdue) are
+  not shown.

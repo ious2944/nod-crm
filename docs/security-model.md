@@ -331,8 +331,28 @@ Next.js, React, Prisma and its pg adapter, `pg`, `@node-rs/argon2`, Zod,
 should be re-evaluated at each Prisma upgrade. The CI pipeline enforces this:
 `npm audit --audit-level=high` is a required gate on every push.
 
+A `gitleaks` secret scan runs in CI on every push with `fetch-depth: 0`,
+covering the full git history. A secret committed once and later removed is
+still caught.
+
 All direct and transitive licenses are permissive or AGPL-compatible (MIT,
 Apache-2.0, ISC, BSD, MPL-2.0, LGPL-3.0).
+
+## 11a. Mutation audit log
+
+Every write through a Server Action appends one row to `audit_logs`:
+`timestamp · userId · workspaceId · entityType · entityId · action · requestId`.
+No field values, snapshots or diffs are stored; the business table remains the
+source of truth for what the data is.
+
+Audit rows are workspace-scoped and cascade on workspace deletion. The write is
+best-effort: a failing `audit_logs` insert is logged server-side and does not
+abort the business mutation.
+
+Covered entities: Contact, Organization, FollowUp, Task, Opportunity,
+PrivacyTreatment, PrivacyProcessor, PrivacyRequest, PrivacyIncident.
+
+See [`src/lib/audit/README.md`](../src/lib/audit/README.md).
 
 ## 12. Residual risks
 
@@ -349,7 +369,7 @@ An honest list of what is *not* covered.
 | `style-src 'unsafe-inline'` | style injection is possible | a Next.js constraint; `script-src` stays strict |
 | Dependency on an npm `overrides` entry | needs watching on upgrade | re-evaluate at each Prisma release |
 | Backups sit on the same host | one hardware failure takes both | **fix this**: copy off-site ([backup-restore.md](backup-restore.md)) |
-| No pagination | thousands of open follow-ups load at once | acceptable below ~2,000 ([database.md](database.md)) |
+| No pagination on follow-ups | open follow-ups for the active filter tab are loaded fully | acceptable below ~2,000 ([database.md](database.md)); contacts, organisations and commerce are paginated |
 | Quick actions require JavaScript | a JS-less browser cannot act on a follow-up | the login screen remains a plain HTML form |
 | Fail2ban cannot see failed logins | a rejected password still answers 200 | compensated by application-level limiting |
 | Large image (~2.8 GB, full Debian base) | disk, and a wider software surface | slim broke Prisma migrations; revisit with slim + `openssl` if disk gets tight |
