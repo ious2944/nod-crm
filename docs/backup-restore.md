@@ -152,16 +152,32 @@ copy of your database on another host should not inherit live sessions.
   **are** covered, by the second archive each run produces. Everything else
   under `NOD_UPLOAD_DIR` that NOD CRM did not write is not its business.
 
-## Residual risk
+## Off-site copy
 
-Backups written by these scripts live **on the same host as the database**. A
-disk or host failure takes both. Copying them off-site is left to you because
-the right destination is yours to pick:
+Backups written by these scripts live **on the same host as the database**.
+Left there alone, a disk or host failure — or a ransomware run — takes the
+data and its only copy in the same instant.
+
+Set `NOD_CRM_RCLONE_REMOTE` before running the script and the two archives
+from that run are pushed off-site right after they pass local verification —
+the same `rclone` remote already used for the Mirai and GED backups on this
+VPS works unchanged:
 
 ```bash
-# Example — adapt to your destination.
-rsync -a --chmod=600 /var/backups/nod-crm/ backup-host:/srv/backups/nod-crm/
+sudo NOD_CRM_RCLONE_REMOTE="b2:nodlab-backups-prod/nod-crm/" \
+     /opt/nod-crm/deploy/backup/nod-crm-backup.sh
 ```
 
-Whatever you choose, verify a restore from *that* copy at least once. An
-off-site backup nobody has ever restored has the same value as no backup.
+Or, in the cron entry:
+
+```cron
+17 3 * * * root NOD_CRM_RCLONE_REMOTE="b2:nodlab-backups-prod/nod-crm/" /opt/nod-crm/deploy/backup/nod-crm-backup.sh >> /var/log/nod-crm-backup.log 2>&1
+```
+
+A push failure is logged as a warning, not fatal — the local archive already
+passed its integrity checks and is not thrown away over a network hiccup.
+Left unset, the script behaves exactly as before: local-only.
+
+Whatever destination you use, verify a restore from *that* copy at least
+once. An off-site backup nobody has ever restored has the same value as no
+backup.
