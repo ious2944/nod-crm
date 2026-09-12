@@ -29,6 +29,31 @@ par exemple), ça doit être une décision explicite et scopée, pas un champ
 `metadata: Json?` fourre-tout où n'importe quel appelant peut, un jour,
 glisser un email ou une note.
 
+## Entités et opérations instrumentées
+
+Toutes les mutations instrumentées dans la version actuelle :
+
+| Entité (`entityType`) | Actions journalisées |
+|---|---|
+| `Contact` | `CREATE` `UPDATE` `ARCHIVE` `RESTORE` |
+| `Organization` | `CREATE` `UPDATE` `ARCHIVE` `RESTORE` |
+| `FollowUp` | `CREATE` `UPDATE` |
+| `Task` | `CREATE` `UPDATE` |
+| `Opportunity` | `CREATE` `UPDATE` `DELETE` |
+| `PrivacyTreatment` | `CREATE` `UPDATE` `ARCHIVE` |
+| `PrivacyProcessor` | `CREATE` `UPDATE` `ARCHIVE` |
+| `PrivacyRequest` | `CREATE` `UPDATE` |
+| `PrivacyIncident` | `CREATE` `UPDATE` |
+
+Notes :
+- `UPDATE` pour `FollowUp` couvre à la fois l'édition du formulaire et les
+  quick actions (Nudge, Reçu, Balle envoyée, Snooze, Compléter, Abandonner,
+  Rouvrir).
+- `UPDATE` pour `Task` couvre compléter, rouvrir et reporter (snooze).
+- La création inline d'un contact depuis le formulaire de suivi est journalisée
+  comme un `CREATE Contact`, pas comme partie du suivi.
+- Les lectures ne sont pas journalisées — seules les mutations le sont.
+
 ## Comment instrumenter un nouveau module
 
 1. Ajouter l'entité à `AUDIT_ENTITY_TYPES` dans `types.ts` si elle n'y est pas

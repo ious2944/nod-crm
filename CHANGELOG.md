@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Post-V0.9 security and audit batches.**
+
+### Added
+
+#### Mutation audit log (P1)
+
+A new `audit_logs` table and `src/lib/audit/` module record every write
+through a Server Action: who acted (user id), which workspace, which entity
+type, which entity id, which operation (CREATE / UPDATE / ARCHIVE / RESTORE /
+DELETE), and a per-request id derived from `X-Request-Id` or generated
+server-side. No field values, snapshots or diffs are stored.
+
+Instrumented: Contact, Organization, FollowUp, Task, Opportunity,
+PrivacyTreatment, PrivacyProcessor, PrivacyRequest, PrivacyIncident.
+
+The write is best-effort: an `audit_logs` insert failure is logged server-side
+and does not abort the business mutation. The table carries `workspace_id` and
+cascades on workspace deletion, keeping audit rows within tenant scope.
+
+See [`src/lib/audit/README.md`](src/lib/audit/README.md).
+
+#### Off-site backup via rclone (P0)
+
+Set `NOD_CRM_RCLONE_REMOTE` before running `nod-crm-backup.sh` to push both
+archives (database dump + uploads) to any configured `rclone` remote right
+after local verification. A push failure is a warning, not fatal. Unset:
+local-only behaviour is unchanged.
+
+### Fixed
+
+#### P0 — dependency security
+
+- **Next.js updated to 16.3.5** — security release. `mysql2` pinned to a
+  patched version.
+- **`npm audit --audit-level=high` CI gate** — the pipeline now fails if a
+  HIGH or CRITICAL vulnerability is present. Covers the full dependency tree
+  on every push.
+
+#### P1 — hardening
+
+- **RGPD actions: `parseOrThrow()` instead of `.parse()`** — a raw `ZodError`
+  no longer escapes into a Server Action rejection. Invalid input now throws a
+  plain `Error` with a controlled French, field-level message.
+- **gitleaks secret scan in CI** — a new `secrets` job runs
+  `gitleaks/gitleaks-action@v2` with `fetch-depth: 0`, scanning the full
+  git history so a secret committed once and later removed is still caught.
+- **RTO/RPO documented** — `docs/backup-restore.md` now states RPO (24 h) and
+  RTO (1 h) as targets, with the conditions they depend on. See
+  [docs/backup-restore.md](docs/backup-restore.md).
+
+---
+
 **Post-V0.9 audit — 16 targeted fixes (F-01 to F-16).**
 
 No new module, no change to existing workflows. The fixes address keyboard
