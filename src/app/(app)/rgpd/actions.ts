@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { z } from "zod";
 
 import { prisma } from "@/lib/prisma";
 import {
@@ -13,6 +14,26 @@ import {
 } from "@/lib/privacy/schemas";
 import { getWorkspaceIdForAction } from "@/lib/workspace";
 
+// `.parse()` throws the raw ZodError straight into the Server Action's
+// rejection, which is what the segment's error.tsx ends up catching. It
+// works, but it's an implementation detail leaking out as the failure mode:
+// the message is whatever Zod's default formatting produces, not something
+// this module chose. `safeParse` plus this helper makes the failure explicit
+// and gives every schema in this file one place from which its errors read
+// the same way — a normal thrown Error with a message this module wrote.
+function parseOrThrow<Schema extends z.ZodTypeAny>(
+  schema: Schema,
+  data: unknown,
+): z.infer<Schema> {
+  const parsed = schema.safeParse(data);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    const detail = first ? `${String(first.path[0] ?? "champ")} : ${first.message}` : "valeur invalide";
+    throw new Error(`Formulaire invalide (${detail}).`);
+  }
+  return parsed.data;
+}
+
 function revalidatePrivacy(...paths: string[]) {
   revalidatePath("/rgpd");
   for (const path of paths) revalidatePath(path);
@@ -20,7 +41,7 @@ function revalidatePrivacy(...paths: string[]) {
 
 function processorIdsFrom(formData: FormData) {
   return [...new Set(formData.getAll("processorId").map(String).filter(Boolean))].map((value) =>
-    privacyIdSchema.parse(value),
+    parseOrThrow(privacyIdSchema, value),
   );
 }
 
@@ -44,7 +65,7 @@ async function assertContact(workspaceId: string, contactId: string | undefined)
 
 export async function createTreatment(formData: FormData) {
   const workspaceId = await getWorkspaceIdForAction();
-  const parsed = treatmentSchema.parse(Object.fromEntries(formData));
+  const parsed = parseOrThrow(treatmentSchema, Object.fromEntries(formData));
   const processorIds = processorIdsFrom(formData);
   await assertProcessors(workspaceId, processorIds);
 
@@ -87,7 +108,7 @@ export async function createTreatment(formData: FormData) {
 
 export async function updateTreatment(formData: FormData) {
   const workspaceId = await getWorkspaceIdForAction();
-  const parsed = treatmentSchema.extend({ id: privacyIdSchema }).parse(Object.fromEntries(formData));
+  const parsed = parseOrThrow(treatmentSchema.extend({ id: privacyIdSchema }), Object.fromEntries(formData));
   const processorIds = processorIdsFrom(formData);
   await assertProcessors(workspaceId, processorIds);
 
@@ -133,7 +154,7 @@ export async function updateTreatment(formData: FormData) {
 
 export async function archiveTreatment(formData: FormData) {
   const workspaceId = await getWorkspaceIdForAction();
-  const id = privacyIdSchema.parse(formData.get("id"));
+  const id = parseOrThrow(privacyIdSchema, formData.get("id"));
   await prisma.privacyTreatment.updateMany({
     where: { id, workspaceId },
     data: { archivedAt: new Date(), status: "ARCHIVED" },
@@ -143,7 +164,7 @@ export async function archiveTreatment(formData: FormData) {
 
 export async function createProcessor(formData: FormData) {
   const workspaceId = await getWorkspaceIdForAction();
-  const parsed = processorSchema.parse(Object.fromEntries(formData));
+  const parsed = parseOrThrow(processorSchema, Object.fromEntries(formData));
   await prisma.privacyProcessor.create({
     data: {
       workspaceId,
@@ -167,7 +188,7 @@ export async function createProcessor(formData: FormData) {
 
 export async function updateProcessor(formData: FormData) {
   const workspaceId = await getWorkspaceIdForAction();
-  const parsed = processorSchema.extend({ id: privacyIdSchema }).parse(Object.fromEntries(formData));
+  const parsed = parseOrThrow(processorSchema.extend({ id: privacyIdSchema }), Object.fromEntries(formData));
   const { id, ...data } = parsed;
   await prisma.privacyProcessor.updateMany({ where: { id, workspaceId }, data });
   revalidatePrivacy("/rgpd/processors", "/rgpd/treatments");
@@ -175,7 +196,7 @@ export async function updateProcessor(formData: FormData) {
 
 export async function archiveProcessor(formData: FormData) {
   const workspaceId = await getWorkspaceIdForAction();
-  const id = privacyIdSchema.parse(formData.get("id"));
+  const id = parseOrThrow(privacyIdSchema, formData.get("id"));
   await prisma.$transaction([
     prisma.privacyProcessor.updateMany({ where: { id, workspaceId }, data: { archivedAt: new Date() } }),
     prisma.privacyTreatmentProcessor.deleteMany({ where: { workspaceId, processorId: id } }),
@@ -185,7 +206,7 @@ export async function archiveProcessor(formData: FormData) {
 
 export async function createPrivacyRequest(formData: FormData) {
   const workspaceId = await getWorkspaceIdForAction();
-  const parsed = requestSchema.parse(Object.fromEntries(formData));
+  const parsed = parseOrThrow(requestSchema, Object.fromEntries(formData));
   const contactId = await assertContact(workspaceId, parsed.contactId || undefined);
   const closed = parsed.status === "COMPLETED" || parsed.status === "REFUSED";
 
@@ -209,7 +230,7 @@ export async function createPrivacyRequest(formData: FormData) {
 
 export async function updatePrivacyRequest(formData: FormData) {
   const workspaceId = await getWorkspaceIdForAction();
-  const parsed = updateRequestSchema.parse(Object.fromEntries(formData));
+  const parsed = parseOrThrow(updateRequestSchema, Object.fromEntries(formData));
   const contactId = await assertContact(workspaceId, parsed.contactId || undefined);
   const closed = parsed.status === "COMPLETED" || parsed.status === "REFUSED";
 
@@ -233,7 +254,7 @@ export async function updatePrivacyRequest(formData: FormData) {
 
 export async function createIncident(formData: FormData) {
   const workspaceId = await getWorkspaceIdForAction();
-  const parsed = incidentSchema.parse(Object.fromEntries(formData));
+  const parsed = parseOrThrow(incidentSchema, Object.fromEntries(formData));
   const closed = parsed.status === "CLOSED";
   await prisma.privacyIncident.create({
     data: {
@@ -260,7 +281,7 @@ export async function createIncident(formData: FormData) {
 
 export async function updateIncident(formData: FormData) {
   const workspaceId = await getWorkspaceIdForAction();
-  const parsed = incidentSchema.extend({ id: privacyIdSchema }).parse(Object.fromEntries(formData));
+  const parsed = parseOrThrow(incidentSchema.extend({ id: privacyIdSchema }), Object.fromEntries(formData));
   const closed = parsed.status === "CLOSED";
   await prisma.privacyIncident.updateMany({
     where: { id: parsed.id, workspaceId },

@@ -152,6 +152,26 @@ copy of your database on another host should not inherit live sessions.
   **are** covered, by the second archive each run produces. Everything else
   under `NOD_UPLOAD_DIR` that NOD CRM did not write is not its business.
 
+## Recovery objectives (RTO/RPO)
+
+Documented so an incident isn't the first time these numbers get decided.
+
+- **RPO (Recovery Point Objective): 24 hours.** The backup runs once a day
+  (see the cron entry above). Anything written between two runs is at risk on
+  a full loss. If that gap is ever too wide for a given period, run the
+  script manually before/after the change rather than waiting for the next
+  scheduled run.
+- **RTO (Recovery Time Objective): 1 hour**, from "restore starts" to "the
+  application is back and answering requests". That covers: pulling the
+  latest archive from wherever it was verified (local or off-site), running
+  `nod-crm-restore.sh`, restoring the uploads archive, and restarting the
+  stack. It assumes the target host and Docker stack already exist — a
+  bare-metal rebuild is not in scope for this number.
+
+Both are targets, not guarantees — they hold only as long as the monthly
+`--verify` runs (above) keep passing and backups actually reach an off-site
+destination.
+
 ## Residual risk
 
 Backups written by these scripts live **on the same host as the database**. A
