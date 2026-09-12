@@ -18,6 +18,22 @@ env:
   NEXT_TELEMETRY_DISABLED: "1"
 
 jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Scans the full history on every run, not just the diff: a secret
+      # committed once and later removed is still in Git history and still a
+      # leak. gitleaks/gitleaks-action pins its own binary version.
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   quality:
     name: Lint, typecheck, unit tests, build
     runs-on: ubuntu-latest
