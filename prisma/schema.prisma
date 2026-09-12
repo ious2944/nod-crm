@@ -30,6 +30,20 @@ enum OpportunityStatus {
   PERDUE
 }
 
+/// Journal d'audit (RGPD art. 30) — QUI a fait QUOI, QUAND, sur QUELLE entité.
+/// Volontairement minimal : ni snapshot, ni diff des valeurs, pour ne jamais
+/// dupliquer de données personnelles ou sensibles dans un journal qui doit
+/// rester lisible par des personnes n'ayant pas accès aux données elles-mêmes.
+/// Voir `src/lib/audit/README.md` pour la stratégie d'instrumentation.
+enum AuditAction {
+  CREATE
+  UPDATE
+  ARCHIVE
+  RESTORE
+  DELETE
+  EXPORT
+}
+
 model Workspace {
   id        String   @id @default(uuid()) @db.Uuid
   slug      String   @unique
@@ -47,6 +61,7 @@ model Workspace {
   privacyProcessors PrivacyProcessor[]
   privacyRequests   PrivacyRequest[]
   privacyIncidents  PrivacyIncident[]
+  auditLogs         AuditLog[]
 
   @@map("workspaces")
 }
@@ -68,6 +83,7 @@ model User {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sessions  Session[]
+  auditLogs AuditLog[]
 
   @@index([workspaceId])
   @@map("users")
@@ -392,4 +408,40 @@ model PrivacyIncident {
 
   @@index([workspaceId, status, discoveredAt])
   @@map("privacy_incidents")
+}
+
+/// Journal d'audit. Une ligne par mutation instrumentée — jamais de valeur
+/// métier (pas de nom, email, notes…), seulement la trace de l'événement.
+///
+/// `userId` est nullable et `SetNull` à la suppression de l'utilisateur : la
+/// trace d'un événement doit survivre au départ de son auteur (c'est même
+/// souvent le cas qui compte le plus). `workspaceId` reste `Cascade` comme
+/// pour toutes les autres tables métier — la suppression d'un tenant efface
+/// aussi son propre journal, ce qui est le comportement déjà en vigueur
+/// partout ailleurs dans ce schéma.
+model AuditLog {
+  id          String      @id @default(uuid()) @db.Uuid
+  workspaceId String      @map("workspace_id") @db.Uuid
+  userId      String?     @map("user_id") @db.Uuid
+  action      AuditAction
+  /// Nom du modèle métier (ex. "Contact", "Opportunity"), pas une table SQL.
+  entityType  String      @map("entity_type")
+  /// Nullable : une action peut ne pas viser une entité unique (ex. un futur
+  /// export multi-lignes).
+  entityId    String?     @map("entity_id") @db.Uuid
+  /// Identifiant de corrélation (en-tête `x-request-id` s'il existe, sinon
+  /// généré). Sert à relier plusieurs lignes d'audit à un même événement
+  /// applicatif — jamais à identifier une personne.
+  requestId   String?     @map("request_id") @db.Uuid
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Trois angles d'interrogation attendus : la timeline d'un tenant, la
+  // fiche d'une entité précise, et l'activité d'un utilisateur donné.
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, entityType, entityId])
+  @@index([workspaceId, userId, createdAt])
+  @@map("audit_logs")
 }

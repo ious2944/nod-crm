@@ -21,3 +21,15 @@ export async function getWorkspaceIdForPage(): Promise<string> {
 export async function getWorkspaceIdForAction(): Promise<string> {
   return (await requireActor()).workspaceId;
 }
+
+/**
+ * Pour une Server Action qui doit aussi journaliser son résultat dans
+ * l'audit trail : mêmes garanties que `getWorkspaceIdForAction` (même appel à
+ * `requireActor()`, dédupliqué par le `cache()` de la DAL — donc gratuit si
+ * l'un des deux a déjà été appelé plus tôt dans la même requête), avec en
+ * plus l'identifiant de l'acteur.
+ */
+export async function getActorForAction(): Promise<{ id: string; workspaceId: string }> {
+  const actor = await requireActor();
+  return { id: actor.id, workspaceId: actor.workspaceId };
+}

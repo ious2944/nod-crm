@@ -16,7 +16,7 @@ export interface TestUser {
 export async function resetDatabase(): Promise<void> {
   // Un seul TRUNCATE en cascade : plus rapide et insensible à l'ordre des FK.
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "privacy_treatment_processors", "privacy_incidents", "privacy_requests", "privacy_processors", "privacy_treatments", "login_attempts", "sessions", "users", "tasks", "follow_ups", "opportunities", "contacts", "organizations", "workspaces" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "audit_logs", "privacy_treatment_processors", "privacy_incidents", "privacy_requests", "privacy_processors", "privacy_treatments", "login_attempts", "sessions", "users", "tasks", "follow_ups", "opportunities", "contacts", "organizations", "workspaces" RESTART IDENTITY CASCADE',
   );
   cookieJar.reset();
 }

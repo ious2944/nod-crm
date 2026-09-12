@@ -5,6 +5,8 @@
 
 import { revalidatePath } from "next/cache";
 
+import { recordAudit } from "@/lib/audit/log";
+import { AUDIT_ENTITY_TYPES } from "@/lib/audit/types";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { shiftDueDate, startOfDay } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
@@ -17,7 +19,7 @@ import {
   followUpSearchSchema,
   taskActionSchema,
 } from "@/lib/tasks/schemas";
-import { getWorkspaceIdForAction } from "@/lib/workspace";
+import { getActorForAction, getWorkspaceIdForAction } from "@/lib/workspace";
 
 /** Revalide les pages Commerce quand une tâche est liée à une opportunité. */
 function revalidateCommerceIfLinked(opportunityId: string | null): void {
@@ -46,7 +48,7 @@ export async function createTask(
 ): Promise<CreateTaskState> {
   // Authentification d'abord : une action appelée sans session est rejetée
   // avant même de regarder le contenu du formulaire.
-  const workspaceId = await getWorkspaceIdForAction();
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const parsed = createTaskSchema.safeParse(Object.fromEntries(formData));
 
@@ -124,7 +126,7 @@ export async function createTask(
     opportunityId = opportunity.id;
   }
 
-  await prisma.task.create({
+  const task = await prisma.task.create({
     data: {
       workspaceId,
       contactId,
@@ -134,6 +136,15 @@ export async function createTask(
       notes: input.notes,
       dueAt: startOfDay(input.dueDate, APP_TIME_ZONE),
     },
+    select: { id: true },
+  });
+
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "CREATE",
+    entityType: AUDIT_ENTITY_TYPES.TASK,
+    entityId: task.id,
   });
 
   revalidateTaskPages();
@@ -149,7 +160,7 @@ export async function createTask(
  * un suivi ont chacun leur état, et c'est le principe même de la V0.4.
  */
 export async function applyTaskAction(formData: FormData): Promise<void> {
-  const workspaceId = await getWorkspaceIdForAction();
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const parsed = taskActionSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -205,6 +216,14 @@ export async function applyTaskAction(formData: FormData): Promise<void> {
   if (count !== 1) {
     throw new TaskConflictError();
   }
+
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "UPDATE",
+    entityType: AUDIT_ENTITY_TYPES.TASK,
+    entityId: id,
+  });
 
   revalidateTaskPages();
   revalidateCommerceIfLinked(task.opportunityId);
