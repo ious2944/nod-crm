@@ -132,6 +132,7 @@ V0.7 is the visual system used by all modules, including RGPD Essentials:
 - **Admin CLI** — create workspaces and users, reset passwords and disable accounts. Passwords are entered interactively.
 - **Self-hosting** — Docker Compose, PostgreSQL 16 and automatic Prisma migrations.
 - **Demo data** — fictional organisations, contacts, follow-ups and tasks for a dedicated demo workspace. Seeded business rows are identifiable as demo data where supported by the model.
+- **Mutation audit log** — every write through a Server Action appends one row to `audit_logs`: who acted, which entity, which operation, and when. No field values or diffs are stored. Scoped to the workspace. See [`src/lib/audit/README.md`](src/lib/audit/README.md).
 
 Not built yet and not shown in the navigation: Dashboard.
 
@@ -344,7 +345,7 @@ Directions, not commitments. The full roadmap lives in [ROADMAP.md](ROADMAP.md).
 
 **Next.** CSV import/export, search-index improvements, better empty/error states, English UI scaffolding and small ergonomics remain candidates rather than commitments.
 
-Later candidates include contact history and duplicate merging, follow-up history, audit log, MFA, self-service password reset, multi-user invitations, pagination at larger scales, public API/webhooks and recurring work.
+Later candidates include contact history and duplicate merging, follow-up history, MFA, self-service password reset, multi-user invitations, pagination at larger scales, public API/webhooks and recurring work.
 
 Deliberately out of scope for a long time: deal scoring, forecasting, marketing automation, plugin systems and AI features that guess what you should do.
 

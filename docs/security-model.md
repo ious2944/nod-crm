@@ -328,7 +328,8 @@ Next.js, React, Prisma and its pg adapter, `pg`, `@node-rs/argon2`, Zod,
 
 `npm audit` is expected to report zero vulnerabilities; one `overrides` entry
 (`deepmerge-ts`) exists to keep it that way without downgrading Prisma, and
-should be re-evaluated at each Prisma upgrade.
+should be re-evaluated at each Prisma upgrade. The CI pipeline enforces this:
+`npm audit --audit-level=high` is a required gate on every push.
 
 All direct and transitive licenses are permissive or AGPL-compatible (MIT,
 Apache-2.0, ISC, BSD, MPL-2.0, LGPL-3.0).
@@ -343,7 +344,7 @@ An honest list of what is *not* covered.
 | No roles or permissions | an authenticated user can do anything in their workspace | small teams, single trust level |
 | No self-service password reset | goes through the CLI and shell access | deliberate: no email to send, no reset flow to secure |
 | Session cookie not bound to an IP | a stolen cookie grants access | binding breaks mobile use for a modest gain |
-| No business audit log | you cannot tell who completed which follow-up | on the roadmap |
+| Audit log covers mutations only | reads (viewing a contact sheet, an export) are not journalled | deliberate for this version; write-only tracing is the stated scope |
 | No encryption at rest | volume access means data access | belongs to the host, not the application |
 | `style-src 'unsafe-inline'` | style injection is possible | a Next.js constraint; `script-src` stays strict |
 | Dependency on an npm `overrides` entry | needs watching on upgrade | re-evaluate at each Prisma release |
