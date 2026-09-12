@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { restoreTreatment } from "@/app/(app)/rgpd/archive-actions";
 import { archiveTreatment, createTreatment, updateTreatment } from "@/app/(app)/rgpd/actions";
 import { PrivacyPageHeader } from "@/components/privacy/privacy-nav";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { LEGAL_BASES, TREATMENT_STATUSES, labelFor } from "@/lib/privacy/constants";
 import {
   listArchivedPrivacyTreatments,
@@ -34,7 +35,15 @@ export default async function PrivacyTreatmentsPage() {
         title="Registre des traitements"
         description="Documente pourquoi des données personnelles sont utilisées, lesquelles et combien de temps."
       />
-      <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+      <div className="mx-auto w-full max-w-5xl px-4 pt-4 sm:px-6">
+        <Breadcrumb
+          items={[
+            { label: "Conformité RGPD", href: "/rgpd" },
+            { label: "Registre des traitements" },
+          ]}
+        />
+      </div>
+      <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-4 sm:px-6 sm:py-6">
         <details className="rounded-xl border border-border-subtle bg-surface p-4 shadow-card">
           <summary className="cursor-pointer font-semibold text-ink">+ Ajouter un traitement</summary>
           <TreatmentForm action={createTreatment} processors={processors} />

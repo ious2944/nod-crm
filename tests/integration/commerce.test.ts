@@ -51,7 +51,7 @@ describe("commerce — CRUD", () => {
 
     expect(result.status).toBe("success");
 
-    const items = await listOpportunities("open");
+    const { items } = await listOpportunities("open");
     expect(items).toHaveLength(1);
     expect(items[0].name).toBe("Refonte site web");
     expect(items[0].status).toBe("A_QUALIFIER");
@@ -92,7 +92,7 @@ describe("commerce — CRUD", () => {
 
     expect(result.status).toBe("success");
 
-    const items = await listOpportunities("open");
+    const { items } = await listOpportunities("open");
     expect(items[0].estimatedAmount).not.toBeNull();
     expect(items[0].expectedCloseDate).toBe("2026-12-31");
   });
@@ -143,7 +143,7 @@ describe("commerce — CRUD", () => {
 
     await deleteOpportunity(formData({ id: oppId }));
 
-    const items = await listOpportunities("all");
+    const { items } = await listOpportunities("all");
     expect(items).toHaveLength(0);
   });
 
@@ -209,7 +209,7 @@ describe("commerce — CRUD", () => {
 
     expect(result.status).toBe("success");
 
-    const items = await listOpportunities("open");
+    const { items } = await listOpportunities("open");
     expect(items[0].contactName).toBe("Jean Dupont");
   });
 });
@@ -234,7 +234,7 @@ describe("commerce — isolation des workspaces", () => {
   });
 
   it("Alice ne voit pas les opportunités de Bob", async () => {
-    const items = await listOpportunities("open");
+    const { items } = await listOpportunities("open");
     expect(items).toHaveLength(0);
   });
 
@@ -267,7 +267,7 @@ describe("commerce — isolation des workspaces", () => {
 
     // L'opportunité de Bob est intacte
     await signIn(bob);
-    const items = await listOpportunities("open");
+    const { items } = await listOpportunities("open");
     expect(items).toHaveLength(1);
   });
 

@@ -1,31 +1,34 @@
 import Link from "next/link";
 
-import { buildContactListHref, type ContactListParams } from "@/lib/contacts/filters";
-
 /**
- * Pagination serveur.
+ * Pagination serveur générique.
  *
  * Deux liens et un compteur : le volume attendu ne justifie pas une barre de
  * numéros, et des liens (plutôt que des boutons) restent partageables et
  * fonctionnent sans JavaScript.
  */
-export function ContactPagination({
-  params,
+export function Pagination({
   page,
   pageCount,
   total,
+  itemLabel,
+  buildHref,
 }: {
-  params: ContactListParams;
+  /** Page courante (1-indexed). */
   page: number;
+  /** Nombre total de pages. */
   pageCount: number;
+  /** Nombre total d'éléments. */
   total: number;
+  /** Étiquette singulier/pluriel pour le compteur (ex. "contact", "organisation"). */
+  itemLabel: { singular: string; plural: string };
+  /** Construit l'URL pour la page `n`. */
+  buildHref: (n: number) => string;
 }) {
+  const totalLabel = `${total} ${total > 1 ? itemLabel.plural : itemLabel.singular}`;
+
   if (pageCount <= 1) {
-    return (
-      <p className="text-xs text-muted">
-        {total} contact{total > 1 ? "s" : ""}
-      </p>
-    );
+    return <p className="text-xs text-muted">{totalLabel}</p>;
   }
 
   const link =
@@ -35,7 +38,7 @@ export function ContactPagination({
   return (
     <nav aria-label="Pagination" className="flex items-center justify-between gap-3">
       {page > 1 ? (
-        <Link href={buildContactListHref({ ...params, page: page - 1 })} className={link}>
+        <Link href={buildHref(page - 1)} className={link}>
           ← Précédent
         </Link>
       ) : (
@@ -43,11 +46,11 @@ export function ContactPagination({
       )}
 
       <p className="text-xs text-muted">
-        Page {page} sur {pageCount} · {total} contact{total > 1 ? "s" : ""}
+        Page {page} sur {pageCount} · {totalLabel}
       </p>
 
       {page < pageCount ? (
-        <Link href={buildContactListHref({ ...params, page: page + 1 })} className={link}>
+        <Link href={buildHref(page + 1)} className={link}>
           Suivant →
         </Link>
       ) : (

@@ -6,67 +6,94 @@ import { getWorkspaceIdForPage } from "@/lib/workspace";
 
 export async function getPrivacyDashboard() {
   const workspaceId = await getWorkspaceIdForPage();
+  const now = new Date();
+  // Fenêtre d'alerte : demandes proches de leur échéance dans les 7 jours.
+  const soon = new Date(now.getTime() + 7 * 86_400_000);
 
-  const [treatments, processors, requests, incidents] = await Promise.all([
-    prisma.privacyTreatment.findMany({
-      where: { workspaceId },
-      select: {
-        id: true,
-        name: true,
-        legalBasis: true,
-        retentionPeriod: true,
-        nextReviewAt: true,
-        archivedAt: true,
-      },
-      orderBy: { name: "asc" },
+  // Compteurs via SQL — pas de chargement de tous les enregistrements en mémoire.
+  const [treatments, processors, openRequests, openIncidents] = await prisma.$transaction([
+    prisma.privacyTreatment.count({ where: { workspaceId, archivedAt: null } }),
+    prisma.privacyProcessor.count({ where: { workspaceId, archivedAt: null } }),
+    prisma.privacyRequest.count({
+      where: { workspaceId, status: { notIn: ["COMPLETED", "REFUSED"] } },
     }),
-    prisma.privacyProcessor.findMany({
-      where: { workspaceId },
-      select: {
-        id: true,
-        name: true,
-        dpaStatus: true,
-        eeaStatus: true,
-        nextReviewAt: true,
-        archivedAt: true,
-      },
-      orderBy: { name: "asc" },
-    }),
-    prisma.privacyRequest.findMany({
-      where: { workspaceId },
-      select: {
-        id: true,
-        requestType: true,
-        requesterName: true,
-        requesterEmail: true,
-        dueAt: true,
-        status: true,
-      },
-      orderBy: { dueAt: "asc" },
-    }),
-    prisma.privacyIncident.findMany({
-      where: { workspaceId },
-      select: {
-        id: true,
-        title: true,
-        status: true,
-        riskLevel: true,
-        authorityNotification: true,
-      },
-      orderBy: { discoveredAt: "desc" },
-    }),
+    prisma.privacyIncident.count({ where: { workspaceId, status: { not: "CLOSED" } } }),
   ]);
+
+  // Alertes : seuls les enregistrements susceptibles de générer une alerte
+  // sont chargés — pas l'ensemble des traitements archivés ni les demandes closes.
+  const [treatmentsForAlerts, processorsForAlerts, requestsForAlerts, incidentsForAlerts] =
+    await Promise.all([
+      // Tout traitement non archivé peut générer une alerte (base légale, conservation, revue).
+      prisma.privacyTreatment.findMany({
+        where: { workspaceId, archivedAt: null },
+        select: {
+          id: true,
+          name: true,
+          legalBasis: true,
+          retentionPeriod: true,
+          nextReviewAt: true,
+          archivedAt: true,
+        },
+        orderBy: { name: "asc" },
+      }),
+      // Tout sous-traitant non archivé peut générer une alerte (DPA, EEA, revue).
+      prisma.privacyProcessor.findMany({
+        where: { workspaceId, archivedAt: null },
+        select: {
+          id: true,
+          name: true,
+          dpaStatus: true,
+          eeaStatus: true,
+          nextReviewAt: true,
+          archivedAt: true,
+        },
+        orderBy: { name: "asc" },
+      }),
+      // Seules les demandes ouvertes dont l'échéance est dans la fenêtre d'alerte.
+      prisma.privacyRequest.findMany({
+        where: {
+          workspaceId,
+          status: { notIn: ["COMPLETED", "REFUSED"] },
+          dueAt: { lte: soon },
+        },
+        select: {
+          id: true,
+          requestType: true,
+          requesterName: true,
+          requesterEmail: true,
+          dueAt: true,
+          status: true,
+        },
+        orderBy: { dueAt: "asc" },
+      }),
+      // Seuls les incidents ouverts peuvent générer une alerte.
+      prisma.privacyIncident.findMany({
+        where: { workspaceId, status: { not: "CLOSED" } },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          riskLevel: true,
+          authorityNotification: true,
+        },
+        orderBy: { discoveredAt: "desc" },
+      }),
+    ]);
 
   return {
     counts: {
-      treatments: treatments.filter((item) => !item.archivedAt).length,
-      processors: processors.filter((item) => !item.archivedAt).length,
-      openRequests: requests.filter(
-        (item) => item.status !== "COMPLETED" && item.status !== "REFUSED",
-      ).length,
-      openIncidents: incidents.filter((item) => item.status !== "CLOSED").length,
+      treatments,
+      processors,
+      openRequests,
+      openIncidents,
     },
-    alerts: buildPrivacyAlerts({ treatments, processors, requests, incidents }),
+    alerts: buildPrivacyAlerts({
+      treatments: treatmentsForAlerts,
+      processors: processorsForAlerts,
+      requests: requestsForAlerts,
+      incidents: incidentsForAlerts,
+    }),
   };
 }
 

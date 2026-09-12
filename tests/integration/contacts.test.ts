@@ -30,6 +30,7 @@ import { objectStore } from "@/lib/storage";
 import { TestRedirect } from "./cookie-jar";
 import {
   createContactRecord,
+  createOrganizationRecord,
   createWorkspaceWithUser,
   dropCookie,
   formData,
@@ -344,12 +345,19 @@ describe("filtres, tri et pagination", () => {
   });
 
   it("filtre par organisation, y compris « sans organisation »", async () => {
+    // listOrganizationOptions() lit désormais la vraie table organization (F-04).
+    // On crée donc de vraies lignes et on y lie les contacts via organizationId.
+    const acmeId = await createOrganizationRecord(user.workspaceId, { name: "ACME" });
+    const globexId = await createOrganizationRecord(user.workspaceId, { name: "Globex" });
+
     await createContactRecord(user.workspaceId, {
       firstName: "Alice",
+      organizationId: acmeId,
       organizationName: "ACME",
     });
     await createContactRecord(user.workspaceId, {
       firstName: "Bob",
+      organizationId: globexId,
       organizationName: "Globex",
     });
     await createContactRecord(user.workspaceId, {

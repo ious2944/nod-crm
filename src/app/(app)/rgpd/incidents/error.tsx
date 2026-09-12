@@ -2,7 +2,7 @@
 
 import { SegmentError } from "@/components/ui/segment-error";
 
-export default function TodayError({
+export default function IncidentsError({
   error,
   reset,
 }: {
@@ -11,7 +11,7 @@ export default function TodayError({
 }) {
   return (
     <SegmentError
-      title="La page Aujourd'hui n'a pas pu se charger"
+      title="Le module Incidents n'a pas pu se charger"
       error={error}
       reset={reset}
     />
