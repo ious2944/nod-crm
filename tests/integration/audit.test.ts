@@ -281,9 +281,11 @@ describe("échecs de validation et de mutation : jamais de fausse ligne d'audit"
 
     // "does-not-matter" is not a valid UUID, so the contact schema transforms it
     // to null — the organization check is skipped and the spy is never called.
-    // Use a valid UUID so that the schema keeps the value, the findFirst call
-    // fires and the spy intercepts it, causing the expected DB error to propagate.
-    await expect(create({ firstName: "X", organizationId: "00000000-0000-0000-0000-000000000001" })).rejects.toThrow("DB down");
+    // Use a valid RFC 4122 v4 UUID (version=4, variant=8) so that Zod v4's
+    // strict z.uuid() check passes, the schema keeps the value, the findFirst
+    // call fires and the spy intercepts it, causing the expected DB error to
+    // propagate. "00000000-0000-0000-…-…1" is NOT valid (version 0, variant 0).
+    await expect(create({ firstName: "X", organizationId: "00000000-0000-4000-8000-000000000001" })).rejects.toThrow("DB down");
 
     spy.mockRestore();
     expect(await auditRows()).toHaveLength(0);
