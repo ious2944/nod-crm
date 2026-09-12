@@ -245,6 +245,13 @@ export async function changeOpportunityStatus(formData: FormData): Promise<void>
     throw new Error("Opportunité introuvable.");
   }
 
+  // Guard idempotent : si le statut demandé est déjà le statut actuel,
+  // on sort immédiatement sans erreur et sans écriture inutile en base.
+  // Protège contre les soumissions en double ou les états UI périmés.
+  if (opportunity.status === newStatus) {
+    return;
+  }
+
   if (!isTransitionAllowed(opportunity.status, newStatus)) {
     throw new OpportunityConflictError();
   }

@@ -138,6 +138,113 @@ describe("commerce — CRUD", () => {
     expect(detail?.closedDate).not.toBeNull();
   });
 
+  // ── Tests de la machine à états : règles métier et idempotence ───────────
+
+  it("PROPOSITION -> PERDUE : fonctionne toujours", async () => {
+    const oppId = await createOpportunityRecord(alice.workspaceId, orgId, { status: "PROPOSITION" });
+
+    await expect(
+      changeOpportunityStatus(formData({ id: oppId, status: "PERDUE" })),
+    ).resolves.toBeUndefined();
+
+    const detail = await getOpportunityDetail(oppId);
+    expect(detail?.status).toBe("PERDUE");
+    expect(detail?.isOpen).toBe(false);
+  });
+
+  it("PROPOSITION -> GAGNEE : fonctionne toujours", async () => {
+    const oppId = await createOpportunityRecord(alice.workspaceId, orgId, { status: "PROPOSITION" });
+
+    await expect(
+      changeOpportunityStatus(formData({ id: oppId, status: "GAGNEE" })),
+    ).resolves.toBeUndefined();
+
+    const detail = await getOpportunityDetail(oppId);
+    expect(detail?.status).toBe("GAGNEE");
+    expect(detail?.isOpen).toBe(false);
+  });
+
+  it("PERDUE -> PERDUE : no-op, aucune erreur (idempotence)", async () => {
+    const oppId = await createOpportunityRecord(alice.workspaceId, orgId, { status: "PERDUE" });
+
+    // Ne doit pas lever OpportunityConflictError
+    await expect(
+      changeOpportunityStatus(formData({ id: oppId, status: "PERDUE" })),
+    ).resolves.toBeUndefined();
+
+    const detail = await getOpportunityDetail(oppId);
+    expect(detail?.status).toBe("PERDUE");
+  });
+
+  it("GAGNEE -> GAGNEE : no-op, aucune erreur (idempotence)", async () => {
+    const oppId = await createOpportunityRecord(alice.workspaceId, orgId, { status: "GAGNEE" });
+
+    await expect(
+      changeOpportunityStatus(formData({ id: oppId, status: "GAGNEE" })),
+    ).resolves.toBeUndefined();
+
+    const detail = await getOpportunityDetail(oppId);
+    expect(detail?.status).toBe("GAGNEE");
+  });
+
+  it("PERDUE -> GAGNEE : toujours refusé (OpportunityConflictError)", async () => {
+    const oppId = await createOpportunityRecord(alice.workspaceId, orgId, { status: "PERDUE" });
+
+    await expect(
+      changeOpportunityStatus(formData({ id: oppId, status: "GAGNEE" })),
+    ).rejects.toThrow();
+
+    const detail = await getOpportunityDetail(oppId);
+    expect(detail?.status).toBe("PERDUE");
+  });
+
+  it("GAGNEE -> PERDUE : toujours refusé (OpportunityConflictError)", async () => {
+    const oppId = await createOpportunityRecord(alice.workspaceId, orgId, { status: "GAGNEE" });
+
+    await expect(
+      changeOpportunityStatus(formData({ id: oppId, status: "PERDUE" })),
+    ).rejects.toThrow();
+
+    const detail = await getOpportunityDetail(oppId);
+    expect(detail?.status).toBe("GAGNEE");
+  });
+
+  // ── Audit trail : no-op ne produit pas de ligne d'audit ──────────────────
+
+  it("PERDUE -> PERDUE : no-op sans ligne d'audit", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const oppId = await createOpportunityRecord(alice.workspaceId, orgId, { status: "PERDUE" });
+
+    const auditBefore = await prisma.auditLog.count({
+      where: { entityType: "Opportunity", entityId: oppId },
+    });
+
+    await changeOpportunityStatus(formData({ id: oppId, status: "PERDUE" }));
+
+    const auditAfter = await prisma.auditLog.count({
+      where: { entityType: "Opportunity", entityId: oppId },
+    });
+
+    expect(auditAfter).toBe(auditBefore); // aucune nouvelle ligne d'audit
+  });
+
+  it("PROPOSITION -> PERDUE : vrai changement produit une ligne d'audit", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const oppId = await createOpportunityRecord(alice.workspaceId, orgId, { status: "PROPOSITION" });
+
+    const auditBefore = await prisma.auditLog.count({
+      where: { entityType: "Opportunity", entityId: oppId },
+    });
+
+    await changeOpportunityStatus(formData({ id: oppId, status: "PERDUE" }));
+
+    const auditAfter = await prisma.auditLog.count({
+      where: { entityType: "Opportunity", entityId: oppId },
+    });
+
+    expect(auditAfter).toBe(auditBefore + 1); // une nouvelle ligne d'audit
+  });
+
   it("supprime une opportunité et la retire de la liste", async () => {
     const oppId = await createOpportunityRecord(alice.workspaceId, orgId);
 
