@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { DueBadge } from "@/components/ui/due-badge";
 import type { TaskView } from "@/lib/tasks/view";
+import { EditTaskDialog } from "./edit-task-dialog";
 import { TaskAction, TaskActions, TaskSnoozeMenu } from "./task-actions";
 
 /**
@@ -50,6 +51,7 @@ export function TaskRow({ item }: { item: TaskView }) {
         <DueBadge level={item.level} label={item.dueLabel} />
 
         <TaskActions className="flex flex-wrap items-center gap-2">
+          <EditTaskDialog item={item} />
           {item.completed ? (
             <TaskAction id={item.id} intent="reopen" label="Rouvrir" />
           ) : (

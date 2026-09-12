@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { applyQuickAction } from "@/app/(app)/follow-ups/actions";
-import { applyTaskAction, createTask, findFollowUps } from "@/app/(app)/tasks/actions";
+import { applyTaskAction, createTask, findFollowUps, updateTask } from "@/app/(app)/tasks/actions";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { addDaysToKey, dayKey } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
 import { initialCreateTaskState } from "@/lib/tasks/create-state";
+import { initialEditTaskState } from "@/lib/tasks/edit-state";
 import { getTaskList } from "@/lib/tasks/queries";
 import { getTodayFeed } from "@/lib/today/queries";
 
@@ -381,6 +382,144 @@ describe("module Tâches", () => {
       const options = await findFollowUps("");
 
       expect(options.map((option) => option.id)).toEqual([openId]);
+    });
+  });
+
+  describe("modification", () => {
+    it("modifie le titre d'une tâche", async () => {
+      const id = await createTaskRecord(alice.workspaceId, { title: "Titre initial", dueInDays: 0 });
+
+      const result = await updateTask(
+        initialEditTaskState,
+        formData({ id, title: "Titre modifié", dueDate: today() }),
+      );
+
+      expect(result.status).toBe("success");
+      const task = await prisma.task.findUniqueOrThrow({ where: { id } });
+      expect(task.title).toBe("Titre modifié");
+    });
+
+    it("modifie l'échéance d'une tâche", async () => {
+      const id = await createTaskRecord(alice.workspaceId, { title: "Tâche", dueInDays: 0 });
+
+      await updateTask(
+        initialEditTaskState,
+        formData({ id, title: "Tâche", dueDate: inDays(5) }),
+      );
+
+      const task = await prisma.task.findUniqueOrThrow({ where: { id } });
+      expect(dayKey(task.dueAt, APP_TIME_ZONE)).toBe(inDays(5));
+    });
+
+    it("modifie la note d'une tâche", async () => {
+      const id = await createTaskRecord(alice.workspaceId, { title: "Tâche", notes: "Note initiale" });
+
+      await updateTask(
+        initialEditTaskState,
+        formData({ id, title: "Tâche", dueDate: today(), notes: "Note modifiée" }),
+      );
+
+      const task = await prisma.task.findUniqueOrThrow({ where: { id } });
+      expect(task.notes).toBe("Note modifiée");
+    });
+
+    it("efface la note d'une tâche (notes = '')", async () => {
+      const id = await createTaskRecord(alice.workspaceId, { title: "Tâche", notes: "Note" });
+
+      await updateTask(
+        initialEditTaskState,
+        formData({ id, title: "Tâche", dueDate: today(), notes: "" }),
+      );
+
+      const task = await prisma.task.findUniqueOrThrow({ where: { id } });
+      expect(task.notes).toBeNull();
+    });
+
+    it("un update ne crée pas de seconde tâche", async () => {
+      const id = await createTaskRecord(alice.workspaceId, { title: "Unique" });
+      expect(await prisma.task.count({ where: { workspaceId: alice.workspaceId } })).toBe(1);
+
+      await updateTask(
+        initialEditTaskState,
+        formData({ id, title: "Unique modifié", dueDate: today() }),
+      );
+
+      expect(await prisma.task.count({ where: { workspaceId: alice.workspaceId } })).toBe(1);
+    });
+
+    it("un update génère un audit UPDATE et pas un second CREATE", async () => {
+      const id = await createTaskRecord(alice.workspaceId, { title: "Auditée" });
+      const auditsBefore = await prisma.auditLog.count({
+        where: { entityType: "Task", entityId: id },
+      });
+
+      await updateTask(
+        initialEditTaskState,
+        formData({ id, title: "Auditée modifiée", dueDate: today() }),
+      );
+
+      const auditsAfter = await prisma.auditLog.count({
+        where: { entityType: "Task", entityId: id },
+      });
+      expect(auditsAfter).toBe(auditsBefore + 1);
+    });
+
+    it("ne modifie pas la tâche d'un autre workspace", async () => {
+      const bob = await createWorkspaceWithUser("tasks-bob");
+      const foreignId = await prisma.task.create({
+        data: { workspaceId: bob.workspaceId, title: "Bob Task", dueAt: new Date() },
+        select: { id: true },
+      }).then((t) => t.id);
+
+      const result = await updateTask(
+        initialEditTaskState,
+        formData({ id: foreignId, title: "Pwned", dueDate: today() }),
+      );
+
+      // La session est celle d'Alice : la tâche de Bob est introuvable
+      expect(result.status).toBe("error");
+      const unchanged = await prisma.task.findUniqueOrThrow({ where: { id: foreignId } });
+      expect(unchanged.title).toBe("Bob Task");
+    });
+
+    it("refuse un titre vide", async () => {
+      const id = await createTaskRecord(alice.workspaceId, { title: "Tâche valide" });
+
+      const result = await updateTask(
+        initialEditTaskState,
+        formData({ id, title: "   ", dueDate: today() }),
+      );
+
+      expect(result.status).toBe("error");
+      expect(result.fieldErrors?.title).toMatch(/obligatoire/i);
+      // Le titre en base reste inchangé
+      const task = await prisma.task.findUniqueOrThrow({ where: { id } });
+      expect(task.title).toBe("Tâche valide");
+    });
+
+    it("refuse une échéance invalide", async () => {
+      const id = await createTaskRecord(alice.workspaceId, { title: "Tâche" });
+
+      const result = await updateTask(
+        initialEditTaskState,
+        formData({ id, title: "Tâche", dueDate: "2026-02-31" }),
+      );
+
+      expect(result.status).toBe("error");
+      expect(result.fieldErrors?.dueDate).toMatch(/invalide/i);
+    });
+
+    it("conserve le followUpId lors d'un update de titre", async () => {
+      const followUpId = await createFollowUpRecord(alice.workspaceId, "Suivi lié");
+      const id = await createTaskRecord(alice.workspaceId, { title: "Tâche", followUpId });
+
+      await updateTask(
+        initialEditTaskState,
+        formData({ id, title: "Titre modifié", dueDate: today() }),
+      );
+
+      const task = await prisma.task.findUniqueOrThrow({ where: { id } });
+      expect(task.followUpId).toBe(followUpId);
     });
   });
 });

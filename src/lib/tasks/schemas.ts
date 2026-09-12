@@ -56,6 +56,23 @@ export const createTaskSchema = z.object({
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 
 /**
+ * Modification d'une tâche existante.
+ *
+ * Seuls titre, échéance, note et contact sont éditables dans le formulaire.
+ * Le suivi lié (`followUpId`) et l'opportunité (`opportunityId`) sont conservés
+ * tels quels par l'action UPDATE — ils ne sont pas exposés dans ce schéma.
+ */
+export const updateTaskSchema = z.object({
+  id: z.string().uuid("Tâche invalide."),
+  title: text(TASK_LIMITS.title, 1, "Le titre est obligatoire."),
+  dueDate: dueDateSchema,
+  contactId: optionalLink("Contact invalide."),
+  notes: optionalText(TASK_LIMITS.notes),
+});
+
+export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
+
+/**
  * Actions de ligne. Trois intentions, pas une machine à états : une tâche est
  * à faire ou terminée.
  */

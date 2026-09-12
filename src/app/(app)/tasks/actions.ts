@@ -11,6 +11,7 @@ import { APP_TIME_ZONE } from "@/lib/config";
 import { shiftDueDate, startOfDay } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
 import type { CreateTaskState } from "@/lib/tasks/create-state";
+import type { EditTaskState } from "@/lib/tasks/edit-state";
 import { TaskConflictError } from "@/lib/tasks/errors";
 import type { FollowUpPickerOption } from "@/lib/tasks/queries";
 import { searchFollowUpOptions } from "@/lib/tasks/queries";
@@ -18,6 +19,7 @@ import {
   createTaskSchema,
   followUpSearchSchema,
   taskActionSchema,
+  updateTaskSchema,
 } from "@/lib/tasks/schemas";
 import { getActorForAction, getWorkspaceIdForAction } from "@/lib/workspace";
 
@@ -150,6 +152,76 @@ export async function createTask(
   revalidateTaskPages();
   revalidateCommerceIfLinked(opportunityId);
   return { status: "success", message: "Tâche créée." };
+}
+
+/**
+ * Modifier le titre, l'échéance, la note ou le contact d'une tâche.
+ *
+ * Signature compatible avec `useActionState` : (_prevState, formData) => state.
+ * Le suivi lié (`followUpId`) et l'opportunité (`opportunityId`) sont laissés
+ * intacts — ils ne sont pas exposés dans le formulaire d'édition.
+ */
+export async function updateTask(
+  _previous: EditTaskState,
+  formData: FormData,
+): Promise<EditTaskState> {
+  const { id: userId, workspaceId } = await getActorForAction();
+
+  const parsed = updateTaskSchema.safeParse(Object.fromEntries(formData));
+
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      const key = String(issue.path[0] ?? "form");
+      fieldErrors[key] ??= issue.message;
+    }
+    return { status: "error", message: "Le formulaire est incomplet.", fieldErrors };
+  }
+
+  const { id, title, dueDate, notes, contactId: rawContactId } = parsed.data;
+
+  let contactId: string | null = null;
+
+  if (rawContactId) {
+    const contact = await prisma.contact.findFirst({
+      where: { id: rawContactId, workspaceId, archivedAt: null },
+      select: { id: true },
+    });
+
+    if (!contact) {
+      return {
+        status: "error",
+        message: "Ce contact n'existe pas ou a été archivé.",
+        fieldErrors: { contactId: "Contact introuvable." },
+      };
+    }
+    contactId = contact.id;
+  }
+
+  const { count } = await prisma.task.updateMany({
+    where: { id, workspaceId },
+    data: {
+      title,
+      notes,
+      dueAt: startOfDay(dueDate, APP_TIME_ZONE),
+      contactId,
+    },
+  });
+
+  if (count !== 1) {
+    return { status: "error", message: "Tâche introuvable." };
+  }
+
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "UPDATE",
+    entityType: AUDIT_ENTITY_TYPES.TASK,
+    entityId: id,
+  });
+
+  revalidateTaskPages();
+  return { status: "success", message: "Tâche mise à jour." };
 }
 
 /**
