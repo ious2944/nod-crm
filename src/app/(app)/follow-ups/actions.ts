@@ -5,6 +5,8 @@
 
 import { revalidatePath } from "next/cache";
 
+import { recordAudit } from "@/lib/audit/log";
+import { AUDIT_ENTITY_TYPES } from "@/lib/audit/types";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { dayKey, shiftDueDate, startOfDay } from "@/lib/date";
 import type { CreateFollowUpState } from "@/lib/follow-ups/create-state";
@@ -19,7 +21,7 @@ import { createFollowUpSchema, quickActionSchema, updateFollowUpSchema } from "@
 import type { EditFollowUpState } from "@/lib/follow-ups/edit-state";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
-import { getWorkspaceIdForAction } from "@/lib/workspace";
+import { getActorForAction } from "@/lib/workspace";
 
 /**
  * Les pages qui montrent des suivis. Depuis la V0.4, le cockpit « Aujourd'hui »
@@ -48,7 +50,7 @@ export async function createFollowUp(
 ): Promise<CreateFollowUpState> {
   // Authentification d'abord : une action appelée sans session est rejetée
   // avant même de regarder le contenu du formulaire.
-  const workspaceId = await getWorkspaceIdForAction();
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const parsed = createFollowUpSchema.safeParse(Object.fromEntries(formData));
 
@@ -76,6 +78,13 @@ export async function createFollowUp(
       select: { id: true },
     });
     contactId = contact.id;
+    await recordAudit({
+      workspaceId,
+      userId,
+      action: "CREATE",
+      entityType: AUDIT_ENTITY_TYPES.CONTACT,
+      entityId: contact.id,
+    });
   } else if (input.contactId) {
     // On re-vérifie que le contact appartient bien au workspace : l'id vient du
     // client. `archivedAt: null` fait partie du filtre, pas d'un contrôle
@@ -119,7 +128,7 @@ export async function createFollowUp(
     opportunityId = opportunity.id;
   }
 
-  await prisma.followUp.create({
+  const followUp = await prisma.followUp.create({
     data: {
       workspaceId,
       contactId,
@@ -129,6 +138,15 @@ export async function createFollowUp(
       ballOwner: input.ballOwner,
       dueAt: startOfDay(input.dueDate, APP_TIME_ZONE),
     },
+    select: { id: true },
+  });
+
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "CREATE",
+    entityType: AUDIT_ENTITY_TYPES.FOLLOW_UP,
+    entityId: followUp.id,
   });
 
   revalidateFollowUpPages();
@@ -141,7 +159,7 @@ export async function createFollowUp(
  * Un seul point d'entrée = une seule validation, un seul contrôle de workspace.
  */
 export async function applyQuickAction(formData: FormData): Promise<void> {
-  const workspaceId = await getWorkspaceIdForAction();
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const parsed = quickActionSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -183,6 +201,14 @@ export async function applyQuickAction(formData: FormData): Promise<void> {
     throw new FollowUpConflictError();
   }
 
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "UPDATE",
+    entityType: AUDIT_ENTITY_TYPES.FOLLOW_UP,
+    entityId: id,
+  });
+
   revalidateFollowUpPages();
   revalidateCommerceIfLinked(followUp.opportunityId);
 }
@@ -203,7 +229,7 @@ export async function updateFollowUp(
   _previous: EditFollowUpState,
   formData: FormData,
 ): Promise<EditFollowUpState> {
-  const workspaceId = await getWorkspaceIdForAction();
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const parsed = updateFollowUpSchema.safeParse(Object.fromEntries(formData));
 
@@ -251,6 +277,14 @@ export async function updateFollowUp(
   if (count !== 1) {
     return { status: "error", message: "Suivi introuvable." };
   }
+
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "UPDATE",
+    entityType: AUDIT_ENTITY_TYPES.FOLLOW_UP,
+    entityId: id,
+  });
 
   revalidateFollowUpPages();
   return { status: "success", message: "Suivi mis à jour." };

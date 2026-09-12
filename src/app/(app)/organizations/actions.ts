@@ -14,8 +14,10 @@ import {
   organizationSearchSchema,
   updateOrganizationSchema,
 } from "@/lib/organizations/schemas";
+import { recordAudit } from "@/lib/audit/log";
+import { AUDIT_ENTITY_TYPES } from "@/lib/audit/types";
 import { prisma } from "@/lib/prisma";
-import { getWorkspaceIdForAction } from "@/lib/workspace";
+import { getActorForAction, getWorkspaceIdForAction } from "@/lib/workspace";
 
 /**
  * Mutations du module Organisations.
@@ -40,7 +42,7 @@ export async function createOrganization(
   _previous: OrganizationFormState,
   formData: FormData,
 ): Promise<OrganizationFormState> {
-  const workspaceId = await getWorkspaceIdForAction();
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const parsed = createOrganizationSchema.safeParse(Object.fromEntries(formData));
 
@@ -64,6 +66,14 @@ export async function createOrganization(
     select: { id: true },
   });
 
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "CREATE",
+    entityType: AUDIT_ENTITY_TYPES.ORGANIZATION,
+    entityId: org.id,
+  });
+
   revalidatePath("/organizations");
   revalidatePath("/contacts");
 
@@ -78,7 +88,7 @@ export async function updateOrganization(
   _previous: OrganizationFormState,
   formData: FormData,
 ): Promise<OrganizationFormState> {
-  const workspaceId = await getWorkspaceIdForAction();
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const parsed = updateOrganizationSchema.safeParse(Object.fromEntries(formData));
 
@@ -123,6 +133,14 @@ export async function updateOrganization(
     }),
   ]);
 
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "UPDATE",
+    entityType: AUDIT_ENTITY_TYPES.ORGANIZATION,
+    entityId: existing.id,
+  });
+
   revalidatePath("/organizations");
   revalidatePath(`/organizations/${existing.id}`);
   revalidatePath("/contacts");
@@ -141,16 +159,20 @@ export async function updateOrganization(
  * archivée disparaît de la liste et du sélecteur, mais le lien FK reste.
  */
 export async function archiveOrganization(formData: FormData): Promise<void> {
-  await setArchivedAt(formData, new Date());
+  await setArchivedAt(formData, new Date(), "ARCHIVE");
 }
 
 /** Restauration : un archivage doit pouvoir se défaire. */
 export async function restoreOrganization(formData: FormData): Promise<void> {
-  await setArchivedAt(formData, null);
+  await setArchivedAt(formData, null, "RESTORE");
 }
 
-async function setArchivedAt(formData: FormData, archivedAt: Date | null): Promise<void> {
-  const workspaceId = await getWorkspaceIdForAction();
+async function setArchivedAt(
+  formData: FormData,
+  archivedAt: Date | null,
+  action: "ARCHIVE" | "RESTORE",
+): Promise<void> {
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const parsed = organizationIdSchema.safeParse(formData.get("id"));
   if (!parsed.success) {
@@ -159,10 +181,20 @@ async function setArchivedAt(formData: FormData, archivedAt: Date | null): Promi
 
   // updateMany avec workspaceId dans le WHERE : si l'id appartient à un autre
   // workspace, 0 lignes sont mises à jour — aucune erreur, aucune divulgation.
-  await prisma.organization.updateMany({
+  const result = await prisma.organization.updateMany({
     where: { id: parsed.data, workspaceId },
     data: { archivedAt },
   });
+
+  if (result.count > 0) {
+    await recordAudit({
+      workspaceId,
+      userId,
+      action,
+      entityType: AUDIT_ENTITY_TYPES.ORGANIZATION,
+      entityId: parsed.data,
+    });
+  }
 
   revalidatePath("/organizations");
   revalidatePath(`/organizations/${parsed.data}`);

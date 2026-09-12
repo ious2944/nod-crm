@@ -5,6 +5,8 @@
 
 import { revalidatePath } from "next/cache";
 
+import { recordAudit } from "@/lib/audit/log";
+import { AUDIT_ENTITY_TYPES } from "@/lib/audit/types";
 import type { ContactFormState } from "@/lib/contacts/form-state";
 import { discardPhoto, storePhotoUpload } from "@/lib/contacts/photo-store";
 import type { ContactPickerOption } from "@/lib/contacts/queries";
@@ -16,7 +18,7 @@ import {
   updateContactSchema,
 } from "@/lib/contacts/schemas";
 import { prisma } from "@/lib/prisma";
-import { getWorkspaceIdForAction } from "@/lib/workspace";
+import { getActorForAction, getWorkspaceIdForAction } from "@/lib/workspace";
 
 /**
  * Mutations du module Contacts.
@@ -45,7 +47,7 @@ export async function createContact(
   _previous: ContactFormState,
   formData: FormData,
 ): Promise<ContactFormState> {
-  const workspaceId = await getWorkspaceIdForAction();
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const parsed = createContactSchema.safeParse(Object.fromEntries(formData));
 
@@ -111,6 +113,14 @@ export async function createContact(
       select: { id: true },
     });
 
+    await recordAudit({
+      workspaceId,
+      userId,
+      action: "CREATE",
+      entityType: AUDIT_ENTITY_TYPES.CONTACT,
+      entityId: contact.id,
+    });
+
     revalidatePath("/contacts");
     revalidatePath("/follow-ups");
 
@@ -127,7 +137,7 @@ export async function updateContact(
   _previous: ContactFormState,
   formData: FormData,
 ): Promise<ContactFormState> {
-  const workspaceId = await getWorkspaceIdForAction();
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const parsed = updateContactSchema.safeParse(Object.fromEntries(formData));
 
@@ -209,6 +219,14 @@ export async function updateContact(
     throw error;
   }
 
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "UPDATE",
+    entityType: AUDIT_ENTITY_TYPES.CONTACT,
+    entityId: existing.id,
+  });
+
   // L'ancien fichier ne part qu'une fois la base à jour : dans l'autre ordre,
   // un échec d'écriture laisserait une fiche pointant sur un objet effacé.
   if (photo || clearsPhoto) {
@@ -234,16 +252,20 @@ export async function updateContact(
  * listes et des sélecteurs.
  */
 export async function archiveContact(formData: FormData): Promise<void> {
-  await setArchivedAt(formData, new Date());
+  await setArchivedAt(formData, new Date(), "ARCHIVE");
 }
 
 /** Retour en arrière : un archivage doit pouvoir se défaire. */
 export async function restoreContact(formData: FormData): Promise<void> {
-  await setArchivedAt(formData, null);
+  await setArchivedAt(formData, null, "RESTORE");
 }
 
-async function setArchivedAt(formData: FormData, archivedAt: Date | null): Promise<void> {
-  const workspaceId = await getWorkspaceIdForAction();
+async function setArchivedAt(
+  formData: FormData,
+  archivedAt: Date | null,
+  action: "ARCHIVE" | "RESTORE",
+): Promise<void> {
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const parsed = contactIdSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -260,6 +282,14 @@ async function setArchivedAt(formData: FormData, archivedAt: Date | null): Promi
   if (count !== 1) {
     throw new Error("Contact introuvable.");
   }
+
+  await recordAudit({
+    workspaceId,
+    userId,
+    action,
+    entityType: AUDIT_ENTITY_TYPES.CONTACT,
+    entityId: parsed.data.id,
+  });
 
   revalidatePath("/contacts");
   revalidatePath(`/contacts/${parsed.data.id}`);

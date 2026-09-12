@@ -18,8 +18,10 @@ import {
 } from "@/lib/commerce/schemas";
 import { searchOpportunityOptions } from "@/lib/commerce/queries";
 import type { OpportunityPickerOption } from "@/lib/commerce/domain";
+import { recordAudit } from "@/lib/audit/log";
+import { AUDIT_ENTITY_TYPES } from "@/lib/audit/types";
 import { prisma } from "@/lib/prisma";
-import { getWorkspaceIdForAction } from "@/lib/workspace";
+import { getActorForAction, getWorkspaceIdForAction } from "@/lib/workspace";
 
 /**
  * Pages du module Commerce à invalider après chaque mutation.
@@ -44,7 +46,7 @@ export async function createOpportunity(
   _previous: CreateOpportunityState,
   formData: FormData,
 ): Promise<CreateOpportunityState> {
-  const workspaceId = await getWorkspaceIdForAction();
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const parsed = createOpportunitySchema.safeParse(Object.fromEntries(formData));
 
@@ -95,7 +97,7 @@ export async function createOpportunity(
     ? startOfDay(input.expectedCloseDate, APP_TIME_ZONE)
     : null;
 
-  await prisma.opportunity.create({
+  const opportunity = await prisma.opportunity.create({
     data: {
       workspaceId,
       organizationId: organization.id,
@@ -106,6 +108,15 @@ export async function createOpportunity(
       expectedCloseAt,
       notes: input.notes,
     },
+    select: { id: true },
+  });
+
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "CREATE",
+    entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
+    entityId: opportunity.id,
   });
 
   revalidateCommerceList();
@@ -118,7 +129,7 @@ export async function updateOpportunity(
   _previous: UpdateOpportunityState,
   formData: FormData,
 ): Promise<UpdateOpportunityState> {
-  const workspaceId = await getWorkspaceIdForAction();
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const parsed = updateOpportunitySchema.safeParse(Object.fromEntries(formData));
 
@@ -195,6 +206,14 @@ export async function updateOpportunity(
     },
   });
 
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "UPDATE",
+    entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
+    entityId: input.id,
+  });
+
   revalidateCommerceList();
   revalidateOpportunityDetail(input.id);
   return { status: "success", message: "Opportunité mise à jour." };
@@ -208,7 +227,7 @@ export async function updateOpportunity(
  * sans passer par un état ouvert.
  */
 export async function changeOpportunityStatus(formData: FormData): Promise<void> {
-  const workspaceId = await getWorkspaceIdForAction();
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const parsed = changeStatusSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -248,6 +267,14 @@ export async function changeOpportunityStatus(formData: FormData): Promise<void>
     },
   });
 
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "UPDATE",
+    entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
+    entityId: id,
+  });
+
   revalidateCommerceList();
   revalidateOpportunityDetail(id);
 }
@@ -263,7 +290,7 @@ export async function changeOpportunityStatus(formData: FormData): Promise<void>
  * actions ou des relances.
  */
 export async function deleteOpportunity(formData: FormData): Promise<void> {
-  const workspaceId = await getWorkspaceIdForAction();
+  const { id: userId, workspaceId } = await getActorForAction();
 
   const id = formData.get("id");
   if (typeof id !== "string" || !id) {
@@ -280,6 +307,14 @@ export async function deleteOpportunity(formData: FormData): Promise<void> {
   }
 
   await prisma.opportunity.delete({ where: { id } });
+
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "DELETE",
+    entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
+    entityId: id,
+  });
 
   revalidateCommerceList();
   revalidateOpportunityDetail(id);

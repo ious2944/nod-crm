@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import type { z } from "zod";
 
+import { recordAudit } from "@/lib/audit/log";
+import { AUDIT_ENTITY_TYPES } from "@/lib/audit/types";
 import { prisma } from "@/lib/prisma";
 import {
   incidentSchema,
@@ -12,7 +14,7 @@ import {
   treatmentSchema,
   updateRequestSchema,
 } from "@/lib/privacy/schemas";
-import { getWorkspaceIdForAction } from "@/lib/workspace";
+import { getActorForAction } from "@/lib/workspace";
 
 // `.parse()` throws the raw ZodError straight into the Server Action's
 // rejection, which is what the segment's error.tsx ends up catching. It
@@ -26,51 +28,96 @@ function parseOrThrow<Schema extends z.ZodTypeAny>(
   data: unknown,
 ): z.infer<Schema> {
   const parsed = schema.safeParse(data);
+
   if (!parsed.success) {
     const first = parsed.error.issues[0];
-    const detail = first ? `${String(first.path[0] ?? "champ")} : ${first.message}` : "valeur invalide";
+    const detail = first
+      ? `${String(first.path[0] ?? "champ")} : ${first.message}`
+      : "valeur invalide";
+
     throw new Error(`Formulaire invalide (${detail}).`);
   }
+
   return parsed.data;
 }
 
 function revalidatePrivacy(...paths: string[]) {
   revalidatePath("/rgpd");
-  for (const path of paths) revalidatePath(path);
+
+  for (const path of paths) {
+    revalidatePath(path);
+  }
 }
 
 function processorIdsFrom(formData: FormData) {
-  return [...new Set(formData.getAll("processorId").map(String).filter(Boolean))].map((value) =>
-    parseOrThrow(privacyIdSchema, value),
-  );
+  return [
+    ...new Set(
+      formData
+        .getAll("processorId")
+        .map(String)
+        .filter(Boolean),
+    ),
+  ].map((value) => parseOrThrow(privacyIdSchema, value));
 }
 
 async function assertProcessors(workspaceId: string, ids: string[]) {
-  if (ids.length === 0) return;
+  if (ids.length === 0) {
+    return;
+  }
+
   const count = await prisma.privacyProcessor.count({
-    where: { workspaceId, id: { in: ids }, archivedAt: null },
+    where: {
+      workspaceId,
+      id: { in: ids },
+      archivedAt: null,
+    },
   });
-  if (count !== ids.length) throw new Error("Sous-traitant introuvable.");
+
+  if (count !== ids.length) {
+    throw new Error("Sous-traitant introuvable.");
+  }
 }
 
-async function assertContact(workspaceId: string, contactId: string | undefined) {
-  if (!contactId) return null;
+async function assertContact(
+  workspaceId: string,
+  contactId: string | undefined,
+) {
+  if (!contactId) {
+    return null;
+  }
+
   const contact = await prisma.contact.findFirst({
-    where: { id: contactId, workspaceId, archivedAt: null },
-    select: { id: true },
+    where: {
+      id: contactId,
+      workspaceId,
+      archivedAt: null,
+    },
+    select: {
+      id: true,
+    },
   });
-  if (!contact) throw new Error("Contact introuvable.");
+
+  if (!contact) {
+    throw new Error("Contact introuvable.");
+  }
+
   return contact.id;
 }
 
 export async function createTreatment(formData: FormData) {
-  const workspaceId = await getWorkspaceIdForAction();
-  const parsed = parseOrThrow(treatmentSchema, Object.fromEntries(formData));
+  const { id: userId, workspaceId } = await getActorForAction();
+
+  const parsed = parseOrThrow(
+    treatmentSchema,
+    Object.fromEntries(formData),
+  );
+
   const processorIds = processorIdsFrom(formData);
+
   await assertProcessors(workspaceId, processorIds);
 
-  await prisma.$transaction(async (tx) => {
-    const treatment = await tx.privacyTreatment.create({
+  const treatment = await prisma.$transaction(async (tx) => {
+    const createdTreatment = await tx.privacyTreatment.create({
       data: {
         workspaceId,
         name: parsed.name,
@@ -89,38 +136,69 @@ export async function createTreatment(formData: FormData) {
         status: parsed.status,
         archivedAt: parsed.status === "ARCHIVED" ? new Date() : null,
       },
-      select: { id: true },
+      select: {
+        id: true,
+      },
     });
 
-    if (processorIds.length) {
+    if (processorIds.length > 0) {
       await tx.privacyTreatmentProcessor.createMany({
         data: processorIds.map((processorId) => ({
           workspaceId,
-          treatmentId: treatment.id,
+          treatmentId: createdTreatment.id,
           processorId,
         })),
       });
     }
+
+    return createdTreatment;
+  });
+
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "CREATE",
+    entityType: AUDIT_ENTITY_TYPES.PRIVACY_TREATMENT,
+    entityId: treatment.id,
   });
 
   revalidatePrivacy("/rgpd/treatments", "/rgpd/processors");
 }
 
 export async function updateTreatment(formData: FormData) {
-  const workspaceId = await getWorkspaceIdForAction();
-  const parsed = parseOrThrow(treatmentSchema.extend({ id: privacyIdSchema }), Object.fromEntries(formData));
+  const { id: userId, workspaceId } = await getActorForAction();
+
+  const parsed = parseOrThrow(
+    treatmentSchema.extend({
+      id: privacyIdSchema,
+    }),
+    Object.fromEntries(formData),
+  );
+
   const processorIds = processorIdsFrom(formData);
+
   await assertProcessors(workspaceId, processorIds);
 
   const existing = await prisma.privacyTreatment.findFirst({
-    where: { id: parsed.id, workspaceId },
-    select: { id: true },
+    where: {
+      id: parsed.id,
+      workspaceId,
+    },
+    select: {
+      id: true,
+    },
   });
-  if (!existing) return;
+
+  if (!existing) {
+    return;
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.privacyTreatment.updateMany({
-      where: { id: parsed.id, workspaceId },
+      where: {
+        id: parsed.id,
+        workspaceId,
+      },
       data: {
         name: parsed.name,
         purpose: parsed.purpose,
@@ -139,33 +217,77 @@ export async function updateTreatment(formData: FormData) {
         archivedAt: parsed.status === "ARCHIVED" ? new Date() : null,
       },
     });
+
     await tx.privacyTreatmentProcessor.deleteMany({
-      where: { workspaceId, treatmentId: parsed.id },
+      where: {
+        workspaceId,
+        treatmentId: parsed.id,
+      },
     });
-    if (processorIds.length) {
+
+    if (processorIds.length > 0) {
       await tx.privacyTreatmentProcessor.createMany({
-        data: processorIds.map((processorId) => ({ workspaceId, treatmentId: parsed.id, processorId })),
+        data: processorIds.map((processorId) => ({
+          workspaceId,
+          treatmentId: parsed.id,
+          processorId,
+        })),
       });
     }
+  });
+
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "UPDATE",
+    entityType: AUDIT_ENTITY_TYPES.PRIVACY_TREATMENT,
+    entityId: parsed.id,
   });
 
   revalidatePrivacy("/rgpd/treatments", "/rgpd/processors");
 }
 
 export async function archiveTreatment(formData: FormData) {
-  const workspaceId = await getWorkspaceIdForAction();
-  const id = parseOrThrow(privacyIdSchema, formData.get("id"));
-  await prisma.privacyTreatment.updateMany({
-    where: { id, workspaceId },
-    data: { archivedAt: new Date(), status: "ARCHIVED" },
+  const { id: userId, workspaceId } = await getActorForAction();
+
+  const id = parseOrThrow(
+    privacyIdSchema,
+    formData.get("id"),
+  );
+
+  const result = await prisma.privacyTreatment.updateMany({
+    where: {
+      id,
+      workspaceId,
+    },
+    data: {
+      archivedAt: new Date(),
+      status: "ARCHIVED",
+    },
   });
+
+  if (result.count > 0) {
+    await recordAudit({
+      workspaceId,
+      userId,
+      action: "ARCHIVE",
+      entityType: AUDIT_ENTITY_TYPES.PRIVACY_TREATMENT,
+      entityId: id,
+    });
+  }
+
   revalidatePrivacy("/rgpd/treatments");
 }
 
 export async function createProcessor(formData: FormData) {
-  const workspaceId = await getWorkspaceIdForAction();
-  const parsed = parseOrThrow(processorSchema, Object.fromEntries(formData));
-  await prisma.privacyProcessor.create({
+  const { id: userId, workspaceId } = await getActorForAction();
+
+  const parsed = parseOrThrow(
+    processorSchema,
+    Object.fromEntries(formData),
+  );
+
+  const processor = await prisma.privacyProcessor.create({
     data: {
       workspaceId,
       name: parsed.name,
@@ -182,35 +304,113 @@ export async function createProcessor(formData: FormData) {
       lastReviewedAt: parsed.lastReviewedAt,
       nextReviewAt: parsed.nextReviewAt,
     },
+    select: {
+      id: true,
+    },
   });
+
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "CREATE",
+    entityType: AUDIT_ENTITY_TYPES.PRIVACY_PROCESSOR,
+    entityId: processor.id,
+  });
+
   revalidatePrivacy("/rgpd/processors", "/rgpd/treatments");
 }
 
 export async function updateProcessor(formData: FormData) {
-  const workspaceId = await getWorkspaceIdForAction();
-  const parsed = parseOrThrow(processorSchema.extend({ id: privacyIdSchema }), Object.fromEntries(formData));
+  const { id: userId, workspaceId } = await getActorForAction();
+
+  const parsed = parseOrThrow(
+    processorSchema.extend({
+      id: privacyIdSchema,
+    }),
+    Object.fromEntries(formData),
+  );
+
   const { id, ...data } = parsed;
-  await prisma.privacyProcessor.updateMany({ where: { id, workspaceId }, data });
+
+  const result = await prisma.privacyProcessor.updateMany({
+    where: {
+      id,
+      workspaceId,
+    },
+    data,
+  });
+
+  if (result.count > 0) {
+    await recordAudit({
+      workspaceId,
+      userId,
+      action: "UPDATE",
+      entityType: AUDIT_ENTITY_TYPES.PRIVACY_PROCESSOR,
+      entityId: id,
+    });
+  }
+
   revalidatePrivacy("/rgpd/processors", "/rgpd/treatments");
 }
 
 export async function archiveProcessor(formData: FormData) {
-  const workspaceId = await getWorkspaceIdForAction();
-  const id = parseOrThrow(privacyIdSchema, formData.get("id"));
-  await prisma.$transaction([
-    prisma.privacyProcessor.updateMany({ where: { id, workspaceId }, data: { archivedAt: new Date() } }),
-    prisma.privacyTreatmentProcessor.deleteMany({ where: { workspaceId, processorId: id } }),
+  const { id: userId, workspaceId } = await getActorForAction();
+
+  const id = parseOrThrow(
+    privacyIdSchema,
+    formData.get("id"),
+  );
+
+  const [result] = await prisma.$transaction([
+    prisma.privacyProcessor.updateMany({
+      where: {
+        id,
+        workspaceId,
+      },
+      data: {
+        archivedAt: new Date(),
+      },
+    }),
+
+    prisma.privacyTreatmentProcessor.deleteMany({
+      where: {
+        workspaceId,
+        processorId: id,
+      },
+    }),
   ]);
+
+  if (result.count > 0) {
+    await recordAudit({
+      workspaceId,
+      userId,
+      action: "ARCHIVE",
+      entityType: AUDIT_ENTITY_TYPES.PRIVACY_PROCESSOR,
+      entityId: id,
+    });
+  }
+
   revalidatePrivacy("/rgpd/processors", "/rgpd/treatments");
 }
 
 export async function createPrivacyRequest(formData: FormData) {
-  const workspaceId = await getWorkspaceIdForAction();
-  const parsed = parseOrThrow(requestSchema, Object.fromEntries(formData));
-  const contactId = await assertContact(workspaceId, parsed.contactId || undefined);
-  const closed = parsed.status === "COMPLETED" || parsed.status === "REFUSED";
+  const { id: userId, workspaceId } = await getActorForAction();
 
-  await prisma.privacyRequest.create({
+  const parsed = parseOrThrow(
+    requestSchema,
+    Object.fromEntries(formData),
+  );
+
+  const contactId = await assertContact(
+    workspaceId,
+    parsed.contactId || undefined,
+  );
+
+  const closed =
+    parsed.status === "COMPLETED" ||
+    parsed.status === "REFUSED";
+
+  const request = await prisma.privacyRequest.create({
     data: {
       workspaceId,
       contactId,
@@ -224,18 +424,44 @@ export async function createPrivacyRequest(formData: FormData) {
       notes: parsed.notes,
       closedAt: closed ? new Date() : null,
     },
+    select: {
+      id: true,
+    },
   });
+
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "CREATE",
+    entityType: AUDIT_ENTITY_TYPES.PRIVACY_REQUEST,
+    entityId: request.id,
+  });
+
   revalidatePrivacy("/rgpd/requests");
 }
 
 export async function updatePrivacyRequest(formData: FormData) {
-  const workspaceId = await getWorkspaceIdForAction();
-  const parsed = parseOrThrow(updateRequestSchema, Object.fromEntries(formData));
-  const contactId = await assertContact(workspaceId, parsed.contactId || undefined);
-  const closed = parsed.status === "COMPLETED" || parsed.status === "REFUSED";
+  const { id: userId, workspaceId } = await getActorForAction();
 
-  await prisma.privacyRequest.updateMany({
-    where: { id: parsed.id, workspaceId },
+  const parsed = parseOrThrow(
+    updateRequestSchema,
+    Object.fromEntries(formData),
+  );
+
+  const contactId = await assertContact(
+    workspaceId,
+    parsed.contactId || undefined,
+  );
+
+  const closed =
+    parsed.status === "COMPLETED" ||
+    parsed.status === "REFUSED";
+
+  const result = await prisma.privacyRequest.updateMany({
+    where: {
+      id: parsed.id,
+      workspaceId,
+    },
     data: {
       contactId,
       requesterName: parsed.requesterName,
@@ -249,14 +475,31 @@ export async function updatePrivacyRequest(formData: FormData) {
       closedAt: closed ? new Date() : null,
     },
   });
+
+  if (result.count > 0) {
+    await recordAudit({
+      workspaceId,
+      userId,
+      action: "UPDATE",
+      entityType: AUDIT_ENTITY_TYPES.PRIVACY_REQUEST,
+      entityId: parsed.id,
+    });
+  }
+
   revalidatePrivacy("/rgpd/requests");
 }
 
 export async function createIncident(formData: FormData) {
-  const workspaceId = await getWorkspaceIdForAction();
-  const parsed = parseOrThrow(incidentSchema, Object.fromEntries(formData));
+  const { id: userId, workspaceId } = await getActorForAction();
+
+  const parsed = parseOrThrow(
+    incidentSchema,
+    Object.fromEntries(formData),
+  );
+
   const closed = parsed.status === "CLOSED";
-  await prisma.privacyIncident.create({
+
+  const incident = await prisma.privacyIncident.create({
     data: {
       workspaceId,
       title: parsed.title,
@@ -275,16 +518,39 @@ export async function createIncident(formData: FormData) {
       status: parsed.status,
       closedAt: closed ? new Date() : null,
     },
+    select: {
+      id: true,
+    },
   });
+
+  await recordAudit({
+    workspaceId,
+    userId,
+    action: "CREATE",
+    entityType: AUDIT_ENTITY_TYPES.PRIVACY_INCIDENT,
+    entityId: incident.id,
+  });
+
   revalidatePrivacy("/rgpd/incidents");
 }
 
 export async function updateIncident(formData: FormData) {
-  const workspaceId = await getWorkspaceIdForAction();
-  const parsed = parseOrThrow(incidentSchema.extend({ id: privacyIdSchema }), Object.fromEntries(formData));
+  const { id: userId, workspaceId } = await getActorForAction();
+
+  const parsed = parseOrThrow(
+    incidentSchema.extend({
+      id: privacyIdSchema,
+    }),
+    Object.fromEntries(formData),
+  );
+
   const closed = parsed.status === "CLOSED";
-  await prisma.privacyIncident.updateMany({
-    where: { id: parsed.id, workspaceId },
+
+  const result = await prisma.privacyIncident.updateMany({
+    where: {
+      id: parsed.id,
+      workspaceId,
+    },
     data: {
       title: parsed.title,
       discoveredAt: parsed.discoveredAt,
@@ -303,5 +569,16 @@ export async function updateIncident(formData: FormData) {
       closedAt: closed ? new Date() : null,
     },
   });
+
+  if (result.count > 0) {
+    await recordAudit({
+      workspaceId,
+      userId,
+      action: "UPDATE",
+      entityType: AUDIT_ENTITY_TYPES.PRIVACY_INCIDENT,
+      entityId: parsed.id,
+    });
+  }
+
   revalidatePrivacy("/rgpd/incidents");
 }
