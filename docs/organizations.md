@@ -126,11 +126,14 @@ component in the contact form. It:
   the list page always runs exactly two queries (count + rows) plus one
   aggregation, regardless of the number of organisations shown. No N+1.
 
-- **Organisation filter on the contact list** still reads from
-  `organization_name` (the `listOrganizationOptions` function). This is
-  intentional: the filter predates the FK, contacts may still have names
-  without FKs, and changing it would be a separate migration. It is not a
-  regression.
+- **Organisation filter on the contact list** now reads from the canonical
+  `organizations` table (`listOrganizationOptions`). Names in the drop-down
+  are stable and match those shown on the organisation pages. The filter
+  predicate uses the `organization_id` FK where it is set, and falls back to
+  the legacy `organization_name` text field for contacts not yet migrated.
+  Contacts whose historical name no longer appears in the `organizations`
+  table will not show up under that name in the filter drop-down; they remain
+  fully reachable by name search.
 
 - **No "mini Salesforce"**: no industry, no annual revenue, no contract
   value, no pipeline stage. If you need those, NOD CRM is not the right

@@ -128,7 +128,7 @@ Candidates after V0.9, ordered by observed product need rather than by commitmen
 
 - CSV import/export for contacts.
 - Better search indexes (`pg_trgm`) when workspace size justifies them.
-- Better empty/error states and small keyboard ergonomics.
+- Small keyboard ergonomics (modal focus management and illustrated empty states landed in the post-V0.9 fixes; broader keyboard shortcuts remain a candidate).
 - English UI scaffolding.
 - Contact history and duplicate merging.
 - Follow-up history and business audit log.
