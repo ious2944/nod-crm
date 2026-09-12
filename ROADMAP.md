@@ -131,7 +131,7 @@ Candidates after V0.9, ordered by observed product need rather than by commitmen
 - Small keyboard ergonomics (modal focus management and illustrated empty states landed in the post-V0.9 fixes; broader keyboard shortcuts remain a candidate).
 - English UI scaffolding.
 - Contact history and duplicate merging.
-- Follow-up history and business audit log.
+- Follow-up per-item history (the mutation audit log shipped in the post-V0.9 batch; per-item change history for a specific follow-up has not).
 - MFA and self-service password reset.
 - Multi-user invitations.
 - Public API/webhooks if a concrete integration needs them.

@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Post-V0.9 bugfixes.**
+
+### Fixed
+
+#### Tasks — editing now works
+
+- **`updateTask` server action** — a "Modifier" button on each task row opens
+  an edit dialog. Title, due date, notes and linked contact are editable.
+  `followUpId` and `opportunityId` are preserved without modification.
+  The dialog closes on success and surfaces field-level validation errors.
+- **Audit trail** — every successful task edit records a `Task / UPDATE` row
+  in `audit_logs`.
+- The update uses a simple `WHERE id, workspaceId` predicate — it does not
+  repeat `completedAt`/`dueAt` as `applyTaskAction` does; the optimistic
+  concurrency guard in quick actions is preserved unchanged.
+
+#### Commerce — idempotent status transitions
+
+- Submitting a status transition that matches the opportunity's current status
+  (e.g. PERDUE → PERDUE) no longer raises `OpportunityConflictError`. The
+  action returns immediately without writing, so the UI does not show a
+  spurious error when a user re-submits the same state.
+
+#### RGPD — optional field clearing on update
+
+- Optional text fields (notes, review dates, etc.) in Processor and Treatment
+  updates are now written as `NULL` when the submitted value is empty. Previously
+  the `text()` Zod helper transformed `""` to `undefined`, which Prisma
+  interpreted as "do not touch the column", leaving the old value in place.
+
+#### RGPD — visual feedback on Processor update
+
+- The Processor update form now uses `useActionState`. Saving shows a green
+  confirmation banner ("Modifications enregistrées.") on success and a red
+  error banner on failure. The previous `void` return made it impossible to
+  know whether the save had worked.
+
+---
+
 **Post-V0.9 security and audit batches.**
 
 ### Added

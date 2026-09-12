@@ -33,6 +33,12 @@ Cross-workspace references are checked before writes:
 
 Updates use workspace-scoped predicates so a foreign UUID updates zero rows. Queries always filter by the session workspace.
 
+Server Actions validate input with `parseOrThrow()` rather than a raw `.parse()` call: a `ZodError` is caught and re-raised as a plain `Error` with a controlled, field-level message in French. An invalid payload never surfaces internal schema details to the client.
+
+### Optional fields and clearing
+
+Optional text fields (notes, review date, etc.) are written as `NULL` when the user submits an empty value. Submitting an empty field on a Processor or Treatment update correctly clears the stored value; it does not leave the previous content in place.
+
 ## Alert model
 
 Alerts are derived from stored data; they are not persisted as a second source of truth.
@@ -48,6 +54,18 @@ Examples:
 - incident is open and still needs risk / notification assessment.
 
 The empty state says **“No attention point detected”**, never “You are GDPR compliant”.
+
+## Update feedback
+
+The Processor update form uses `useActionState` and shows a confirmation banner
+on success ("Modifications enregistrées.") or a contextual error message on
+failure. The form never silently discards changes.
+
+## Audit trail
+
+Every privacy mutation (create, update, archive) is recorded in `audit_logs`
+with the user id, workspace id, entity type, entity id, and timestamp. No field
+values or diffs are stored. See [`src/lib/audit/README.md`](../src/lib/audit/README.md).
 
 ## Deliberate V0.8 exclusions
 

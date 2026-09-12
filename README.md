@@ -63,7 +63,7 @@ Tasks and follow-ups keep independent state machines: completing or snoozing one
 - Title, due date and two states: to do or done.
 - Optional contact and optional linked follow-up for context only.
 - `/tasks` orders unfinished work overdue → today → upcoming.
-- Complete, Reopen and Snooze actions.
+- Create, edit (title, due date, notes, contact), Complete, Reopen and Snooze actions.
 - No state synchronisation with follow-ups by design.
 
 See [docs/tasks.md](docs/tasks.md).
@@ -91,9 +91,9 @@ See [docs/organizations.md](docs/organizations.md).
 
 ### Commerce
 
-- Opportunity list at `/commerce` with open/closed/all filters and pipeline counts.
+- Opportunity list at `/commerce` with open/closed/all filters and pipeline counts, paginated at 25 per page.
 - Opportunity fields: name, linked organisation (required), optional contact, estimated amount, expected close date, pipeline status and notes.
-- Five-stage pipeline: À qualifier → En discussion → Proposition → Gagnée / Perdue. Status transitions are enforced server-side.
+- Five-stage pipeline: À qualifier → En discussion → Proposition → Gagnée / Perdue. Status transitions are enforced server-side; submitting the same status already active is a no-op (idempotent).
 - Opportunity sheet at `/commerce/[id]` with pipeline controls, edit, delete and linked tasks and follow-ups.
 - Create a task or follow-up directly from an opportunity with the opportunity preselected.
 - Deleting an opportunity preserves linked tasks and follow-ups (`ON DELETE SET NULL`).
@@ -319,7 +319,7 @@ Known and accepted in V0.9:
 - Contact search uses `ILIKE`; `pg_trgm` is not shipped yet.
 - Contact photos live on a volume rather than in PostgreSQL. Backup includes them, but restore remains a manual step; see [docs/backup-restore.md](docs/backup-restore.md).
 - Follow-ups can be edited, but ball ownership and status remain quick-action-only.
-- Tasks cannot be generically edited or deleted; they can be completed, reopened or snoozed.
+- Tasks can be edited (title, due date, notes, contact), completed, reopened or snoozed. There is no delete.
 - `/tasks` and `/today` are not paginated; the completed task tab is capped at 100.
 - A task always has a due date; “someday” tasks are not supported.
 - Quick actions require JavaScript. The login screen does not.
@@ -343,9 +343,9 @@ Directions, not commitments. The full roadmap lives in [ROADMAP.md](ROADMAP.md).
 - **V0.8 — RGPD Essentials — shipped.** Treatment register, processors, rights requests, incidents and privacy alerts.
 - **V0.9 — Commerce — current.** Lightweight opportunity tracking, five-stage pipeline and integration with existing tasks and follow-ups.
 
-**Next.** CSV import/export, search-index improvements, better empty/error states, English UI scaffolding and small ergonomics remain candidates rather than commitments.
+**Next.** CSV import/export, search-index improvements (`pg_trgm`), English UI scaffolding and broader keyboard shortcuts remain candidates rather than commitments.
 
-Later candidates include contact history and duplicate merging, follow-up history, MFA, self-service password reset, multi-user invitations, pagination at larger scales, public API/webhooks and recurring work.
+Later candidates include contact history and duplicate merging, follow-up per-item history, MFA, self-service password reset, multi-user invitations, follow-up pagination at larger scales, public API/webhooks and recurring work.
 
 Deliberately out of scope for a long time: deal scoring, forecasting, marketing automation, plugin systems and AI features that guess what you should do.
 
