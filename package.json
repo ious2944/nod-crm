@@ -45,7 +45,7 @@
     "user:create": "node scripts/admin.mjs create-user"
   },
   "dependencies": {
-    "@node-rs/argon2": "^2.1.0",
+    "@node-rs/argon2": "^2.2.0",
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "lucide-react": "^1.45.0",
