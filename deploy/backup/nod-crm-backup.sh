@@ -20,6 +20,17 @@
 #   NOD_CRM_SKIP_UPLOADS  set to 1 to back up the database only
 #   NOD_CRM_RETENTION_DAYS  delete dumps older than this  (default 30)
 #   NOD_CRM_MIN_KEPT      never go below this many dumps  (default 7)
+#   NOD_CRM_RCLONE_REMOTE off-site rclone destination (e.g. b2:bucket/nod-crm/)
+#                         empty by default — see "Off-site copy" below
+#
+# --------------------------------------------------------------- off-site copy
+# A backup that lives only on the host it protects is not a backup, it is a
+# hope: a ransomware run or a dead disk destroys the data and its only copy in
+# the same instant. Set NOD_CRM_RCLONE_REMOTE to an rclone destination (the
+# same rclone/remote already used for the Mirai and GED backups on this VPS
+# works unchanged) and every successful run pushes both archives there right
+# after they are verified locally. Left unset, the script behaves exactly as
+# before — local-only, same as it always was.
 #
 # Since V0.2 the database is no longer the whole story: contact photos are
 # files on the `nod-crm-uploads-data` volume, and the rows reference them. A
@@ -40,6 +51,8 @@ RETENTION_DAYS="${NOD_CRM_RETENTION_DAYS:-30}"
 # Safety net: never prune below this many backups. A multi-week outage must not
 # quietly erase every copy.
 MIN_KEPT="${NOD_CRM_MIN_KEPT:-7}"
+# Off-site destination. Empty means "local only", unchanged from before.
+RCLONE_REMOTE="${NOD_CRM_RCLONE_REMOTE:-}"
 
 log()  { printf '%s [nod-crm-backup] %s\n' "$(date -Is)" "$*"; }
 fail() { log "ERROR: $*" >&2; exit 1; }
@@ -180,6 +193,27 @@ prune() {
 
 prune 'nod-crm-*.sql.gz'
 prune 'nod-crm-uploads-*.tar.gz'
+
+# ------------------------------------------------------------- off-site push
+# Runs after local verification, on the two archives this run just produced —
+# never a bulk sync of the whole directory, so a partial or stale local file
+# can't be pushed by accident. A failure here is logged, not fatal: the local
+# backup that already exists and already passed its integrity checks is not
+# invalidated by a network hiccup reaching the off-site target.
+if [[ -n "$RCLONE_REMOTE" ]]; then
+  if ! command -v rclone >/dev/null; then
+    log "WARNING: NOD_CRM_RCLONE_REMOTE is set but rclone is not installed — off-site push skipped"
+  else
+    for f in "$TARGET" "$UPLOADS_TARGET"; do
+      [[ -f "$f" ]] || continue
+      if rclone copy "$f" "$RCLONE_REMOTE" >/dev/null 2>&1; then
+        log "off-site copy ok: $(basename "$f") -> $RCLONE_REMOTE"
+      else
+        log "WARNING: off-site copy failed for $(basename "$f") -> $RCLONE_REMOTE (local copy is still intact)"
+      fi
+    done
+  fi
+fi
 
 # Both counts, deliberately: an operator glancing at the log must be able to
 # see that the photos are covered too, not just the database.
