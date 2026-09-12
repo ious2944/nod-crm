@@ -150,7 +150,6 @@ describe("isolation stricte par tenant", () => {
     const result = await create({
       firstName: "Attaque",
       lastName: "Injection",
-      // @ts-expect-error — champ hors schéma, volontairement injecté pour le test
       workspaceId: userB.workspaceId,
     });
     expect(result.status).toBe("success");
