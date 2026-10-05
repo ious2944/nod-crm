@@ -326,10 +326,15 @@ writing the same thing worse:
 Next.js, React, Prisma and its pg adapter, `pg`, `@node-rs/argon2`, Zod,
 `server-only`.
 
-`npm audit` is expected to report zero vulnerabilities; one `overrides` entry
-(`deepmerge-ts`) exists to keep it that way without downgrading Prisma, and
-should be re-evaluated at each Prisma upgrade. The CI pipeline enforces this:
-`npm audit --audit-level=high` is a required gate on every push.
+`npm audit` is expected to report zero vulnerabilities in the production
+dependency tree; one `overrides` entry (`deepmerge-ts`) exists to keep it that
+way without downgrading Prisma, and should be re-evaluated at each Prisma
+upgrade. The CI pipeline enforces this: `npm audit --omit=dev
+--audit-level=high` is a required gate on every push. A full-tree audit,
+dev dependencies included, also runs on every push but is informational only:
+dev tooling (linters, test and build tools) never ships, and an advisory there
+can have no patched release at all — `braces`, pulled in by
+`eslint-config-next`, is one at the time of writing.
 
 A `gitleaks` secret scan runs in CI on every push with `fetch-depth: 0`,
 covering the full git history. A secret committed once and later removed is
