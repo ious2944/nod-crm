@@ -58,7 +58,7 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
     <div className="flex min-h-full flex-col">
       {/* En-tête sticky */}
       <header className="sticky top-0 z-10 border-b border-border-subtle bg-surface/95 backdrop-blur-sm">
-        <div className="mx-auto w-full max-w-5xl px-4 sm:px-6">
+        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-3 py-4">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">
@@ -77,7 +77,7 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
       </header>
 
       {/* Contenu scrollable */}
-      <div className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+      <div className="mx-auto w-full max-w-7xl flex-1 space-y-6 px-4 py-6 sm:px-6 sm:py-8">
         {cockpit.openTotal === 0 && tasksInWindow.length === 0 && (
           <EmptyState
             title="Votre espace est prêt"
@@ -101,7 +101,10 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
         </section>
 
         {/* Grille principale */}
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] xl:gap-7">
+        {/* La colonne de droite garde une largeur fixe (celle qu'elle avait avec
+            l'ancien partage 1.6fr/1fr) : tout l'espace gagné revient aux tâches
+            et aux suivis, dont le titre est l'information principale. */}
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] xl:gap-7">
           {/* Colonne gauche : suivis prioritaires + tâches */}
           <div className="min-w-0 space-y-6">
             <PriorityFeed section={cockpit.feed} filter={filter} />

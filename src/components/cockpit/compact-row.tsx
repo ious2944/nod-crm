@@ -7,7 +7,7 @@ import { ContactLabel } from "./contact-label";
 /**
  * Ligne dense des zones secondaires (« Prochainement », « En attente chez eux »).
  *
- * Une seule ligne visuelle : quand, qui, quoi — et rien de plus, sinon ces
+ * Une ligne dense : quand, quoi, qui — et rien de plus, sinon ces
  * zones concurrenceraient le feed au lieu de le compléter. `trailing` accueille
  * l'action éventuelle.
  */
@@ -35,8 +35,15 @@ export function CompactFollowUpRow({
       </span>
 
       <span className="min-w-0 flex-1">
+        {/* L'objet d'abord, sur deux lignes au plus : tronqué à une ligne
+            dans cette colonne étroite, il ne disait plus de quoi il s'agissait. */}
+        <span
+          title={item.title}
+          className="line-clamp-2 break-words text-[13px] font-medium leading-snug text-ink"
+        >
+          {item.title}
+        </span>
         <ContactLabel contact={item.contact} size="compact" />
-        <span className="block truncate text-[13px] text-ink">{item.title}</span>
         {/* La note n'est pas tronquée : dans « En attente chez eux », c'est
             elle qui porte l'information — un « sans mouvement depuis … » coupé
             ne dit plus rien. */}
