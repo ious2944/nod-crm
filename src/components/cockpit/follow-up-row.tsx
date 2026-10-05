@@ -33,7 +33,20 @@ export function FollowUpRow({ item }: { item: CockpitItem }) {
         className={`absolute inset-y-0 left-0 w-1 rounded-l-xl ${URGENCY_EDGE[item.level]}`}
       />
 
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      {/* Même hiérarchie que les tâches : l'objet du suivi d'abord, avec la
+          seule échéance à sa droite ; qui, où est la balle et les actions
+          viennent dessous. */}
+      <div className="flex items-start gap-3">
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          <h3 className="min-w-0 break-words text-[15px] font-semibold leading-snug text-ink">
+            {item.title}
+          </h3>
+          {item.isDemo && (
+            <span className="mt-0.5 shrink-0 rounded-full border border-border-subtle px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-muted">
+              démo
+            </span>
+          )}
+        </div>
         <span
           className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${
             URGENCY_CHIP[item.level]
@@ -41,21 +54,14 @@ export function FollowUpRow({ item }: { item: CockpitItem }) {
         >
           {item.dueLabel}
         </span>
-        <ContactLabel contact={item.contact} />
-        {item.isDemo && (
-          <span className="rounded-full border border-border-subtle px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-muted">
-            démo
-          </span>
-        )}
       </div>
-
-      <h3 className="mt-0.5 text-[15px] font-semibold leading-snug text-ink">{item.title}</h3>
 
       {/* Contexte et actions partagent une ligne dès qu'il y a la place : sur
           une pile de dix suivis, la ligne d'actions isolée transformait le feed
           en succession de grosses cartes. */}
       <div className="mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+          <ContactLabel contact={item.contact} />
           <BallBadge ballOwner={item.ballOwner} label={item.ballLabel} />
           {item.overdueDays >= 1 && <span>En retard de {item.overdueDays} j</span>}
           {item.stagnationLabel && (
