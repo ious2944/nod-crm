@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — V1.0 work management (tasks & projects)
+
+- Projects, sections, multi-project task membership (`task_projects`), subtasks,
+  dependencies, tags, custom fields, followers/collaborators, comments with
+  mentions and reactions, attachments, change history, time entries, approvals,
+  recurrence, notifications and preferences, saved views, automation rules and
+  runs, task templates, project templates, internal forms.
+- Views: Overview, List, Board, Calendar, Timeline, Dashboard; My tasks, Search,
+  Portfolio, Workload, Notifications, Favourites, Forms, Settings.
+- Right-hand task detail panel available from every page (`?task=<id>`), direct
+  link `/tasks/t/<id>`.
+- Real-time refresh between users (PostgreSQL `LISTEN/NOTIFY` → SSE
+  `/api/tasks/stream`) and per-field conflict detection.
+- CRM sheets (contact, organisation, opportunity) show linked tasks and projects
+  with quick creation.
+- CSV import/export.
+
+### Changed
+
+- `tasks.due_at` is now optional; legacy task actions run through the new
+  service (assignee, followers, history, notifications, rules).
+- The `/today` cockpit applies project visibility and shows the user's own and
+  unassigned tasks.
+
+### Migration
+
+- `20261013120000_work_management` — additive. Backfills `status` from
+  `completed_at`, and `created_by_id` / `assignee_id` from the audit trail (or
+  from the single user of a workspace).
+
 **Post-V0.9 bugfixes.**
 
 ### Fixed

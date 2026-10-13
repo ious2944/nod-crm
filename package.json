@@ -34,6 +34,7 @@
     "test:integration": "vitest run --config vitest.integration.config.mts",
     "test:e2e": "node e2e/run.mjs",
     "test:e2e:popover": "node e2e/popover.mjs",
+    "test:e2e:work": "node e2e/work.mjs",
     "test:cli": "python3 tests/pty/admin-cli.py",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

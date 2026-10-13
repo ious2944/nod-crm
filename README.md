@@ -58,13 +58,17 @@ Tasks and follow-ups keep independent state machines: completing or snoozing one
 - Search by subject and description, preserved in the URL and compatible with filters.
 - Editing after creation: subject, description, due date and linked contact. Ball ownership and status remain quick-action-only.
 
-### Tasks
+### Tasks & projects (V1.0 — work management)
 
-- Title, due date and two states: to do or done.
-- Optional contact and optional linked follow-up for context only.
-- `/tasks` orders unfinished work overdue → today → upcoming.
-- Create, edit (title, due date, notes, contact), Complete, Reopen and Snooze actions.
-- No state synchronisation with follow-ups by design.
+An Asana-style work-management module built on the **same `tasks` table** as before — there is one task system.
+
+- **Navigation**: Mes tâches (grouped Overdue / Today / Upcoming / No date), Projects, Notifications, Favourites, plus Search, Portfolio, Workload, Forms and Settings.
+- **Projects**: name, description, colour, icon, owner, members and roles, dates, visibility (workspace / private), status updates with comments and history, favourites, templates, duplicate, archive, delete; sections can be created, renamed, reordered and deleted.
+- **Views on the same data**: Overview, List (compact, collapsible sections, configurable and resizable columns, inline editing, expandable subtasks, quick add, multi-select bulk actions, context menus, keyboard), Board (by section or status), Calendar (month/week, drag to reschedule), Timeline/Gantt (bars, milestones, dependency arrows, move/resize, conflicts flagged, cascading shift only when explicitly enabled) and Dashboard.
+- **Tasks**: rich description, assignee, collaborators and followers, start/due date and optional time, status (À faire / En cours / En attente / Terminé), priority, tags, custom fields, multi-project membership, subtasks, blocked-by / blocking dependencies (cycles refused), milestones, recurrence, estimate and time tracking, attachments, comments with @mentions and reactions, change history, approval workflow, direct link `/tasks/t/<id>`.
+- **Collaboration**: in-app notifications with read/unread/archive and per-type preferences; real-time refresh of other users' views (PostgreSQL LISTEN/NOTIFY → SSE); concurrent edits are detected per field instead of silently overwritten.
+- **Automation**: trigger → conditions → actions rules, persisted, traced, idempotent per event and protected against loops; task and project templates; internal request forms; CSV import/export; multi-project portfolio; workload per assignee.
+- **CRM integration**: tasks and projects link to a contact, organisation or opportunity; their sheets show the linked work and offer quick creation.
 
 See [docs/tasks.md](docs/tasks.md).
 
@@ -319,9 +323,9 @@ Known and accepted in V0.9:
 - Contact search uses `ILIKE`; `pg_trgm` is not shipped yet.
 - Contact photos live on a volume rather than in PostgreSQL. Backup includes them, but restore remains a manual step; see [docs/backup-restore.md](docs/backup-restore.md).
 - Follow-ups can be edited, but ball ownership and status remain quick-action-only.
-- Tasks can be edited (title, due date, notes, contact), completed, reopened or snoozed. There is no delete.
-- `/tasks` and `/today` are not paginated; the completed task tab is capped at 100.
-- A task always has a due date; “someday” tasks are not supported.
+- E-mail notifications are not sent: NOD CRM has no mail transport yet. Notifications are in-app only.
+- Due-date reminders are evaluated lazily (on activity, at most every 5 minutes per process) — there is no scheduler. They are idempotent.
+- Subtasks are one level deep. Large project lists render incrementally (150 rows per section, “show more”) rather than with full virtualisation.
 - Quick actions require JavaScript. The login screen does not.
 - The interface is French-only.
 - **RGPD Essentials is an operational aid, not legal advice, legal certification, a DPIA/AIPD tool, a consent-management platform or an automated transfer-law assessment.**

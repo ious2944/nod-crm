@@ -1,167 +1,155 @@
-# Tasks (V0.4 + post-V0.9 bugfixes)
+# Tasks & projects (V1.0 — work management)
 
-**A task is something to do. A follow-up is something to move forward with
-someone.**
+V0.4 defined a task as *something to do*. V1.0 turns tasks into a complete,
+Asana-style work-management module **without creating a second task system**:
+the cockpit, the historical task actions, projects, “Mes tâches” and the CRM
+sheets all read and write the same rows of the `tasks` table.
 
-That one sentence is the whole design. A follow-up has a counterpart, a ball
-and a nudge count; a task has none of that. It has a title, a due date, and two
-states. Keeping them apart is what stops NOD CRM from turning into a project
-management tool.
+A follow-up is still *something to move forward with someone*; tasks and
+follow-ups keep independent states.
 
-```
-/today        cockpit — everything that needs action now, follow-ups and tasks
-/tasks        the task list: overdue, today, upcoming (+ a "Terminées" tab)
-```
+## Pages
+
+| Path | Content |
+| --- | --- |
+| `/tasks` | **Mes tâches** — tasks assigned to me across all projects, grouped Overdue / Today / Upcoming / Later / No date |
+| `/tasks/projects` | Projects (active, archived, templates) |
+| `/tasks/projects/[id]?view=` | `overview`, `list`, `board`, `calendar`, `timeline`, `dashboard` |
+| `/tasks/favorites` | Favourite projects (also in the side navigation) |
+| `/tasks/notifications` | Inbox (unread/read, archive) and notification preferences |
+| `/tasks/search` | Server-side search (title **and** full description) with combinable filters |
+| `/tasks/portfolio` | Multi-project overview |
+| `/tasks/workload` | Estimated load per assignee and week |
+| `/tasks/forms`, `/tasks/forms/[id]` | Internal request forms |
+| `/tasks/settings` | Tags and custom-field library |
+| `/tasks/t/[id]` | Direct link to a task (opens its first readable project with the panel) |
+
+Any page can open the right-hand **task panel** with `?task=<id>` (cockpit,
+CRM sheets, projects): the store, the panel and the toasts live in the
+authenticated layout.
 
 ## Where the code lives
 
 | Path | Holds |
 | --- | --- |
-| `src/lib/tasks/domain.ts` | timing, buckets, sorting — pure, tested |
-| `src/lib/tasks/filters.ts` | the `?f=` parameter (`todo` \| `done`) |
-| `src/lib/tasks/schemas.ts` | Zod validation and field limits (`createTaskSchema`, `updateTaskSchema`) |
-| `src/lib/tasks/queries.ts` | reads: list, actionable tasks, follow-up picker |
-| `src/lib/tasks/view.ts` | display shape handed to components, pure |
-| `src/lib/tasks/create-state.ts` | `CreateTaskState` type for the creation action |
-| `src/lib/tasks/edit-state.ts` | `EditTaskState` type for the update action |
-| `src/lib/today/feed.ts` | merges follow-ups and tasks into one feed, pure |
-| `src/lib/today/queries.ts` | the cockpit read |
-| `src/app/(app)/tasks/actions.ts` | mutations: create, update, complete, reopen, snooze |
-| `src/components/tasks/` | row, actions, create dialog, edit dialog, follow-up picker |
+| `prisma/migrations/20261013120000_work_management` | additive migration + data backfill |
+| `src/lib/tasks/types.ts`, `constants.ts` | client-safe types, labels, palettes |
+| `src/lib/tasks/access.ts` | **permissions** (workspace, project visibility, roles) |
+| `src/lib/tasks/service.ts` | task mutations (create/update/move/delete/duplicate, tags, custom fields, dependencies, followers, time, comments) |
+| `src/lib/tasks/project-service.ts` | projects, sections, members, favourites, status updates, templates |
+| `src/lib/tasks/settings-service.ts` | tags, custom fields, rules, task templates, forms, saved views, notifications, CSV import, attachments |
+| `src/lib/tasks/automations.ts`, `automation-model.ts` | rule engine / rule model |
+| `src/lib/tasks/notify.ts`, `realtime.ts` | notifications, LISTEN/NOTIFY |
+| `src/lib/tasks/work-queries.ts`, `serialize.ts` | reads and DTO mapping |
+| `src/lib/tasks/{recurrence,graph,query-engine,rich-text,csv,format}.ts` | pure, unit-tested modules |
+| `src/app/(app)/tasks/work-actions.ts` | Server Actions (mutations) |
+| `src/app/api/tasks/**` | GET route handlers (reads, SSE stream, export) and attachment upload/download |
+| `src/components/work/` | the interface |
 
-As everywhere else in NOD CRM there is no REST layer: reads are Server
-Components calling `src/lib/`, writes are Server Actions.
+Reads go through GET route handlers rather than Server Actions because Next
+dispatches actions one at a time per client: a background refresh must never
+block the user's own edits.
 
-| Conventional | Here |
-| --- | --- |
-| `GET /tasks?state=` | `/tasks?f=todo\|done` → `getTaskList` |
-| `POST /tasks` | `createTask` action |
-| `POST /tasks/:id` | `updateTask` action |
-| `POST /tasks/:id/complete` | `applyTaskAction` with `intent=complete` |
-| `POST /tasks/:id/snooze` | `applyTaskAction` with `intent=snooze&days=N` |
+## Data model
 
-There is no delete. A task is completed, edited or reopened; nothing is destroyed.
+- `tasks` gains `status`, `priority`, `assignee_id`, `created_by_id`,
+  `parent_id` (one level of subtasks), `start_at`, `due_time`, `is_milestone`,
+  `is_approval` / `approval_status`, `recurrence`, `recurrence_origin_id`
+  (unique), `estimated_minutes`, `organization_id`, `version`; `due_at` becomes
+  optional.
+- `projects`, `project_members` (OWNER / EDITOR / COMMENTER),
+  `project_sections`, `task_projects` (a task belongs to several projects with
+  its own section and position in each), `project_favorites`,
+  `project_status_updates`.
+- `tags`, `task_tags`, `custom_fields`, `project_custom_fields`,
+  `task_custom_field_values`, `task_followers`, `task_dependencies`,
+  `task_attachments`, `comments`, `comment_reactions`, `task_activities`,
+  `task_time_entries`, `notifications`, `notification_preferences`,
+  `saved_views`, `automation_rules`, `automation_runs`, `task_templates`,
+  `task_forms`.
 
-## Two states, and no more
+`status = DONE` ⇔ `completed_at IS NOT NULL` is maintained by the service.
 
-```
-completed_at IS NULL      → à faire
-completed_at IS NOT NULL  → terminée
-```
+### Migration
 
-No `IN_PROGRESS`, no `BLOCKED`, no `CANCELLED`, no P1/P2/P3, no custom
-workflow. Three transitions exist — complete, reopen, snooze — and the server
-refuses any other, including the ones the interface never offers.
+`npm run db:deploy` applies `20261013120000_work_management`. It is additive:
+no table or column is dropped or renamed; only `tasks.due_at NOT NULL` is
+relaxed. Backfill: completed tasks become `DONE`; creator and assignee come from
+the `Task / CREATE` audit event, or from the only user of single-user
+workspaces. Existing tasks keep no project and remain visible to the workspace,
+exactly as before.
 
-## Due dates
+## Permissions (checked on the server)
 
-Tasks reuse the follow-up vocabulary rather than inventing one: `J+4`,
-`Aujourd'hui`, `Demain`, `Dans 5 j`, coloured by the same six-level ageing
-scale and the same design tokens. `dueLabel` and `urgencyLevel` are imported
-from `src/lib/follow-ups/domain.ts` — an overdue task and an overdue follow-up
-must never drift apart visually. V0.4 adds no colour of its own, so dark mode
-follows for free.
+- Every query starts from the **session's workspace**; no function accepts a
+  workspace from the client. Ids received from the client are re-checked.
+- A `WORKSPACE` project is readable by the whole workspace, a `PRIVATE` one by
+  its members only — a non-member gets the same 404 as for a missing id.
+- Editing project content requires OWNER/EDITOR (or, on a workspace project,
+  not being restricted to COMMENTER). Archived projects are read-only.
+  Settings, members, archive and delete require ownership.
+- A task is visible if it has no project, belongs to a readable project, or the
+  user is its assignee/creator/collaborator/follower. Subtasks follow their
+  parent. Search, CRM sheets, notifications, attachments and the cockpit apply
+  the same rule (`visibleTaskWhere`).
+- Attachments: extension allow-list **and** binary signature check, 10 MB,
+  opaque server-generated keys, served only by
+  `/api/tasks/attachments/[id]` after a read check, with `nosniff`, sandboxed
+  CSP and `attachment` disposition (images/PDF inline). Upload checks `Origin`.
 
-Due dates are stored as an instant at local midnight in `APP_TIME_ZONE`, and
-all comparisons are calendar-day comparisons — the same convention as
-follow-ups.
+## Reliability
 
-## What "actionable today" means
+- **Optimistic UI with rollback**: every edit is applied immediately, then
+  replaced by the server version; on failure the previous state is restored and
+  the error shown.
+- **Concurrent edits**: writes are compare-and-set on `version`, and the client
+  sends the value it saw for each changed field. If *that field* changed in the
+  meantime the server answers `CONFLICT` with the current task instead of
+  overwriting; edits to other fields go through.
+- **Real time**: mutations `pg_notify('nod_work', ids)`; each Node process keeps
+  one LISTEN connection and fans out to SSE streams (`/api/tasks/stream`),
+  filtered by workspace. The message carries ids only; clients re-read through
+  the permission-checked routes. Views also refresh when the tab regains focus.
+- **Dependencies**: cycles and self-dependencies are refused. The timeline
+  flags blocked tasks and date conflicts; dependants are shifted only when
+  “Décaler les tâches dépendantes” is ticked.
+- **Recurrence**: computed on calendar day keys in `APP_TIME_ZONE` (DST-safe);
+  completing a recurring task creates the next occurrence once —
+  `recurrence_origin_id` is unique, so double clicks or reopen/complete cycles
+  never duplicate it.
+- **Rules**: `trigger → conditions → actions`, persisted; each execution is
+  recorded in `automation_runs` (success / skipped / error); `(rule_id,
+  event_key)` is unique so one event never runs a rule twice; chains carry the
+  rules already applied and a depth limit (3), so rules cannot loop. Changes made
+  by a rule appear in the task history with the rule id.
+- **Due reminders**: there is no scheduler in NOD CRM, so the sweep runs lazily
+  on activity (at most every 5 minutes per process). Reminders are idempotent
+  (`dedupe_key` per task and due date).
 
-A task appears in the `/today` feed when:
+## Notifications
 
-```
-completed_at IS NULL  AND  due_at <= end of the current day (APP_TIME_ZONE)
-```
+Assignment, mentions, comments on followed tasks, completion, due-date and
+status changes, approvals, project status updates, project membership, rule
+messages and form submissions. Each type can be disabled per user. Recipients
+must be active members of the workspace **and** able to read the task.
 
-So: overdue → in the feed; due today → in the feed; due tomorrow → not;
-completed → not. The bound is `endOfDay(today)` (`src/lib/date.ts`), not
-`new Date()`: a task due today at local midnight must stay actionable all day,
-including on a server running in UTC.
+E-mail: NOD CRM has no mail infrastructure, so notifications are in-app only;
+`notify()` is the single place where a transport would be plugged in.
 
-Follow-ups use the identical rule (`getActionableFollowUps`), which is the V0.3
-`needsAttention` definition moved into the `WHERE` clause.
+## CRM integration
 
-## Links, and what they do not do
+Tasks and projects can be linked to a contact, an organisation or an
+opportunity. Their sheets embed `LinkedWork`: the same task rows (completing one
+there completes it everywhere), the linked projects, quick creation pre-linked
+to the sheet. An organisation also shows tasks of its contacts and
+opportunities.
 
-A task may reference a contact, a follow-up, both, or neither.
+## Known limits
 
-- **Contact** — context only. It shows the person and links to their sheet. It
-  does **not** turn the task into a follow-up: there is no ball, no nudge.
-- **Follow-up** — rendered as `Lié à <titre> — <prénom>`.
-
-**No state is ever synchronised.** Completing "Préparer le devis" does not
-complete "Envoyer le devis à Camille", and completing the follow-up does not
-complete the task. Snoozing one does not move the other. This is enforced by
-the actions themselves: `applyTaskAction` never writes to `follow_ups`, and
-`applyQuickAction` never writes to `tasks`. Integration tests assert both
-directions.
-
-Deleting a follow-up or a contact sets the link to `NULL` and keeps the task.
-
-## Counters
-
-The four V0.3 counters — Ouverts, Chez moi, Chez eux, À relancer — still mean
-**follow-ups**, still live on `/follow-ups`, and were not extended to tasks.
-Mixing two populations into one number silently would make every one of them
-unreadable.
-
-The cockpit shows one count of its own, `cockpitHeadline`, and it is explicitly
-the count of *actionable items today, follow-ups and tasks together* — exactly
-what the page lists underneath. The task page shows the number of tasks left to
-do. Three counters, three stated meanings, no overlap.
-
-## Editing a task
-
-A "Modifier" button on each task row opens the edit dialog (`EditTaskDialog`).
-
-**Editable fields:** title, due date, notes, linked contact.
-
-**Preserved on edit:** `followUpId` and `opportunityId` — neither appears in
-the edit form, and neither is touched by `updateTask`. Editing a task never
-changes which follow-up or opportunity it is linked to.
-
-The update uses a simple `where: { id, workspaceId }` predicate — it does not
-repeat `completedAt` or `dueAt` as `applyTaskAction` does. That is intentional:
-editing is a deliberate user action on a form they just opened; it should
-succeed regardless of the task's current state. The optimistic concurrency
-guard in `applyTaskAction` protects against double-clicks on quick actions, not
-general edits.
-
-The dialog closes on success and surfaces field-level validation errors if the
-form is incomplete. An audit row (`Task / UPDATE`) is written after every
-successful save.
-
-## Multi-tenant boundary
-
-Same rules as the rest of the application, no exception:
-
-- the workspace comes from the session (`getWorkspaceIdFor{Page,Action}`), never
-  from a form field, a URL parameter or a header — no function in
-  `src/lib/tasks/queries.ts` even accepts a `workspaceId` argument;
-- every client-supplied id (`contactId`, `followUpId`, the task's own `id`) is
-  re-checked against that workspace before use, so a cross-workspace link
-  cannot be created and another workspace's task cannot be read or mutated —
-  it simply is not found;
-- quick-action writes go through `updateMany` with the workspace and the exact
-  prior state in the `WHERE`, making each transition atomic without an explicit
-  transaction; edit writes use `where: { id, workspaceId }` only, which is the
-  right scope for a general update;
-- the create schema enumerates its fields, so an enriched form cannot set
-  `workspace_id`, `completed_at` or `is_demo`.
-
-PostgreSQL cannot enforce the workspace coherence of `contact_id` and
-`follow_up_id` on its own here: a composite `(id, workspace_id)` foreign key
-would rule out the `ON DELETE SET NULL` that keeps a task alive when its
-contact or follow-up disappears. The check therefore lives in the action, and
-`tests/integration/workspace-isolation.test.ts` covers it in both directions.
-
-## Deliberately out of scope
-
-Projects, kanban, sub-tasks, dependencies, priorities, tags, multi-user
-assignment, comments, attachments, recurrence, notifications, reminders, time
-tracking, estimates, a full calendar, drag and drop, and any automatic
-Task ↔ Follow-up synchronisation.
-
-Ideas kept for later, not implemented: showing a contact's tasks on their
-sheet, and a task count per contact in the directory.
+- Subtasks are one level deep.
+- Lists render 150 rows per section with “show more” and
+  `content-visibility: auto`, not full virtualisation.
+- Column widths and view preferences are stored per device (`localStorage`);
+  saved views are stored on the server.
+- The in-project toolbar search matches titles and the first 300 characters of
+  descriptions; `/tasks/search` searches full descriptions on the server.
