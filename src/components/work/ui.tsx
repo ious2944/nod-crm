@@ -29,6 +29,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ComponentType,
   type ReactNode,
   type RefObject,
@@ -692,10 +693,18 @@ export function ConfirmModal({
 
 /* ─── Notifications visuelles ─────────────────────────────────────────────── */
 
+const noopSubscribe = () => () => {};
+
+/** `true` une fois hydraté : les portails ne doivent pas exister dans le HTML serveur. */
+export function useMounted(): boolean {
+  return useSyncExternalStore(noopSubscribe, () => true, () => false);
+}
+
 export function ToastViewport() {
   const toasts = useWork((s) => s.toasts);
   const { store } = useWorkApi();
-  if (typeof document === "undefined") return null;
+  const mounted = useMounted();
+  if (!mounted) return null;
   return createPortal(
     <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-4 z-[80] flex flex-col items-center gap-2 px-4">
       {toasts.map((toast) => (
@@ -798,7 +807,8 @@ export function InlineText({
     },
     className: `w-full rounded-sm border border-transparent bg-transparent px-1 outline-none hover:border-border-subtle focus:border-accent focus:bg-surface ${inputClassName}`,
   };
-  return multiline ? <textarea rows={2} {...common} /> : <input type="text" {...common} />;
+  // `field-sizing: content` : la zone grandit avec le texte, sans ligne vide.
+  return multiline ? <textarea rows={1} style={{ fieldSizing: "content" } as React.CSSProperties} {...common} /> : <input type="text" {...common} />;
 }
 
 export function SectionTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {

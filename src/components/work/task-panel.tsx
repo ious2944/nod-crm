@@ -718,19 +718,20 @@ function TimeField({ task, detail, disabled, update, refresh }: { task: TaskItem
   return (
     <div className="flex flex-wrap items-center gap-2 pt-0.5 text-[13px]">
       <span className="text-muted">Estimé</span>
-      <InlineText
-        value={task.estimatedMinutes ? minutesLabel(task.estimatedMinutes) : ""}
-        placeholder="—"
-        label="Temps estimé"
-        disabled={disabled}
-        maxLength={12}
-        onSave={(text) => {
-          const minutes = parseDuration(text.replace(/\s/g, ""));
-          if (minutes !== null) update({ estimatedMinutes: minutes });
-        }}
-        className="w-20"
-        inputClassName="w-20 tabular-nums"
-      />
+      <span className="inline-block w-20">
+        <InlineText
+          value={task.estimatedMinutes ? minutesLabel(task.estimatedMinutes) : ""}
+          placeholder="—"
+          label="Temps estimé"
+          disabled={disabled}
+          maxLength={12}
+          onSave={(text) => {
+            const minutes = parseDuration(text.replace(/\s/g, ""));
+            if (minutes !== null) update({ estimatedMinutes: minutes });
+          }}
+          inputClassName="tabular-nums"
+        />
+      </span>
       <span className="text-muted">Passé</span>
       <span className="tabular-nums">{minutesLabel(task.spentMinutes)}</span>
       {task.estimatedMinutes ? (

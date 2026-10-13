@@ -197,3 +197,18 @@ export function formData(fields: Record<string, string | number>): FormData {
   }
   return data;
 }
+
+/** Ajoute un second utilisateur actif à un espace existant (collaboration, permissions). */
+export async function addUserToWorkspace(
+  workspaceId: string,
+  label: string,
+  password = "Mot-De-Passe-Test-2026!",
+): Promise<TestUser> {
+  counter += 1;
+  const email = `${label}${counter}@member.test`;
+  const user = await prisma.user.create({
+    data: { workspaceId, email, displayName: label, passwordHash: await hashPassword(password) },
+    select: { id: true },
+  });
+  return { userId: user.id, workspaceId, email, password };
+}

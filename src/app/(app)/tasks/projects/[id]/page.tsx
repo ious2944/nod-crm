@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 
-import { ProjectView, TABS, type TabKey } from "@/components/work/project-view";
+import { ProjectView } from "@/components/work/project-view";
+import { PROJECT_TAB_KEYS, type ProjectTabKey } from "@/lib/tasks/constants";
 import { TaskAccessError } from "@/lib/tasks/access";
 import { getPageActor } from "@/lib/tasks/page-actor";
 import { getProjectBundle, getSavedViews } from "@/lib/tasks/work-queries";
@@ -25,6 +26,6 @@ export default async function ProjectPage({ params, searchParams }: PageProps<"/
     throw error;
   }
   const views = await getSavedViews(actor, `project:${id}`);
-  const tab = (TABS.map((t) => t.key) as string[]).includes(String(view)) ? (view as TabKey) : "list";
+  const tab = (PROJECT_TAB_KEYS as readonly string[]).includes(String(view)) ? (view as ProjectTabKey) : "list";
   return <ProjectView initial={bundle} initialTab={tab} savedViews={views} />;
 }

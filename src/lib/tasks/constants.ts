@@ -249,3 +249,7 @@ export const TASK_LIMITS_V1 = {
   formName: 120,
   viewName: 80,
 } as const;
+
+/** Onglets d'un projet (clés d'URL `?view=`). Partagé serveur / client. */
+export const PROJECT_TAB_KEYS = ["overview", "list", "board", "calendar", "timeline", "dashboard"] as const;
+export type ProjectTabKey = (typeof PROJECT_TAB_KEYS)[number];

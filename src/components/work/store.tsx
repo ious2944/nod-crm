@@ -354,7 +354,7 @@ export function WorkProvider({
     if (id) url.searchParams.set("task", id);
     else url.searchParams.delete("task");
     const method = id && !new URL(window.location.href).searchParams.get("task") ? "pushState" : "replaceState";
-    window.history[method](window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    window.history[method](null, "", `${url.pathname}${url.search}${url.hash}`);
   }, []);
 
   const mutateTask = useCallback<WorkApi["mutateTask"]>(

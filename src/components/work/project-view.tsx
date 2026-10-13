@@ -136,7 +136,7 @@ export function ProjectView({ initial, initialTab, savedViews: initialViews }: {
     setTab(next);
     const url = new URL(window.location.href);
     url.searchParams.set("view", next);
-    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}`);
+    window.history.replaceState(null, "", `${url.pathname}${url.search}`);
   };
 
   const projectTasks = useMemo(
@@ -255,7 +255,7 @@ export function ProjectView({ initial, initialTab, savedViews: initialViews }: {
           <button type="button" disabled={!project.canManage} onClick={() => setModal("edit")} aria-label="Modifier la couleur et l'icône" className="rounded-md">
             <ProjectIcon icon={project.icon} color={project.color} size={32} />
           </button>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-[55%] flex-1 sm:min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <h1 className="truncate text-[18px] font-semibold text-ink">{project.name}</h1>
               {project.visibility === "PRIVATE" && <Lock aria-label="Projet privé" className="h-3.5 w-3.5 text-muted" />}
@@ -277,12 +277,14 @@ export function ProjectView({ initial, initialTab, savedViews: initialViews }: {
           <button type="button" onClick={() => setModal("members")} className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-surface-muted" aria-label="Membres du projet">
             <AvatarStack users={members} max={5} size={26} />
           </button>
-          <button type="button" onClick={() => setModal("members")} className={`${BTN_SECONDARY} hidden sm:inline-flex`}>
-            <UserPlus className="h-3.5 w-3.5" /> Partager
-          </button>
-          <button type="button" onClick={() => setModal("customize")} className={`${BTN_GHOST} hidden sm:inline-flex`}>
-            <Settings className="h-3.5 w-3.5" /> Personnaliser
-          </button>
+          <span className="hidden gap-2 sm:flex">
+            <button type="button" onClick={() => setModal("members")} className={BTN_SECONDARY}>
+              <UserPlus className="h-3.5 w-3.5" /> Partager
+            </button>
+            <button type="button" onClick={() => setModal("customize")} className={BTN_GHOST}>
+              <Settings className="h-3.5 w-3.5" /> Personnaliser
+            </button>
+          </span>
         </div>
         <nav role="tablist" aria-label="Vues du projet" className="mt-1 flex gap-0.5 overflow-x-auto px-2 sm:px-3">
           {TABS.map((t) => (
