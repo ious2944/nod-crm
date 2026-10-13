@@ -7,7 +7,7 @@ import { EditOpportunityDialog } from "@/components/commerce/edit-opportunity-di
 import { ChangeStatusForm } from "@/components/commerce/change-status-form";
 import { StatusBadge } from "@/components/commerce/status-badge";
 import { NewFollowUpDialog } from "@/components/follow-ups/new-follow-up-dialog";
-import { NewTaskDialog } from "@/components/tasks/new-task-dialog";
+import { LinkedWork } from "@/components/work/linked-work";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { dayKey } from "@/lib/date";
 import { getOpportunityDetail } from "@/lib/commerce/queries";
@@ -150,49 +150,10 @@ export default async function OpportunityPage({ params }: PageProps<"/commerce/[
         </section>
       )}
 
-      {/* Tâches liées */}
-      <section aria-label="Tâches liées" className="mt-8">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold tracking-tight">
-            Tâches{" "}
-            {opportunity.openTasks.length > 0 && (
-              <span className="text-base font-normal text-muted">
-                ({opportunity.openTasks.length})
-              </span>
-            )}
-          </h2>
-          <NewTaskDialog
-            defaultDueDate={today}
-            defaultOpportunityId={opportunity.id}
-            defaultOpportunityName={opportunity.name}
-            triggerLabel="+ Tâche"
-            triggerClassName="rounded-lg px-3 py-1.5 text-sm font-medium text-muted hover:bg-surface-muted hover:text-ink"
-          />
-        </div>
-
-        {opportunity.openTasks.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">
-            Aucune tâche ouverte liée à cette affaire.
-          </p>
-        ) : (
-          <ul className="mt-3 space-y-2">
-            {opportunity.openTasks.map((task) => (
-              <li
-                key={task.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-subtle bg-surface px-4 py-3"
-              >
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-ink">{task.title}</p>
-                  {task.contactName && (
-                    <p className="text-sm text-muted">{task.contactName}</p>
-                  )}
-                </div>
-                <p className="shrink-0 text-xs text-muted">{task.dueAt ? formatFrenchDate(task.dueAt) : "Sans échéance"}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {/* Tâches liées : mêmes tâches que dans les projets, création rapide rattachée. */}
+      <div className="mt-8">
+        <LinkedWork kind="opportunity" id={opportunity.id} title="Tâches liées" />
+      </div>
 
       {/* Suivis liés */}
       <section aria-label="Suivis liés" className="mt-8">

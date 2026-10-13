@@ -5,6 +5,7 @@ import { connection } from "next/server";
 import { ContactActions } from "@/components/contacts/contact-actions";
 import { ContactAvatar } from "@/components/contacts/contact-avatar";
 import { ContactFollowUps } from "@/components/contacts/contact-follow-ups";
+import { LinkedWork } from "@/components/work/linked-work";
 import { NewFollowUpDialog } from "@/components/follow-ups/new-follow-up-dialog";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { getContactDetail } from "@/lib/contacts/queries";
@@ -164,6 +165,11 @@ export default async function ContactPage({ params }: PageProps<"/contacts/[id]"
 
         <ContactFollowUps followUps={contact.followUps} />
       </section>
+
+      {/* Tâches et projets rattachés : les mêmes tâches que dans les projets. */}
+      <div className="mt-8">
+        <LinkedWork kind="contact" id={contact.id} />
+      </div>
 
       <p className="mt-8 text-xs text-muted">
         Créé le{" "}
