@@ -39,13 +39,14 @@ export type TaskIntent = "complete" | "reopen" | "snooze";
 export type TaskBucket = "overdue" | "today" | "upcoming" | "completed";
 
 export interface TaskTimingInput {
-  dueAt: Date;
+  /** `null` : tâche sans échéance (V1.0). */
+  dueAt: Date | null;
   completedAt: Date | null;
 }
 
 export interface TaskTiming {
-  /** > 0 : en retard. 0 : dû aujourd'hui. < 0 : encore du temps. */
-  overdueDays: number;
+  /** > 0 : en retard. 0 : dû aujourd'hui. < 0 : encore du temps. `null` : sans échéance. */
+  overdueDays: number | null;
   bucket: TaskBucket;
   level: UrgencyLevel;
   /** Étiquette courte : `J+4`, `Aujourd'hui`, `Demain`, `Dans 5 j`. */
@@ -64,7 +65,7 @@ export function computeTaskTiming(
 ): TaskTiming {
   // Comparaison en jours calendaires, pas en heures : « dû aujourd'hui » reste
   // vrai à 23 h 59 comme à 8 h, quel que soit le fuseau du serveur.
-  const overdueDays = daysBetween(input.dueAt, now, timeZone);
+  const overdueDays = input.dueAt ? daysBetween(input.dueAt, now, timeZone) : null;
 
   if (input.completedAt) {
     return {
@@ -72,6 +73,17 @@ export function computeTaskTiming(
       bucket: "completed",
       level: "done",
       dueLabel: "Terminée",
+      isActionable: false,
+    };
+  }
+
+  if (overdueDays === null) {
+    // Sans échéance : jamais en retard, jamais dans le cockpit.
+    return {
+      overdueDays,
+      bucket: "upcoming",
+      level: "calm",
+      dueLabel: "Sans échéance",
       isActionable: false,
     };
   }
@@ -94,10 +106,13 @@ export function taskBucket(overdueDays: number): Exclude<TaskBucket, "completed"
 
 /** Ordre d'affichage : la plus en retard d'abord, la plus lointaine ensuite. */
 export function compareTasks(
-  a: { dueAt: Date; createdAt: Date },
-  b: { dueAt: Date; createdAt: Date },
+  a: { dueAt: Date | null; createdAt: Date },
+  b: { dueAt: Date | null; createdAt: Date },
 ): number {
-  return a.dueAt.getTime() - b.dueAt.getTime() || a.createdAt.getTime() - b.createdAt.getTime();
+  // Les tâches sans échéance passent après toutes les autres.
+  const da = a.dueAt?.getTime() ?? Number.POSITIVE_INFINITY;
+  const db = b.dueAt?.getTime() ?? Number.POSITIVE_INFINITY;
+  return (da === db ? 0 : da < db ? -1 : 1) || a.createdAt.getTime() - b.createdAt.getTime();
 }
 
 /** Titre du bandeau de la page Tâches. Compte les tâches à faire, rien d'autre. */

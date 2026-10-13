@@ -187,7 +187,7 @@ export default async function OpportunityPage({ params }: PageProps<"/commerce/[
                     <p className="text-sm text-muted">{task.contactName}</p>
                   )}
                 </div>
-                <p className="shrink-0 text-xs text-muted">{formatFrenchDate(task.dueAt)}</p>
+                <p className="shrink-0 text-xs text-muted">{task.dueAt ? formatFrenchDate(task.dueAt) : "Sans échéance"}</p>
               </li>
             ))}
           </ul>

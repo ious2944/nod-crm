@@ -74,7 +74,7 @@ export interface OrganizationTask {
   title: string;
   contactId: string | null;
   contactName: string | null;
-  dueAt: string;
+  dueAt: string | null;
   ageLabel: string;
   ageTier: "calm" | "soon" | "today" | "late" | "critical";
 }

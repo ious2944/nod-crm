@@ -126,7 +126,7 @@ function DialogBody({
               name="dueDate"
               type="date"
               required
-              defaultValue={item.dueDate}
+              defaultValue={item.dueDate ?? undefined}
               className={`mt-1 ${FIELD} sm:max-w-56`}
             />
             <FieldError message={errors.dueDate} />

@@ -308,7 +308,7 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
       title: task.title,
       contactId: task.contactId,
       contactName: task.contact ? contactFullName(task.contact) : null,
-      dueAt: dayKey(task.dueAt, APP_TIME_ZONE),
+      dueAt: task.dueAt ? dayKey(task.dueAt, APP_TIME_ZONE) : null,
       ageLabel: timing.dueLabel,
       ageTier: timing.level.replace("done", "calm") as
         | "calm"

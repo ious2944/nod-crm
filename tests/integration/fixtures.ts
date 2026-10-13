@@ -100,6 +100,8 @@ export async function createTaskRecord(
       workspaceId,
       title: "Tâche de test",
       dueAt: new Date(Date.now() + dueInDays * 86_400_000),
+      // V1.0 : statut et date d'achèvement sont toujours tenus ensemble.
+      status: rest.completedAt ? "DONE" : "TODO",
       ...rest,
     },
     select: { id: true },

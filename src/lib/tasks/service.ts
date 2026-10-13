@@ -1,0 +1,1707 @@
+import "server-only";
+
+import { randomUUID } from "node:crypto";
+
+import { Prisma } from "@/generated/prisma/client";
+import { recordAudit } from "@/lib/audit/log";
+import { AUDIT_ENTITY_TYPES } from "@/lib/audit/types";
+import { APP_TIME_ZONE } from "@/lib/config";
+import { dayKey, startOfDay } from "@/lib/date";
+import { prisma } from "@/lib/prisma";
+import { objectStore } from "@/lib/storage";
+
+import {
+  canEditProjectContent,
+  evaluateTaskAccess,
+  projectAccessSelect,
+  taskAccessSelect,
+  TaskAccessError,
+  TaskValidationError,
+  TaskVersionConflictError,
+  visibleTaskWhere,
+  type Actor,
+} from "./access";
+import type { TaskEvent } from "./automation-model";
+import {
+  APPROVAL_LABELS,
+  PRIORITY_LABELS,
+  REACTION_EMOJIS,
+  STATUS_LABELS,
+} from "./constants";
+import { evenPositions, positionBetween, POSITION_STEP, wouldCreateCycle } from "./graph";
+import {
+  commentBodySchema,
+  createTaskSchema,
+  customValueSchema,
+  moveTaskSchema,
+  taskPatchSchema,
+  timeEntrySchema,
+  type CreateTaskInputV1,
+} from "./inputs";
+import { notify } from "./notify";
+import { publishChange } from "./realtime";
+import { describeRecurrence, nextOccurrence } from "./recurrence";
+import { extractMentions, toPlainText } from "./rich-text";
+import { loadTaskItems, parseRecurrence, toKey } from "./serialize";
+import type {
+  CustomFieldValue,
+  RecurrenceRule,
+  TaskItem,
+  TaskPatch,
+  TaskPatchField,
+} from "./types";
+
+/**
+ * Mutations des tâches (V1.0).
+ *
+ * Chaque fonction :
+ * 1. valide ses entrées (`inputs.ts`) ;
+ * 2. relit la tâche **bornée à l'espace de la session** et évalue les droits
+ *    (`evaluateTaskAccess`) — refus neutre si absente ou interdite ;
+ * 3. écrit en transaction, avec l'historique (`task_activities`) ;
+ * 4. publie l'événement temps réel, notifie, et déclenche les règles.
+ *
+ * Modifications concurrentes : chaque écriture fait un « compare-and-set » sur
+ * `version`. En plus, le client envoie pour chaque champ modifié la valeur
+ * qu'il avait sous les yeux (`base`). Si quelqu'un a changé **ce champ**
+ * entre-temps, l'écriture est refusée avec l'état courant (`CONFLICT`) au lieu
+ * d'écraser silencieusement ; si seul un autre champ a changé, la
+ * modification passe.
+ */
+
+export interface MutationContext {
+  actor: Actor;
+  /** Mutation déclenchée par une règle : contrôles de droits du projet de la règle. */
+  automation?: { ruleId: string; depth: number; chain: string[] };
+  /**
+   * L'appelant a déjà vérifié un droit plus étroit (envoi d'un formulaire
+   * interne : il suffit de pouvoir lire le projet). Réservé au code serveur.
+   */
+  trusted?: boolean;
+}
+
+export function userContext(actor: Actor): MutationContext {
+  return { actor };
+}
+
+const actorIdOf = (ctx: MutationContext) => (ctx.automation ? null : ctx.actor.id);
+
+// ─── Événements (règles d'automatisation) ────────────────────────────────────
+
+type EventSink = (ctx: MutationContext, events: TaskEvent[]) => Promise<void>;
+let eventSink: EventSink | null = null;
+
+/** Branché par `automations.ts` au chargement : évite une dépendance circulaire. */
+export function registerEventSink(sink: EventSink): void {
+  eventSink = sink;
+}
+
+function makeEvent(
+  ctx: MutationContext,
+  event: Omit<TaskEvent, "id" | "depth" | "chain">,
+  id: string = randomUUID(),
+): TaskEvent {
+  return {
+    ...event,
+    id,
+    depth: ctx.automation ? ctx.automation.depth + 1 : 0,
+    chain: ctx.automation ? [...ctx.automation.chain, ctx.automation.ruleId] : [],
+  };
+}
+
+async function dispatch(ctx: MutationContext, events: TaskEvent[]): Promise<void> {
+  if (!eventSink || events.length === 0) return;
+  try {
+    await eventSink(ctx, events);
+  } catch (error) {
+    console.error("[automations] échec du moteur", {
+      errorType: error instanceof Error ? error.constructor.name : typeof error,
+    });
+  }
+}
+
+// ─── Lecture avec contrôle ────────────────────────────────────────────────────
+
+async function loadAccess(ctx: MutationContext, taskId: string) {
+  const task = await prisma.task.findFirst({
+    where: { id: taskId, workspaceId: ctx.actor.workspaceId },
+    select: taskAccessSelect(ctx.actor),
+  });
+  if (!task) throw new TaskAccessError("NOT_FOUND");
+  const permissions = ctx.automation || ctx.trusted
+    ? { canRead: true, canEdit: true, canComment: true }
+    : evaluateTaskAccess(task, ctx.actor);
+  if (!permissions.canRead) throw new TaskAccessError("NOT_FOUND");
+  return { task, permissions };
+}
+
+export async function requireTaskRead(ctx: MutationContext, taskId: string) {
+  return loadAccess(ctx, taskId);
+}
+
+export async function requireTaskEdit(ctx: MutationContext, taskId: string) {
+  const result = await loadAccess(ctx, taskId);
+  if (!result.permissions.canEdit) throw new TaskAccessError("FORBIDDEN");
+  return result;
+}
+
+async function requireProjectContentEdit(ctx: MutationContext, projectId: string) {
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, workspaceId: ctx.actor.workspaceId },
+    select: projectAccessSelect(ctx.actor),
+  });
+  if (!project) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+  if (!ctx.automation && !ctx.trusted) {
+    const readable = project.visibility === "WORKSPACE" || project.members.length > 0;
+    if (!readable) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+    if (!canEditProjectContent(project, ctx.actor)) {
+      throw new TaskAccessError(
+        "FORBIDDEN",
+        project.archivedAt ? "Ce projet est archivé." : "Vous ne pouvez pas modifier ce projet.",
+      );
+    }
+  }
+  return project;
+}
+
+export async function getTaskItem(ctx: MutationContext, taskId: string): Promise<TaskItem> {
+  const [item] = await loadTaskItems(ctx.actor, { id: taskId });
+  if (!item) throw new TaskAccessError("NOT_FOUND");
+  return item;
+}
+
+// ─── Références CRM et utilisateurs ──────────────────────────────────────────
+
+async function assertUserInWorkspace(actor: Actor, userId: string | null | undefined) {
+  if (!userId) return;
+  const user = await prisma.user.findFirst({
+    where: { id: userId, workspaceId: actor.workspaceId, isActive: true },
+    select: { id: true },
+  });
+  if (!user) throw new TaskValidationError("Cet utilisateur n'existe pas dans votre espace.");
+}
+
+export async function assertCrmLinks(
+  actor: Actor,
+  links: {
+    contactId?: string | null;
+    organizationId?: string | null;
+    opportunityId?: string | null;
+    followUpId?: string | null;
+  },
+) {
+  const { workspaceId } = actor;
+  const checks: Promise<void>[] = [];
+  if (links.contactId) {
+    checks.push(
+      prisma.contact.findFirst({ where: { id: links.contactId, workspaceId }, select: { id: true } }).then((r) => {
+        if (!r) throw new TaskValidationError("Contact introuvable.");
+      }),
+    );
+  }
+  if (links.organizationId) {
+    checks.push(
+      prisma.organization
+        .findFirst({ where: { id: links.organizationId, workspaceId }, select: { id: true } })
+        .then((r) => {
+          if (!r) throw new TaskValidationError("Organisation introuvable.");
+        }),
+    );
+  }
+  if (links.opportunityId) {
+    checks.push(
+      prisma.opportunity
+        .findFirst({ where: { id: links.opportunityId, workspaceId }, select: { id: true } })
+        .then((r) => {
+          if (!r) throw new TaskValidationError("Opportunité introuvable.");
+        }),
+    );
+  }
+  if (links.followUpId) {
+    checks.push(
+      prisma.followUp.findFirst({ where: { id: links.followUpId, workspaceId }, select: { id: true } }).then((r) => {
+        if (!r) throw new TaskValidationError("Suivi introuvable.");
+      }),
+    );
+  }
+  await Promise.all(checks);
+}
+
+async function userLabel(userId: string | null): Promise<string | null> {
+  if (!userId) return null;
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { displayName: true, email: true } });
+  return user ? user.displayName?.trim() || user.email : null;
+}
+
+const dueInstant = (key: string | null | undefined) => (key ? startOfDay(key, APP_TIME_ZONE) : null);
+
+// ─── Historique ──────────────────────────────────────────────────────────────
+
+interface ActivityInput {
+  taskId: string;
+  kind: string;
+  field?: string | null;
+  oldValue?: string | null;
+  newValue?: string | null;
+}
+
+function activityRows(ctx: MutationContext, rows: ActivityInput[]) {
+  return rows.map((row) => ({
+    workspaceId: ctx.actor.workspaceId,
+    taskId: row.taskId,
+    actorId: actorIdOf(ctx),
+    automationRuleId: ctx.automation?.ruleId ?? null,
+    kind: row.kind,
+    field: row.field ?? null,
+    oldValue: row.oldValue?.slice(0, 500) ?? null,
+    newValue: row.newValue?.slice(0, 500) ?? null,
+  }));
+}
+
+async function logActivity(ctx: MutationContext, rows: ActivityInput[], tx: Prisma.TransactionClient = prisma) {
+  if (rows.length === 0) return;
+  await tx.taskActivity.createMany({ data: activityRows(ctx, rows) });
+}
+
+async function audit(ctx: MutationContext, action: "CREATE" | "UPDATE" | "DELETE", entityId: string) {
+  await recordAudit({
+    workspaceId: ctx.actor.workspaceId,
+    userId: actorIdOf(ctx),
+    action,
+    entityType: AUDIT_ENTITY_TYPES.TASK,
+    entityId,
+  });
+}
+
+async function projectIdsOf(taskId: string): Promise<string[]> {
+  const rows = await prisma.taskProject.findMany({ where: { taskId }, select: { projectId: true } });
+  return rows.map((r) => r.projectId);
+}
+
+async function broadcast(ctx: MutationContext, taskIds: string[], kind = "task") {
+  const projects = await prisma.taskProject.findMany({
+    where: { taskId: { in: taskIds } },
+    select: { projectId: true },
+    distinct: ["projectId"],
+  });
+  await publishChange({
+    w: ctx.actor.workspaceId,
+    a: actorIdOf(ctx),
+    t: taskIds,
+    p: projects.map((p) => p.projectId),
+    k: kind,
+  });
+}
+
+// ─── Création ────────────────────────────────────────────────────────────────
+
+async function nextMembershipPosition(projectId: string, sectionId: string | null, placement: "top" | "bottom") {
+  const agg = await prisma.taskProject.aggregate({
+    where: { projectId, sectionId },
+    _max: { position: true },
+    _min: { position: true },
+  });
+  if (placement === "top") return (agg._min.position ?? POSITION_STEP * 2) - POSITION_STEP;
+  return (agg._max.position ?? 0) + POSITION_STEP;
+}
+
+async function assertSectionInProject(projectId: string, sectionId: string | null | undefined) {
+  if (!sectionId) return;
+  const section = await prisma.projectSection.findFirst({ where: { id: sectionId, projectId }, select: { id: true } });
+  if (!section) throw new TaskValidationError("Section introuvable.");
+}
+
+export async function createTask(ctx: MutationContext, raw: CreateTaskInputV1): Promise<TaskItem> {
+  const parsed = createTaskSchema.safeParse(raw);
+  if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Tâche invalide.");
+  const input = parsed.data;
+  const { actor } = ctx;
+
+  // Modèle de tâche : il pré-remplit, l'entrée explicite l'emporte.
+  let template: {
+    title: string;
+    description: string | null;
+    priority: TaskItem["priority"];
+    estimatedMinutes: number | null;
+    isApproval: boolean;
+    subtasks: unknown;
+    tagIds: string[];
+  } | null = null;
+  if (input.templateId) {
+    template = await prisma.taskTemplate.findFirst({
+      where: { id: input.templateId, workspaceId: actor.workspaceId },
+      select: {
+        title: true,
+        description: true,
+        priority: true,
+        estimatedMinutes: true,
+        isApproval: true,
+        subtasks: true,
+        tagIds: true,
+      },
+    });
+    if (!template) throw new TaskValidationError("Modèle introuvable.");
+  }
+
+  let parentId: string | null = null;
+  if (input.parentId) {
+    const { task: parent } = await requireTaskEdit(ctx, input.parentId);
+    if (parent.parentId) {
+      throw new TaskValidationError("Une sous-tâche ne peut pas avoir elle-même de sous-tâches.");
+    }
+    parentId = input.parentId;
+  }
+
+  if (input.projectId) {
+    if (parentId) throw new TaskValidationError("Une sous-tâche suit les projets de sa tâche parente.");
+    await requireProjectContentEdit(ctx, input.projectId);
+    await assertSectionInProject(input.projectId, input.sectionId);
+  }
+
+  // Responsable par défaut : soi-même pour une tâche personnelle (ni projet ni
+  // parente), personne sinon — comme dans Asana.
+  const assigneeId =
+    input.assigneeId !== undefined ? input.assigneeId : !input.projectId && !parentId ? actor.id : null;
+  await assertUserInWorkspace(actor, assigneeId);
+  await assertCrmLinks(actor, input);
+
+  if (input.startDate && input.dueDate && input.startDate > input.dueDate) {
+    throw new TaskValidationError("La date de début doit précéder l'échéance.");
+  }
+
+  const tagIds = [...new Set([...(input.tagIds ?? []), ...(template?.tagIds ?? [])])];
+  if (tagIds.length) {
+    const count = await prisma.tag.count({ where: { id: { in: tagIds }, workspaceId: actor.workspaceId } });
+    if (count !== tagIds.length) throw new TaskValidationError("Tag introuvable.");
+  }
+
+  const status = input.status ?? "TODO";
+  const isApproval = input.isApproval ?? template?.isApproval ?? false;
+
+  let position = 0;
+  if (input.projectId) {
+    const sectionId = input.sectionId ?? null;
+    if (input.afterTaskId) {
+      const anchor = await prisma.taskProject.findFirst({
+        where: { taskId: input.afterTaskId, projectId: input.projectId },
+        select: { position: true, sectionId: true },
+      });
+      if (anchor) {
+        const next = await prisma.taskProject.findFirst({
+          where: { projectId: input.projectId, sectionId: anchor.sectionId, position: { gt: anchor.position } },
+          orderBy: { position: "asc" },
+          select: { position: true },
+        });
+        position = positionBetween(anchor.position, next?.position ?? null) ?? anchor.position + 0.0001;
+      } else {
+        position = await nextMembershipPosition(input.projectId, sectionId, "bottom");
+      }
+    } else {
+      position = await nextMembershipPosition(input.projectId, sectionId, input.placement ?? "bottom");
+    }
+  }
+
+  let subtaskPosition = 0;
+  if (parentId) {
+    const agg = await prisma.task.aggregate({ where: { parentId }, _max: { subtaskPosition: true } });
+    subtaskPosition = (agg._max.subtaskPosition ?? 0) + POSITION_STEP;
+  }
+
+  const description = input.description ?? template?.description ?? null;
+
+  const created = await prisma.$transaction(async (tx) => {
+    const task = await tx.task.create({
+      data: {
+        workspaceId: actor.workspaceId,
+        title: input.title || template?.title || "Nouvelle tâche",
+        notes: description,
+        status,
+        completedAt: status === "DONE" ? new Date() : null,
+        priority: input.priority ?? template?.priority ?? "NORMAL",
+        assigneeId,
+        createdById: actorIdOf(ctx),
+        parentId,
+        subtaskPosition,
+        dueAt: dueInstant(input.dueDate),
+        dueTime: input.dueDate ? (input.dueTime ?? null) : null,
+        startAt: dueInstant(input.startDate),
+        isMilestone: input.isMilestone ?? false,
+        isApproval,
+        approvalStatus: isApproval ? "PENDING" : null,
+        estimatedMinutes: input.estimatedMinutes ?? template?.estimatedMinutes ?? null,
+        contactId: input.contactId ?? null,
+        organizationId: input.organizationId ?? null,
+        opportunityId: input.opportunityId ?? null,
+        followUpId: input.followUpId ?? null,
+        tags: tagIds.length ? { create: tagIds.map((tagId) => ({ tagId })) } : undefined,
+        projects: input.projectId
+          ? {
+              create: {
+                projectId: input.projectId,
+                sectionId: input.sectionId ?? null,
+                workspaceId: actor.workspaceId,
+                position,
+              },
+            }
+          : undefined,
+      },
+      select: { id: true },
+    });
+
+    // Le créateur suit la tâche ; le responsable aussi.
+    const followers = new Set([actorIdOf(ctx), assigneeId].filter((v): v is string => Boolean(v)));
+    if (followers.size) {
+      await tx.taskFollower.createMany({
+        data: [...followers].map((userId) => ({ taskId: task.id, userId, kind: "FOLLOWER" as const })),
+        skipDuplicates: true,
+      });
+    }
+
+    const subtaskTitles = Array.isArray(template?.subtasks)
+      ? (template!.subtasks as unknown[]).filter((v): v is string => typeof v === "string").slice(0, 50)
+      : [];
+    if (subtaskTitles.length && !parentId) {
+      await tx.task.createMany({
+        data: subtaskTitles.map((title, index) => ({
+          workspaceId: actor.workspaceId,
+          title,
+          parentId: task.id,
+          subtaskPosition: (index + 1) * POSITION_STEP,
+          createdById: actorIdOf(ctx),
+        })),
+      });
+    }
+
+    await logActivity(ctx, [{ taskId: task.id, kind: "created", newValue: input.title }], tx);
+    if (parentId) {
+      await logActivity(ctx, [{ taskId: parentId, kind: "subtask_added", newValue: input.title }], tx);
+    }
+    return task;
+  });
+
+  if (input.custom) {
+    for (const [fieldId, value] of Object.entries(input.custom)) {
+      await writeCustomValue(ctx, created.id, fieldId, value, { log: false });
+    }
+  }
+
+  await audit(ctx, "CREATE", created.id);
+
+  if (assigneeId && assigneeId !== actorIdOf(ctx)) {
+    await notify({
+      workspaceId: actor.workspaceId,
+      recipients: [assigneeId],
+      actorId: actorIdOf(ctx),
+      type: "ASSIGNED",
+      title: `Nouvelle tâche affectée : ${input.title}`,
+      taskId: created.id,
+    });
+  }
+
+  await broadcast(ctx, parentId ? [created.id, parentId] : [created.id], "task_created");
+  await dispatch(ctx, [
+    makeEvent(ctx, { type: "TASK_CREATED", taskId: created.id, projectId: input.projectId ?? null }),
+  ]);
+
+  return getTaskItem(ctx, created.id);
+}
+
+// ─── Modification de champs ───────────────────────────────────────────────────
+
+const PATCH_SELECT = {
+  id: true,
+  title: true,
+  notes: true,
+  assigneeId: true,
+  dueAt: true,
+  dueTime: true,
+  startAt: true,
+  status: true,
+  priority: true,
+  isMilestone: true,
+  isApproval: true,
+  approvalStatus: true,
+  estimatedMinutes: true,
+  recurrence: true,
+  contactId: true,
+  organizationId: true,
+  opportunityId: true,
+  completedAt: true,
+  parentId: true,
+  version: true,
+  createdById: true,
+} satisfies Prisma.TaskSelect;
+
+type PatchRecord = Prisma.TaskGetPayload<{ select: typeof PATCH_SELECT }>;
+
+function currentValue(record: PatchRecord, field: TaskPatchField): unknown {
+  switch (field) {
+    case "description":
+      return record.notes;
+    case "dueDate":
+      return toKey(record.dueAt);
+    case "startDate":
+      return toKey(record.startAt);
+    case "recurrence":
+      return parseRecurrence(record.recurrence);
+    default:
+      return record[field as keyof PatchRecord] ?? null;
+  }
+}
+
+function same(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if ((a === null || a === undefined) && (b === null || b === undefined)) return true;
+  if (typeof a === "object" || typeof b === "object") return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  return false;
+}
+
+function fieldLabel(field: TaskPatchField): string {
+  const labels: Record<TaskPatchField, string> = {
+    title: "Titre",
+    description: "Description",
+    assigneeId: "Responsable",
+    dueDate: "Échéance",
+    dueTime: "Heure",
+    startDate: "Date de début",
+    status: "Statut",
+    priority: "Priorité",
+    isMilestone: "Jalon",
+    isApproval: "Validation",
+    approvalStatus: "Validation",
+    estimatedMinutes: "Temps estimé",
+    recurrence: "Récurrence",
+    contactId: "Contact",
+    organizationId: "Organisation",
+    opportunityId: "Opportunité",
+  };
+  return labels[field];
+}
+
+async function displayValue(field: TaskPatchField, value: unknown): Promise<string | null> {
+  if (value === null || value === undefined || value === "") return null;
+  switch (field) {
+    case "assigneeId":
+      return userLabel(value as string);
+    case "status":
+      return STATUS_LABELS[value as TaskItem["status"]];
+    case "priority":
+      return PRIORITY_LABELS[value as TaskItem["priority"]];
+    case "approvalStatus":
+      return APPROVAL_LABELS[value as keyof typeof APPROVAL_LABELS];
+    case "isMilestone":
+    case "isApproval":
+      return value ? "Oui" : "Non";
+    case "recurrence":
+      return describeRecurrence(value as RecurrenceRule);
+    case "description":
+      return toPlainText(value as string).slice(0, 200);
+    case "estimatedMinutes":
+      return `${value} min`;
+    case "contactId": {
+      const c = await prisma.contact.findUnique({ where: { id: value as string }, select: { firstName: true, lastName: true } });
+      return c ? `${c.firstName} ${c.lastName}`.trim() : null;
+    }
+    case "organizationId": {
+      const o = await prisma.organization.findUnique({ where: { id: value as string }, select: { name: true } });
+      return o?.name ?? null;
+    }
+    case "opportunityId": {
+      const o = await prisma.opportunity.findUnique({ where: { id: value as string }, select: { name: true } });
+      return o?.name ?? null;
+    }
+    default:
+      return String(value);
+  }
+}
+
+export interface UpdateOptions {
+  /** Valeurs que le client avait sous les yeux, pour la détection de conflit. */
+  base?: Partial<Record<TaskPatchField, unknown>>;
+}
+
+export async function updateTaskFields(
+  ctx: MutationContext,
+  taskId: string,
+  rawPatch: TaskPatch,
+  options: UpdateOptions = {},
+): Promise<TaskItem> {
+  const parsed = taskPatchSchema.safeParse(rawPatch);
+  if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Modification invalide.");
+  const patch = parsed.data as TaskPatch;
+
+  await requireTaskEdit(ctx, taskId);
+  const { actor } = ctx;
+
+  const record = await prisma.task.findFirst({
+    where: { id: taskId, workspaceId: actor.workspaceId },
+    select: PATCH_SELECT,
+  });
+  if (!record) throw new TaskAccessError("NOT_FOUND");
+
+  // Conflit : un champ que l'utilisateur modifie a changé depuis qu'il l'a lu.
+  if (options.base) {
+    for (const [field, baseValue] of Object.entries(options.base) as [TaskPatchField, unknown][]) {
+      if (!(field in patch)) continue;
+      if (!same(currentValue(record, field), baseValue)) {
+        throw new TaskVersionConflictError(taskId);
+      }
+    }
+  }
+
+  const changes = (Object.keys(patch) as TaskPatchField[]).filter(
+    (field) => !same(currentValue(record, field), patch[field]),
+  );
+  if (changes.length === 0) return getTaskItem(ctx, taskId);
+
+  if (changes.includes("assigneeId")) await assertUserInWorkspace(actor, patch.assigneeId);
+  await assertCrmLinks(actor, {
+    contactId: changes.includes("contactId") ? patch.contactId : null,
+    organizationId: changes.includes("organizationId") ? patch.organizationId : null,
+    opportunityId: changes.includes("opportunityId") ? patch.opportunityId : null,
+  });
+
+  const nextStart = "startDate" in patch ? patch.startDate : toKey(record.startAt);
+  const nextDue = "dueDate" in patch ? patch.dueDate : toKey(record.dueAt);
+  if (nextStart && nextDue && nextStart > nextDue) {
+    throw new TaskValidationError("La date de début doit précéder l'échéance.");
+  }
+
+  const data: Prisma.TaskUpdateManyMutationInput = { version: { increment: 1 } };
+  for (const field of changes) {
+    const value = patch[field];
+    switch (field) {
+      case "description":
+        data.notes = value as string | null;
+        break;
+      case "dueDate":
+        data.dueAt = dueInstant(value as string | null);
+        if (!value) data.dueTime = null;
+        break;
+      case "startDate":
+        data.startAt = dueInstant(value as string | null);
+        break;
+      case "recurrence":
+        data.recurrence = value ? (value as Prisma.InputJsonValue) : Prisma.DbNull;
+        break;
+      case "status":
+        data.status = value as TaskItem["status"];
+        data.completedAt = value === "DONE" ? new Date() : null;
+        break;
+      case "isApproval":
+        data.isApproval = value as boolean;
+        data.approvalStatus = value ? (record.approvalStatus ?? "PENDING") : null;
+        break;
+      case "approvalStatus":
+        if (!(patch.isApproval ?? record.isApproval) && value) {
+          throw new TaskValidationError("Cette tâche n'est pas une demande de validation.");
+        }
+        data.approvalStatus = value as TaskItem["approvalStatus"];
+        break;
+      default:
+        (data as Record<string, unknown>)[field] = value;
+    }
+  }
+  if ("dueTime" in patch && !nextDue) data.dueTime = null;
+
+  const activity: ActivityInput[] = [];
+  for (const field of changes) {
+    if (field === "dueTime" && !nextDue) continue;
+    activity.push({
+      taskId,
+      kind: field === "status" && patch.status === "DONE" ? "completed" : field === "status" && record.status === "DONE" ? "reopened" : "field",
+      field: fieldLabel(field),
+      oldValue: await displayValue(field, currentValue(record, field)),
+      newValue: await displayValue(field, patch[field]),
+    });
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.task.updateMany({
+      where: { id: taskId, workspaceId: actor.workspaceId, version: record.version },
+      data,
+    });
+    if (count !== 1) throw new TaskVersionConflictError(taskId);
+    await logActivity(ctx, activity, tx);
+    if (changes.includes("assigneeId") && patch.assigneeId) {
+      await tx.taskFollower.createMany({
+        data: [{ taskId, userId: patch.assigneeId, kind: "FOLLOWER" }],
+        skipDuplicates: true,
+      });
+    }
+  });
+
+  await audit(ctx, "UPDATE", taskId);
+
+  const followers = await prisma.taskFollower.findMany({ where: { taskId }, select: { userId: true } });
+  const followerIds = followers.map((f) => f.userId);
+  const title = patch.title ?? record.title;
+  const assignee = "assigneeId" in patch ? patch.assigneeId : record.assigneeId;
+
+  // ── Notifications des changements importants ──
+  if (changes.includes("assigneeId") && patch.assigneeId) {
+    await notify({
+      workspaceId: actor.workspaceId,
+      recipients: [patch.assigneeId],
+      actorId: actorIdOf(ctx),
+      type: "ASSIGNED",
+      title: `Tâche affectée : ${title}`,
+      taskId,
+    });
+  }
+  if (changes.includes("status") && patch.status === "DONE") {
+    await notify({
+      workspaceId: actor.workspaceId,
+      recipients: [...followerIds, record.createdById],
+      actorId: actorIdOf(ctx),
+      type: "TASK_COMPLETED",
+      title: `Tâche terminée : ${title}`,
+      taskId,
+    });
+  } else if (changes.includes("dueDate") || changes.includes("status")) {
+    const what = changes.includes("dueDate")
+      ? `Échéance modifiée${nextDue ? ` : ${nextDue.split("-").reverse().join("/")}` : " (retirée)"}`
+      : `Statut : ${STATUS_LABELS[patch.status!]}`;
+    await notify({
+      workspaceId: actor.workspaceId,
+      recipients: [assignee, ...followerIds],
+      actorId: actorIdOf(ctx),
+      type: "TASK_CHANGED",
+      title: `${title} — ${what}`,
+      taskId,
+    });
+  }
+  if (changes.includes("isApproval") && patch.isApproval && assignee) {
+    await notify({
+      workspaceId: actor.workspaceId,
+      recipients: [assignee],
+      actorId: actorIdOf(ctx),
+      type: "APPROVAL",
+      title: `Validation demandée : ${title}`,
+      taskId,
+    });
+  }
+  if (changes.includes("approvalStatus") && patch.approvalStatus && patch.approvalStatus !== "PENDING") {
+    await notify({
+      workspaceId: actor.workspaceId,
+      recipients: [record.createdById, ...followerIds],
+      actorId: actorIdOf(ctx),
+      type: "APPROVAL",
+      title: `${title} — ${APPROVAL_LABELS[patch.approvalStatus]}`,
+      taskId,
+    });
+  }
+
+  const touched = [taskId];
+  if (record.parentId) touched.push(record.parentId);
+
+  // ── Récurrence : terminer une tâche récurrente crée l'occurrence suivante ──
+  if (changes.includes("status") && patch.status === "DONE") {
+    const nextId = await spawnNextOccurrence(ctx, taskId);
+    if (nextId) touched.push(nextId);
+  }
+
+  await broadcast(ctx, touched);
+
+  // ── Règles ──
+  const projectIds = await projectIdsOf(taskId);
+  const events: TaskEvent[] = [];
+  // Un même changement produit un événement par projet de la tâche, avec un
+  // identifiant commun : une règle d'espace ne s'exécute ainsi qu'une fois.
+  const forEachProject = (event: Omit<TaskEvent, "id" | "depth" | "chain" | "projectId">) => {
+    const targets = projectIds.length ? projectIds : [null];
+    const shared = randomUUID();
+    for (const projectId of targets) events.push(makeEvent(ctx, { ...event, projectId }, shared));
+  };
+  if (changes.includes("status")) {
+    forEachProject({ type: "STATUS_CHANGED", taskId, from: record.status, to: patch.status });
+    if (patch.status === "DONE") forEachProject({ type: "TASK_COMPLETED", taskId });
+  }
+  if (changes.includes("priority")) {
+    forEachProject({ type: "PRIORITY_CHANGED", taskId, from: record.priority, to: patch.priority });
+  }
+  if (changes.includes("assigneeId")) {
+    forEachProject({ type: "ASSIGNEE_CHANGED", taskId, from: record.assigneeId, to: patch.assigneeId ?? null });
+  }
+  if (changes.includes("approvalStatus") && patch.approvalStatus) {
+    forEachProject({ type: "APPROVAL_CHANGED", taskId, to: patch.approvalStatus });
+  }
+
+  // Toutes les sous-tâches terminées : événement sur la parente + suggestion.
+  if (changes.includes("status") && patch.status === "DONE" && record.parentId) {
+    const open = await prisma.task.count({ where: { parentId: record.parentId, status: { not: "DONE" } } });
+    if (open === 0) {
+      const parent = await prisma.task.findUnique({
+        where: { id: record.parentId },
+        select: { id: true, title: true, status: true, assigneeId: true },
+      });
+      if (parent && parent.status !== "DONE") {
+        const parentProjects = await projectIdsOf(parent.id);
+        const shared = randomUUID();
+        for (const projectId of parentProjects.length ? parentProjects : [null]) {
+          events.push(makeEvent(ctx, { type: "SUBTASKS_COMPLETED", taskId: parent.id, projectId }, shared));
+        }
+      }
+    }
+  }
+  await dispatch(ctx, events);
+
+  return getTaskItem(ctx, taskId);
+}
+
+// ─── Récurrence ───────────────────────────────────────────────────────────────
+
+/**
+ * Crée l'occurrence suivante d'une tâche récurrente qui vient d'être terminée.
+ * Idempotent : `recurrence_origin_id` est unique, un second appel (double
+ * clic, réouverture puis nouvel achèvement) ne crée rien.
+ */
+export async function spawnNextOccurrence(ctx: MutationContext, taskId: string): Promise<string | null> {
+  const source = await prisma.task.findFirst({
+    where: { id: taskId, workspaceId: ctx.actor.workspaceId },
+    include: {
+      tags: true,
+      customValues: true,
+      projects: true,
+      followers: true,
+      subtasks: { orderBy: { subtaskPosition: "asc" } },
+      recurrenceNext: { select: { id: true } },
+    },
+  });
+  if (!source) return null;
+  const rule = parseRecurrence(source.recurrence);
+  if (!rule) return null;
+  if (source.recurrenceNext) return source.recurrenceNext.id;
+
+  const today = dayKey(new Date(), APP_TIME_ZONE);
+  const fromKey = source.dueAt ? dayKey(source.dueAt, APP_TIME_ZONE) : today;
+  let nextDue = nextOccurrence(rule, fromKey);
+  // Rattrapage : une tâche quotidienne en retard d'un mois ne doit pas générer
+  // une occurrence déjà en retard.
+  for (let guard = 0; nextDue < today && guard < 1000; guard += 1) nextDue = nextOccurrence(rule, nextDue);
+
+  let nextStart: string | null = null;
+  if (source.startAt && source.dueAt) {
+    const span = Math.round(
+      (Date.parse(`${dayKey(source.dueAt, APP_TIME_ZONE)}T00:00:00Z`) -
+        Date.parse(`${dayKey(source.startAt, APP_TIME_ZONE)}T00:00:00Z`)) /
+        86_400_000,
+    );
+    nextStart = new Date(Date.parse(`${nextDue}T00:00:00Z`) - span * 86_400_000).toISOString().slice(0, 10);
+  }
+
+  try {
+    const created = await prisma.$transaction(async (tx) => {
+      const task = await tx.task.create({
+        data: {
+          workspaceId: source.workspaceId,
+          title: source.title,
+          notes: source.notes,
+          priority: source.priority,
+          assigneeId: source.assigneeId,
+          createdById: source.createdById,
+          parentId: source.parentId,
+          subtaskPosition: source.subtaskPosition + 0.5,
+          dueAt: startOfDay(nextDue, APP_TIME_ZONE),
+          dueTime: source.dueTime,
+          startAt: nextStart ? startOfDay(nextStart, APP_TIME_ZONE) : null,
+          isMilestone: source.isMilestone,
+          isApproval: source.isApproval,
+          approvalStatus: source.isApproval ? "PENDING" : null,
+          recurrence: source.recurrence ?? Prisma.DbNull,
+          recurrenceOriginId: source.id,
+          estimatedMinutes: source.estimatedMinutes,
+          contactId: source.contactId,
+          organizationId: source.organizationId,
+          opportunityId: source.opportunityId,
+          followUpId: source.followUpId,
+          tags: { create: source.tags.map((t) => ({ tagId: t.tagId })) },
+          customValues: {
+            create: source.customValues.map((v) => ({
+              fieldId: v.fieldId,
+              workspaceId: v.workspaceId,
+              textValue: v.textValue,
+              numberValue: v.numberValue,
+              dateValue: v.dateValue,
+              boolValue: v.boolValue,
+              optionIds: v.optionIds,
+            })),
+          },
+          projects: {
+            create: source.projects.map((p) => ({
+              projectId: p.projectId,
+              sectionId: p.sectionId,
+              workspaceId: p.workspaceId,
+              position: p.position + 0.5,
+            })),
+          },
+          followers: { create: source.followers.map((f) => ({ userId: f.userId, kind: f.kind })) },
+        },
+        select: { id: true },
+      });
+      if (source.subtasks.length) {
+        await tx.task.createMany({
+          data: source.subtasks.map((sub) => ({
+            workspaceId: sub.workspaceId,
+            title: sub.title,
+            notes: sub.notes,
+            priority: sub.priority,
+            assigneeId: sub.assigneeId,
+            createdById: sub.createdById,
+            parentId: task.id,
+            subtaskPosition: sub.subtaskPosition,
+            estimatedMinutes: sub.estimatedMinutes,
+          })),
+        });
+      }
+      await logActivity(
+        ctx,
+        [
+          { taskId: task.id, kind: "recurrence_created", newValue: `Occurrence suivante de « ${source.title} »` },
+          { taskId: source.id, kind: "recurrence_spawned", newValue: nextDue.split("-").reverse().join("/") },
+        ],
+        tx,
+      );
+      return task;
+    });
+    return created.id;
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const existing = await prisma.task.findFirst({ where: { recurrenceOriginId: source.id }, select: { id: true } });
+      return existing?.id ?? null;
+    }
+    throw error;
+  }
+}
+
+// ─── Suppression, duplication ─────────────────────────────────────────────────
+
+export async function deleteTask(ctx: MutationContext, taskId: string): Promise<{ id: string; parentId: string | null }> {
+  const { task } = await requireTaskEdit(ctx, taskId);
+  const projectIds = await projectIdsOf(taskId);
+  const attachments = await prisma.taskAttachment.findMany({
+    where: { OR: [{ taskId }, { task: { parentId: taskId } }] },
+    select: { storageKey: true },
+  });
+
+  await prisma.task.deleteMany({ where: { id: taskId, workspaceId: ctx.actor.workspaceId } });
+  for (const { storageKey } of attachments) {
+    await objectStore.remove(storageKey).catch(() => {});
+  }
+  if (task.parentId) {
+    await logActivity(ctx, [{ taskId: task.parentId, kind: "subtask_removed" }]);
+  }
+  await audit(ctx, "DELETE", taskId);
+  await publishChange({
+    w: ctx.actor.workspaceId,
+    a: actorIdOf(ctx),
+    t: task.parentId ? [taskId, task.parentId] : [taskId],
+    p: projectIds,
+    k: "task_deleted",
+  });
+  return { id: taskId, parentId: task.parentId };
+}
+
+export async function duplicateTask(
+  ctx: MutationContext,
+  taskId: string,
+  options: { includeSubtasks?: boolean } = {},
+): Promise<TaskItem> {
+  await requireTaskRead(ctx, taskId);
+  const source = await prisma.task.findFirst({
+    where: { id: taskId, workspaceId: ctx.actor.workspaceId },
+    include: { tags: true, customValues: true, projects: true, subtasks: { orderBy: { subtaskPosition: "asc" } } },
+  });
+  if (!source) throw new TaskAccessError("NOT_FOUND");
+  for (const membership of source.projects) await requireProjectContentEdit(ctx, membership.projectId);
+  if (source.parentId) await requireTaskEdit(ctx, source.parentId);
+
+  const created = await prisma.$transaction(async (tx) => {
+    const copies: { projectId: string; sectionId: string | null; position: number }[] = [];
+    for (const membership of source.projects) {
+      const next = await tx.taskProject.findFirst({
+        where: { projectId: membership.projectId, sectionId: membership.sectionId, position: { gt: membership.position } },
+        orderBy: { position: "asc" },
+        select: { position: true },
+      });
+      copies.push({
+        projectId: membership.projectId,
+        sectionId: membership.sectionId,
+        position: positionBetween(membership.position, next?.position ?? null) ?? membership.position + 0.0001,
+      });
+    }
+    const task = await tx.task.create({
+      data: {
+        workspaceId: source.workspaceId,
+        title: `${source.title} (copie)`.slice(0, 300),
+        notes: source.notes,
+        priority: source.priority,
+        assigneeId: source.assigneeId,
+        createdById: actorIdOf(ctx),
+        parentId: source.parentId,
+        subtaskPosition: source.subtaskPosition + 0.5,
+        dueAt: source.dueAt,
+        dueTime: source.dueTime,
+        startAt: source.startAt,
+        isMilestone: source.isMilestone,
+        isApproval: source.isApproval,
+        approvalStatus: source.isApproval ? "PENDING" : null,
+        recurrence: source.recurrence ?? Prisma.DbNull,
+        estimatedMinutes: source.estimatedMinutes,
+        contactId: source.contactId,
+        organizationId: source.organizationId,
+        opportunityId: source.opportunityId,
+        followUpId: source.followUpId,
+        tags: { create: source.tags.map((t) => ({ tagId: t.tagId })) },
+        customValues: {
+          create: source.customValues.map((v) => ({
+            fieldId: v.fieldId,
+            workspaceId: v.workspaceId,
+            textValue: v.textValue,
+            numberValue: v.numberValue,
+            dateValue: v.dateValue,
+            boolValue: v.boolValue,
+            optionIds: v.optionIds,
+          })),
+        },
+        projects: { create: copies.map((c) => ({ ...c, workspaceId: source.workspaceId })) },
+        followers: actorIdOf(ctx) ? { create: [{ userId: ctx.actor.id, kind: "FOLLOWER" }] } : undefined,
+      },
+      select: { id: true },
+    });
+    if (options.includeSubtasks !== false && source.subtasks.length) {
+      await tx.task.createMany({
+        data: source.subtasks.map((sub) => ({
+          workspaceId: sub.workspaceId,
+          title: sub.title,
+          notes: sub.notes,
+          priority: sub.priority,
+          assigneeId: sub.assigneeId,
+          createdById: actorIdOf(ctx),
+          parentId: task.id,
+          subtaskPosition: sub.subtaskPosition,
+          dueAt: sub.dueAt,
+          startAt: sub.startAt,
+          estimatedMinutes: sub.estimatedMinutes,
+        })),
+      });
+    }
+    await logActivity(ctx, [{ taskId: task.id, kind: "duplicated", newValue: source.title }], tx);
+    return task;
+  });
+
+  await audit(ctx, "CREATE", created.id);
+  await broadcast(ctx, [created.id], "task_created");
+  return getTaskItem(ctx, created.id);
+}
+
+// ─── Projets d'une tâche, déplacement, ordre ──────────────────────────────────
+
+export interface MoveResult {
+  task: TaskItem;
+  /** Positions renumérotées de la section, si l'écart était épuisé. */
+  renumbered?: { taskId: string; position: number }[];
+}
+
+async function renumberSection(projectId: string, sectionId: string | null, tx: Prisma.TransactionClient) {
+  const rows = await tx.taskProject.findMany({
+    where: { projectId, sectionId },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+    select: { taskId: true },
+  });
+  const positions = evenPositions(rows.length);
+  for (let i = 0; i < rows.length; i += 1) {
+    await tx.taskProject.update({
+      where: { taskId_projectId: { taskId: rows[i].taskId, projectId } },
+      data: { position: positions[i] },
+    });
+  }
+  return rows.map((row, i) => ({ taskId: row.taskId, position: positions[i] }));
+}
+
+/**
+ * Déplace une tâche dans un projet : section cible, entre `beforeId` (au-dessus)
+ * et `afterId` (en dessous). Ajoute la tâche au projet si nécessaire.
+ */
+export async function moveTask(
+  ctx: MutationContext,
+  raw: { taskId: string; projectId: string; sectionId: string | null; beforeId?: string | null; afterId?: string | null },
+): Promise<MoveResult> {
+  const parsed = moveTaskSchema.safeParse(raw);
+  if (!parsed.success) throw new TaskValidationError("Déplacement invalide.");
+  const input = parsed.data;
+  const { task } = await requireTaskRead(ctx, input.taskId);
+  if (task.parentId) throw new TaskValidationError("Une sous-tâche suit les projets de sa tâche parente.");
+  await requireProjectContentEdit(ctx, input.projectId);
+  await assertSectionInProject(input.projectId, input.sectionId);
+
+  const existing = await prisma.taskProject.findUnique({
+    where: { taskId_projectId: { taskId: input.taskId, projectId: input.projectId } },
+    select: { sectionId: true, position: true },
+  });
+  if (!existing) {
+    // Ajouter une tâche à un nouveau projet exige de pouvoir la modifier.
+    await requireTaskEdit(ctx, input.taskId);
+  }
+
+  const neighbour = async (id: string | null | undefined) => {
+    if (!id) return null;
+    const row = await prisma.taskProject.findUnique({
+      where: { taskId_projectId: { taskId: id, projectId: input.projectId } },
+      select: { position: true, sectionId: true },
+    });
+    return row && row.sectionId === input.sectionId ? row.position : null;
+  };
+
+  let renumbered: MoveResult["renumbered"];
+  await prisma.$transaction(async (tx) => {
+    let before = await neighbour(input.beforeId);
+    let after = await neighbour(input.afterId);
+    if (before === null && after === null && !input.beforeId && !input.afterId) {
+      const agg = await tx.taskProject.aggregate({
+        where: { projectId: input.projectId, sectionId: input.sectionId, NOT: { taskId: input.taskId } },
+        _max: { position: true },
+      });
+      before = agg._max.position ?? null;
+    }
+    let position = positionBetween(before, after);
+    if (position === null) {
+      renumbered = await renumberSection(input.projectId, input.sectionId, tx);
+      const map = new Map(renumbered.map((r) => [r.taskId, r.position]));
+      before = input.beforeId ? (map.get(input.beforeId) ?? null) : null;
+      after = input.afterId ? (map.get(input.afterId) ?? null) : null;
+      position = positionBetween(before, after) ?? POSITION_STEP;
+    }
+
+    await tx.taskProject.upsert({
+      where: { taskId_projectId: { taskId: input.taskId, projectId: input.projectId } },
+      create: {
+        taskId: input.taskId,
+        projectId: input.projectId,
+        sectionId: input.sectionId,
+        position,
+        workspaceId: ctx.actor.workspaceId,
+      },
+      update: { sectionId: input.sectionId, position },
+    });
+    await tx.task.update({ where: { id: input.taskId }, data: { version: { increment: 1 } } });
+
+    if (!existing) {
+      const project = await tx.project.findUnique({ where: { id: input.projectId }, select: { name: true } });
+      await logActivity(ctx, [{ taskId: input.taskId, kind: "project_added", newValue: project?.name }], tx);
+    } else if (existing.sectionId !== input.sectionId) {
+      const [from, to] = await Promise.all([
+        existing.sectionId ? tx.projectSection.findUnique({ where: { id: existing.sectionId }, select: { name: true } }) : null,
+        input.sectionId ? tx.projectSection.findUnique({ where: { id: input.sectionId }, select: { name: true } }) : null,
+      ]);
+      await logActivity(
+        ctx,
+        [{ taskId: input.taskId, kind: "moved", field: "Section", oldValue: from?.name ?? "Sans section", newValue: to?.name ?? "Sans section" }],
+        tx,
+      );
+    }
+  });
+
+  await broadcast(ctx, [input.taskId], "task_moved");
+  if (!existing || existing.sectionId !== input.sectionId) {
+    await dispatch(ctx, [
+      makeEvent(ctx, { type: "SECTION_CHANGED", taskId: input.taskId, projectId: input.projectId, sectionId: input.sectionId }),
+    ]);
+  }
+  return { task: await getTaskItem(ctx, input.taskId), renumbered };
+}
+
+export async function addTaskToProject(
+  ctx: MutationContext,
+  taskId: string,
+  projectId: string,
+  sectionId: string | null = null,
+): Promise<TaskItem> {
+  return (await moveTask(ctx, { taskId, projectId, sectionId })).task;
+}
+
+export async function removeTaskFromProject(ctx: MutationContext, taskId: string, projectId: string): Promise<TaskItem> {
+  await requireTaskEdit(ctx, taskId);
+  await requireProjectContentEdit(ctx, projectId);
+  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { name: true } });
+  const { count } = await prisma.taskProject.deleteMany({ where: { taskId, projectId, workspaceId: ctx.actor.workspaceId } });
+  if (count) {
+    await prisma.task.update({ where: { id: taskId }, data: { version: { increment: 1 } } });
+    await logActivity(ctx, [{ taskId, kind: "project_removed", oldValue: project?.name }]);
+    await publishChange({ w: ctx.actor.workspaceId, a: actorIdOf(ctx), t: [taskId], p: [projectId], k: "task_moved" });
+  }
+  return getTaskItem(ctx, taskId);
+}
+
+export async function moveSubtask(
+  ctx: MutationContext,
+  taskId: string,
+  beforeId: string | null,
+  afterId: string | null,
+): Promise<TaskItem> {
+  const { task } = await requireTaskEdit(ctx, taskId);
+  if (!task.parentId) throw new TaskValidationError("Ce n'est pas une sous-tâche.");
+  const position = async (id: string | null) =>
+    id
+      ? ((await prisma.task.findFirst({ where: { id, parentId: task.parentId }, select: { subtaskPosition: true } }))
+          ?.subtaskPosition ?? null)
+      : null;
+  let next = positionBetween(await position(beforeId), await position(afterId));
+  if (next === null) {
+    const siblings = await prisma.task.findMany({
+      where: { parentId: task.parentId },
+      orderBy: [{ subtaskPosition: "asc" }, { createdAt: "asc" }],
+      select: { id: true },
+    });
+    const positions = evenPositions(siblings.length);
+    await prisma.$transaction(
+      siblings.map((s, i) => prisma.task.update({ where: { id: s.id }, data: { subtaskPosition: positions[i] } })),
+    );
+    next = positionBetween(await position(beforeId), await position(afterId)) ?? POSITION_STEP;
+  }
+  await prisma.task.update({ where: { id: taskId }, data: { subtaskPosition: next, version: { increment: 1 } } });
+  await broadcast(ctx, [taskId, task.parentId]);
+  return getTaskItem(ctx, taskId);
+}
+
+/** Convertit une sous-tâche en tâche indépendante, ou l'inverse. */
+export async function setTaskParent(ctx: MutationContext, taskId: string, parentId: string | null): Promise<TaskItem> {
+  const { task } = await requireTaskEdit(ctx, taskId);
+  if (parentId) {
+    if (parentId === taskId) throw new TaskValidationError("Une tâche ne peut pas être sa propre parente.");
+    const { task: parent } = await requireTaskEdit(ctx, parentId);
+    if (parent.parentId) throw new TaskValidationError("Une sous-tâche ne peut pas avoir de sous-tâches.");
+    const children = await prisma.task.count({ where: { parentId: taskId } });
+    if (children) throw new TaskValidationError("Cette tâche a déjà des sous-tâches.");
+    await prisma.$transaction([
+      prisma.taskProject.deleteMany({ where: { taskId } }),
+      prisma.task.update({ where: { id: taskId }, data: { parentId, version: { increment: 1 } } }),
+    ]);
+  } else {
+    await prisma.task.update({ where: { id: taskId }, data: { parentId: null, version: { increment: 1 } } });
+  }
+  await logActivity(ctx, [{ taskId, kind: parentId ? "made_subtask" : "made_task" }]);
+  await broadcast(ctx, [taskId, ...(task.parentId ? [task.parentId] : []), ...(parentId ? [parentId] : [])]);
+  return getTaskItem(ctx, taskId);
+}
+
+// ─── Tags et champs personnalisés ─────────────────────────────────────────────
+
+export async function setTaskTags(ctx: MutationContext, taskId: string, tagIds: string[]): Promise<TaskItem> {
+  await requireTaskEdit(ctx, taskId);
+  const unique = [...new Set(tagIds)].slice(0, 30);
+  const tags = await prisma.tag.findMany({
+    where: { id: { in: unique }, workspaceId: ctx.actor.workspaceId },
+    select: { id: true, name: true },
+  });
+  if (tags.length !== unique.length) throw new TaskValidationError("Tag introuvable.");
+  const current = await prisma.taskTag.findMany({ where: { taskId }, select: { tagId: true, tag: { select: { name: true } } } });
+  const currentIds = new Set(current.map((c) => c.tagId));
+  const added = tags.filter((t) => !currentIds.has(t.id));
+  const removed = current.filter((c) => !unique.includes(c.tagId));
+  if (!added.length && !removed.length) return getTaskItem(ctx, taskId);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.taskTag.deleteMany({ where: { taskId, tagId: { in: removed.map((r) => r.tagId) } } });
+    await tx.taskTag.createMany({ data: added.map((t) => ({ taskId, tagId: t.id })), skipDuplicates: true });
+    await tx.task.update({ where: { id: taskId }, data: { version: { increment: 1 } } });
+    await logActivity(
+      ctx,
+      [
+        ...added.map((t) => ({ taskId, kind: "tag_added", field: "Tag", newValue: t.name })),
+        ...removed.map((r) => ({ taskId, kind: "tag_removed", field: "Tag", oldValue: r.tag.name })),
+      ],
+      tx,
+    );
+  });
+  await broadcast(ctx, [taskId]);
+  return getTaskItem(ctx, taskId);
+}
+
+async function writeCustomValue(
+  ctx: MutationContext,
+  taskId: string,
+  fieldId: string,
+  rawValue: CustomFieldValue,
+  options: { log?: boolean } = {},
+) {
+  const field = await prisma.customField.findFirst({
+    where: { id: fieldId, workspaceId: ctx.actor.workspaceId },
+    select: { id: true, name: true, type: true, options: true },
+  });
+  if (!field) throw new TaskValidationError("Champ personnalisé introuvable.");
+  const parsed = customValueSchema.safeParse(rawValue);
+  if (!parsed.success) throw new TaskValidationError(`Valeur invalide pour « ${field.name} ».`);
+  const value = parsed.data;
+  const optionIds = new Set(
+    (Array.isArray(field.options) ? (field.options as { id?: string }[]) : []).map((o) => o.id),
+  );
+
+  const data = { textValue: null as string | null, numberValue: null as number | null, dateValue: null as Date | null, boolValue: null as boolean | null, optionIds: [] as string[] };
+  const invalid = () => new TaskValidationError(`Valeur invalide pour « ${field.name} ».`);
+  if (value !== null && value !== "") {
+    switch (field.type) {
+      case "TEXT":
+        if (typeof value !== "string") throw invalid();
+        data.textValue = value.trim().slice(0, 2000);
+        break;
+      case "NUMBER":
+        if (typeof value !== "number") throw invalid();
+        data.numberValue = value;
+        break;
+      case "DATE":
+        if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw invalid();
+        data.dateValue = startOfDay(value, APP_TIME_ZONE);
+        break;
+      case "CHECKBOX":
+        if (typeof value !== "boolean") throw invalid();
+        data.boolValue = value;
+        break;
+      case "SINGLE_SELECT":
+        if (typeof value !== "string" || !optionIds.has(value)) throw invalid();
+        data.optionIds = [value];
+        break;
+      case "MULTI_SELECT":
+        if (!Array.isArray(value) || value.some((v) => !optionIds.has(v))) throw invalid();
+        data.optionIds = [...new Set(value)];
+        break;
+    }
+  }
+
+  const empty = data.textValue === null && data.numberValue === null && data.dateValue === null && data.boolValue === null && data.optionIds.length === 0;
+  if (empty) {
+    await prisma.taskCustomFieldValue.deleteMany({ where: { taskId, fieldId } });
+  } else {
+    await prisma.taskCustomFieldValue.upsert({
+      where: { taskId_fieldId: { taskId, fieldId } },
+      create: { taskId, fieldId, workspaceId: ctx.actor.workspaceId, ...data },
+      update: data,
+    });
+  }
+  if (options.log !== false) {
+    const labels = (Array.isArray(field.options) ? (field.options as { id: string; label: string }[]) : []);
+    const display = Array.isArray(value)
+      ? value.map((v) => labels.find((o) => o.id === v)?.label ?? v).join(", ")
+      : field.type === "SINGLE_SELECT"
+        ? (labels.find((o) => o.id === value)?.label ?? null)
+        : value === null
+          ? null
+          : String(value);
+    await logActivity(ctx, [{ taskId, kind: "field", field: field.name, newValue: display }]);
+  }
+}
+
+export async function setCustomFieldValue(
+  ctx: MutationContext,
+  taskId: string,
+  fieldId: string,
+  value: CustomFieldValue,
+): Promise<TaskItem> {
+  await requireTaskEdit(ctx, taskId);
+  await writeCustomValue(ctx, taskId, fieldId, value);
+  await prisma.task.update({ where: { id: taskId }, data: { version: { increment: 1 } } });
+  await broadcast(ctx, [taskId]);
+  return getTaskItem(ctx, taskId);
+}
+
+// ─── Dépendances ─────────────────────────────────────────────────────────────
+
+async function collectEdges(workspaceId: string, startId: string) {
+  // Parcours par niveaux depuis `startId` en suivant « bloque » : on ne
+  // charge que la partie du graphe atteignable, pas tout l'espace.
+  const edges: { blockingId: string; blockedId: string }[] = [];
+  let frontier = [startId];
+  const seen = new Set<string>(frontier);
+  for (let depth = 0; frontier.length && depth < 200; depth += 1) {
+    const rows = await prisma.taskDependency.findMany({
+      where: { workspaceId, blockingId: { in: frontier } },
+      select: { blockingId: true, blockedId: true },
+    });
+    edges.push(...rows);
+    frontier = rows.map((r) => r.blockedId).filter((id) => !seen.has(id));
+    frontier.forEach((id) => seen.add(id));
+  }
+  return edges;
+}
+
+/** `blockingId` bloque `blockedId`. Refuse les boucles et l'auto-dépendance. */
+export async function addDependency(ctx: MutationContext, blockedId: string, blockingId: string): Promise<TaskItem> {
+  if (blockedId === blockingId) throw new TaskValidationError("Une tâche ne peut pas dépendre d'elle-même.");
+  await requireTaskEdit(ctx, blockedId);
+  await requireTaskRead(ctx, blockingId);
+
+  const edges = await collectEdges(ctx.actor.workspaceId, blockedId);
+  if (wouldCreateCycle(edges, blockingId, blockedId)) {
+    throw new TaskValidationError("Cette dépendance créerait une boucle (dépendance circulaire).");
+  }
+
+  const blocking = await prisma.task.findUnique({ where: { id: blockingId }, select: { title: true } });
+  await prisma.$transaction(async (tx) => {
+    await tx.taskDependency.createMany({
+      data: [{ blockingId, blockedId, workspaceId: ctx.actor.workspaceId }],
+      skipDuplicates: true,
+    });
+    await tx.task.updateMany({ where: { id: { in: [blockedId, blockingId] } }, data: { version: { increment: 1 } } });
+    await logActivity(ctx, [{ taskId: blockedId, kind: "dependency_added", field: "Bloquée par", newValue: blocking?.title }], tx);
+  });
+  await broadcast(ctx, [blockedId, blockingId]);
+  return getTaskItem(ctx, blockedId);
+}
+
+export async function removeDependency(ctx: MutationContext, blockedId: string, blockingId: string): Promise<TaskItem> {
+  await requireTaskEdit(ctx, blockedId);
+  const blocking = await prisma.task.findFirst({ where: { id: blockingId, workspaceId: ctx.actor.workspaceId }, select: { title: true } });
+  const { count } = await prisma.taskDependency.deleteMany({
+    where: { blockingId, blockedId, workspaceId: ctx.actor.workspaceId },
+  });
+  if (count) {
+    await prisma.task.updateMany({ where: { id: { in: [blockedId, blockingId] } }, data: { version: { increment: 1 } } });
+    await logActivity(ctx, [{ taskId: blockedId, kind: "dependency_removed", field: "Bloquée par", oldValue: blocking?.title }]);
+    await broadcast(ctx, [blockedId, blockingId]);
+  }
+  return getTaskItem(ctx, blockedId);
+}
+
+// ─── Collaborateurs et abonnés ────────────────────────────────────────────────
+
+export async function setFollower(
+  ctx: MutationContext,
+  taskId: string,
+  userId: string,
+  kind: "COLLABORATOR" | "FOLLOWER" | null,
+): Promise<void> {
+  const self = userId === ctx.actor.id;
+  // S'abonner soi-même demande seulement de pouvoir lire ; ajouter quelqu'un
+  // d'autre, ou devenir collaborateur, demande de pouvoir modifier.
+  if (self && kind !== "COLLABORATOR") await requireTaskRead(ctx, taskId);
+  else await requireTaskEdit(ctx, taskId);
+  await assertUserInWorkspace(ctx.actor, userId);
+
+  const label = await userLabel(userId);
+  if (kind === null) {
+    await prisma.taskFollower.deleteMany({ where: { taskId, userId } });
+    await logActivity(ctx, [{ taskId, kind: "follower_removed", oldValue: label }]);
+  } else {
+    await prisma.taskFollower.upsert({
+      where: { taskId_userId: { taskId, userId } },
+      create: { taskId, userId, kind },
+      update: { kind },
+    });
+    await logActivity(ctx, [
+      { taskId, kind: "follower_added", field: kind === "COLLABORATOR" ? "Collaborateur" : "Abonné", newValue: label },
+    ]);
+    if (!self && kind === "COLLABORATOR") {
+      const task = await prisma.task.findUnique({ where: { id: taskId }, select: { title: true } });
+      await notify({
+        workspaceId: ctx.actor.workspaceId,
+        recipients: [userId],
+        actorId: actorIdOf(ctx),
+        type: "ASSIGNED",
+        title: `Vous collaborez à : ${task?.title ?? "une tâche"}`,
+        taskId,
+      });
+    }
+  }
+  await prisma.task.update({ where: { id: taskId }, data: { version: { increment: 1 } } });
+  await broadcast(ctx, [taskId]);
+}
+
+// ─── Temps passé ──────────────────────────────────────────────────────────────
+
+export async function addTimeEntry(
+  ctx: MutationContext,
+  taskId: string,
+  raw: { minutes: number; date: string; note?: string | null },
+): Promise<TaskItem> {
+  await requireTaskEdit(ctx, taskId);
+  const parsed = timeEntrySchema.safeParse(raw);
+  if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Saisie invalide.");
+  await prisma.taskTimeEntry.create({
+    data: {
+      taskId,
+      workspaceId: ctx.actor.workspaceId,
+      userId: ctx.actor.id,
+      minutes: parsed.data.minutes,
+      spentAt: startOfDay(parsed.data.date, APP_TIME_ZONE),
+      note: parsed.data.note ?? null,
+    },
+  });
+  await logActivity(ctx, [{ taskId, kind: "time_logged", field: "Temps passé", newValue: `${parsed.data.minutes} min` }]);
+  await prisma.task.update({ where: { id: taskId }, data: { version: { increment: 1 } } });
+  await broadcast(ctx, [taskId]);
+  return getTaskItem(ctx, taskId);
+}
+
+export async function deleteTimeEntry(ctx: MutationContext, entryId: string): Promise<TaskItem> {
+  const entry = await prisma.taskTimeEntry.findFirst({
+    where: { id: entryId, workspaceId: ctx.actor.workspaceId },
+    select: { taskId: true, userId: true, minutes: true },
+  });
+  if (!entry) throw new TaskAccessError("NOT_FOUND");
+  if (entry.userId === ctx.actor.id) await requireTaskRead(ctx, entry.taskId);
+  else await requireTaskEdit(ctx, entry.taskId);
+  await prisma.taskTimeEntry.delete({ where: { id: entryId } });
+  await logActivity(ctx, [{ taskId: entry.taskId, kind: "time_removed", field: "Temps passé", oldValue: `${entry.minutes} min` }]);
+  await prisma.task.update({ where: { id: entry.taskId }, data: { version: { increment: 1 } } });
+  await broadcast(ctx, [entry.taskId]);
+  return getTaskItem(ctx, entry.taskId);
+}
+
+// ─── Commentaires et réactions ────────────────────────────────────────────────
+
+export async function addComment(ctx: MutationContext, taskId: string, rawBody: string): Promise<string> {
+  const { permissions } = await requireTaskRead(ctx, taskId);
+  if (!permissions.canComment) throw new TaskAccessError("FORBIDDEN");
+  const parsed = commentBodySchema.safeParse(rawBody);
+  if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Commentaire invalide.");
+  const body = parsed.data;
+
+  // Mentions : uniquement des utilisateurs de l'espace.
+  const mentioned = extractMentions(body);
+  const validMentions = mentioned.length
+    ? (
+        await prisma.user.findMany({
+          where: { id: { in: mentioned }, workspaceId: ctx.actor.workspaceId, isActive: true },
+          select: { id: true },
+        })
+      ).map((u) => u.id)
+    : [];
+
+  const comment = await prisma.$transaction(async (tx) => {
+    const created = await tx.comment.create({
+      data: { workspaceId: ctx.actor.workspaceId, taskId, authorId: actorIdOf(ctx), body },
+      select: { id: true },
+    });
+    const followers = [actorIdOf(ctx), ...validMentions].filter((v): v is string => Boolean(v));
+    if (followers.length) {
+      await tx.taskFollower.createMany({
+        data: followers.map((userId) => ({ taskId, userId, kind: "FOLLOWER" as const })),
+        skipDuplicates: true,
+      });
+    }
+    return created;
+  });
+
+  const task = await prisma.task.findUnique({ where: { id: taskId }, select: { title: true, assigneeId: true } });
+  const followerIds = (await prisma.taskFollower.findMany({ where: { taskId }, select: { userId: true } })).map(
+    (f) => f.userId,
+  );
+  const preview = toPlainText(body).slice(0, 200);
+
+  if (validMentions.length) {
+    await notify({
+      workspaceId: ctx.actor.workspaceId,
+      recipients: validMentions,
+      actorId: actorIdOf(ctx),
+      type: "MENTIONED",
+      title: `Mention dans « ${task?.title ?? "une tâche"} »`,
+      body: preview,
+      taskId,
+      commentId: comment.id,
+    });
+  }
+  await notify({
+    workspaceId: ctx.actor.workspaceId,
+    recipients: [...followerIds, task?.assigneeId].filter((id) => id && !validMentions.includes(id)),
+    actorId: actorIdOf(ctx),
+    type: "COMMENT",
+    title: `Nouveau commentaire sur « ${task?.title ?? "une tâche"} »`,
+    body: preview,
+    taskId,
+    commentId: comment.id,
+  });
+
+  await broadcast(ctx, [taskId], "comment");
+  return comment.id;
+}
+
+async function requireOwnComment(ctx: MutationContext, commentId: string) {
+  const comment = await prisma.comment.findFirst({
+    where: { id: commentId, workspaceId: ctx.actor.workspaceId },
+    select: { id: true, authorId: true, taskId: true, statusUpdateId: true },
+  });
+  if (!comment) throw new TaskAccessError("NOT_FOUND");
+  if (comment.authorId !== ctx.actor.id) throw new TaskAccessError("FORBIDDEN", "Seul l'auteur peut modifier ce commentaire.");
+  if (comment.taskId) await requireTaskRead(ctx, comment.taskId);
+  return comment;
+}
+
+export async function editComment(ctx: MutationContext, commentId: string, rawBody: string): Promise<void> {
+  const comment = await requireOwnComment(ctx, commentId);
+  const parsed = commentBodySchema.safeParse(rawBody);
+  if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Commentaire invalide.");
+  await prisma.comment.update({ where: { id: commentId }, data: { body: parsed.data, editedAt: new Date() } });
+  if (comment.taskId) await broadcast(ctx, [comment.taskId], "comment");
+}
+
+export async function deleteComment(ctx: MutationContext, commentId: string): Promise<void> {
+  const comment = await requireOwnComment(ctx, commentId);
+  await prisma.comment.delete({ where: { id: commentId } });
+  if (comment.taskId) await broadcast(ctx, [comment.taskId], "comment");
+}
+
+export async function toggleReaction(ctx: MutationContext, commentId: string, emoji: string): Promise<void> {
+  if (!(REACTION_EMOJIS as readonly string[]).includes(emoji)) throw new TaskValidationError("Réaction invalide.");
+  const comment = await prisma.comment.findFirst({
+    where: { id: commentId, workspaceId: ctx.actor.workspaceId },
+    select: { taskId: true, statusUpdate: { select: { projectId: true } } },
+  });
+  if (!comment) throw new TaskAccessError("NOT_FOUND");
+  if (comment.taskId) await requireTaskRead(ctx, comment.taskId);
+  if (comment.statusUpdate) {
+    const project = await prisma.project.findFirst({
+      where: { id: comment.statusUpdate.projectId, workspaceId: ctx.actor.workspaceId },
+      select: projectAccessSelect(ctx.actor),
+    });
+    if (!project || (project.visibility === "PRIVATE" && project.members.length === 0)) {
+      throw new TaskAccessError("NOT_FOUND");
+    }
+  }
+  const key = { commentId_userId_emoji: { commentId, userId: ctx.actor.id, emoji } };
+  const existing = await prisma.commentReaction.findUnique({ where: key });
+  if (existing) await prisma.commentReaction.delete({ where: key });
+  else await prisma.commentReaction.create({ data: { commentId, userId: ctx.actor.id, emoji } });
+  if (comment.taskId) await broadcast(ctx, [comment.taskId], "comment");
+}
+
+// ─── Actions groupées ─────────────────────────────────────────────────────────
+
+export interface BulkResult {
+  updated: TaskItem[];
+  failed: { id: string; error: string }[];
+}
+
+export async function bulkUpdate(ctx: MutationContext, taskIds: string[], patch: TaskPatch): Promise<BulkResult> {
+  const result: BulkResult = { updated: [], failed: [] };
+  for (const id of [...new Set(taskIds)].slice(0, 500)) {
+    try {
+      result.updated.push(await updateTaskFields(ctx, id, patch));
+    } catch (error) {
+      result.failed.push({ id, error: error instanceof Error ? error.message : "Erreur." });
+    }
+  }
+  return result;
+}
+
+export async function bulkDelete(ctx: MutationContext, taskIds: string[]): Promise<{ deleted: string[]; failed: { id: string; error: string }[] }> {
+  const deleted: string[] = [];
+  const failed: { id: string; error: string }[] = [];
+  for (const id of [...new Set(taskIds)].slice(0, 500)) {
+    try {
+      await deleteTask(ctx, id);
+      deleted.push(id);
+    } catch (error) {
+      failed.push({ id, error: error instanceof Error ? error.message : "Erreur." });
+    }
+  }
+  return { deleted, failed };
+}
+
+/** Tâches visibles : utilitaire de lecture partagé par les routes. */
+export async function visibleTaskIds(actor: Actor, ids: string[]): Promise<Set<string>> {
+  const rows = await prisma.task.findMany({
+    where: { AND: [visibleTaskWhere(actor), { id: { in: ids } }] },
+    select: { id: true },
+  });
+  return new Set(rows.map((r) => r.id));
+}

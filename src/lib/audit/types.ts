@@ -26,6 +26,11 @@ export const AUDIT_ENTITY_TYPES = {
   PRIVACY_PROCESSOR: "PrivacyProcessor",
   PRIVACY_REQUEST: "PrivacyRequest",
   PRIVACY_INCIDENT: "PrivacyIncident",
+  PROJECT: "Project",
+  CUSTOM_FIELD: "CustomField",
+  AUTOMATION_RULE: "AutomationRule",
+  TASK_FORM: "TaskForm",
+  TASK_ATTACHMENT: "TaskAttachment",
 } as const;
 
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[keyof typeof AUDIT_ENTITY_TYPES];

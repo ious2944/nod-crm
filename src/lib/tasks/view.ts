@@ -7,7 +7,7 @@ export interface TaskRecord {
   id: string;
   title: string;
   notes: string | null;
-  dueAt: Date;
+  dueAt: Date | null;
   completedAt: Date | null;
   isDemo: boolean;
   createdAt: Date;
@@ -29,12 +29,12 @@ export interface TaskView {
   id: string;
   title: string;
   notes: string | null;
-  /** `YYYY-MM-DD`, pré-rempli dans le formulaire de report. */
-  dueDate: string;
+  /** `YYYY-MM-DD`, pré-rempli dans le formulaire de report. `null` : sans échéance. */
+  dueDate: string | null;
   dueLabel: string;
   level: UrgencyLevel;
   bucket: TaskBucket;
-  overdueDays: number;
+  overdueDays: number | null;
   isActionable: boolean;
   completed: boolean;
   contactId: string | null;
@@ -54,7 +54,7 @@ export function toTaskView(record: TaskRecord, now: Date, timeZone: string): Tas
     id: record.id,
     title: record.title,
     notes: record.notes,
-    dueDate: dayKey(record.dueAt, timeZone),
+    dueDate: record.dueAt ? dayKey(record.dueAt, timeZone) : null,
     dueLabel: timing.dueLabel,
     level: timing.level,
     bucket: timing.bucket,
