@@ -128,8 +128,9 @@ async function loadAccess(ctx: MutationContext, taskId: string) {
     select: taskAccessSelect(ctx.actor),
   });
   if (!task) throw new TaskAccessError("NOT_FOUND");
+  if (task.deletedAt || task.parent?.deletedAt) throw new TaskAccessError("NOT_FOUND");
   const permissions = ctx.automation || ctx.trusted
-    ? { canRead: true, canEdit: true, canComment: true }
+    ? { canRead: true, canEdit: true, canComment: true, canManage: true }
     : evaluateTaskAccess(task, ctx.actor);
   if (!permissions.canRead) throw new TaskAccessError("NOT_FOUND");
   return { task, permissions };
@@ -142,6 +143,30 @@ export async function requireTaskRead(ctx: MutationContext, taskId: string) {
 export async function requireTaskEdit(ctx: MutationContext, taskId: string) {
   const result = await loadAccess(ctx, taskId);
   if (!result.permissions.canEdit) throw new TaskAccessError("FORBIDDEN");
+  return result;
+}
+
+const MANAGE_REFUSED =
+  "Seul un éditeur du projet peut faire cela (supprimer, déplacer, réaffecter ou partager la tâche).";
+
+/** Structure et partage de la tâche : voir `evaluateTaskAccess` (canManage). */
+export async function requireTaskManage(ctx: MutationContext, taskId: string) {
+  const result = await loadAccess(ctx, taskId);
+  if (!result.permissions.canManage) throw new TaskAccessError("FORBIDDEN", MANAGE_REFUSED);
+  return result;
+}
+
+/**
+ * Parmi `userIds`, ceux qui peuvent lire la tâche. Sert à ne jamais accorder
+ * un accès par effet de bord (mention, abonnement automatique).
+ */
+export async function readersAmong(workspaceId: string, taskId: string, userIds: string[]): Promise<string[]> {
+  const result: string[] = [];
+  for (const userId of [...new Set(userIds)]) {
+    const actor = { id: userId, workspaceId };
+    const task = await prisma.task.findFirst({ where: { id: taskId, workspaceId }, select: taskAccessSelect(actor) });
+    if (task && evaluateTaskAccess(task, actor).canRead) result.push(userId);
+  }
   return result;
 }
 
@@ -344,8 +369,10 @@ export async function createTask(ctx: MutationContext, raw: CreateTaskInputV1): 
   }
 
   let parentId: string | null = null;
+  let parentManageable = true;
   if (input.parentId) {
-    const { task: parent } = await requireTaskEdit(ctx, input.parentId);
+    const { task: parent, permissions: parentPermissions } = await requireTaskEdit(ctx, input.parentId);
+    parentManageable = parentPermissions.canManage;
     if (parent.parentId) {
       throw new TaskValidationError("Une sous-tâche ne peut pas avoir elle-même de sous-tâches.");
     }
@@ -363,6 +390,11 @@ export async function createTask(ctx: MutationContext, raw: CreateTaskInputV1): 
   const assigneeId =
     input.assigneeId !== undefined ? input.assigneeId : !input.projectId && !parentId ? actor.id : null;
   await assertUserInWorkspace(actor, assigneeId);
+  // Affecter une sous-tâche à quelqu'un lui en donne l'accès : réservé à qui
+  // peut gérer la tâche parente.
+  if (parentId && !parentManageable && assigneeId && assigneeId !== actor.id) {
+    throw new TaskAccessError("FORBIDDEN", MANAGE_REFUSED);
+  }
   await assertCrmLinks(actor, input);
 
   if (input.startDate && input.dueDate && input.startDate > input.dueDate) {
@@ -530,6 +562,7 @@ const PATCH_SELECT = {
   parentId: true,
   version: true,
   createdById: true,
+  lastActiveStatus: true,
 } satisfies Prisma.TaskSelect;
 
 type PatchRecord = Prisma.TaskGetPayload<{ select: typeof PATCH_SELECT }>;
@@ -630,7 +663,7 @@ export async function updateTaskFields(
   if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Modification invalide.");
   const patch = parsed.data as TaskPatch;
 
-  await requireTaskEdit(ctx, taskId);
+  const { permissions } = await requireTaskEdit(ctx, taskId);
   const { actor } = ctx;
 
   const record = await prisma.task.findFirst({
@@ -654,7 +687,40 @@ export async function updateTaskFields(
   );
   if (changes.length === 0) return getTaskItem(ctx, taskId);
 
-  if (changes.includes("assigneeId")) await assertUserInWorkspace(actor, patch.assigneeId);
+  if (changes.includes("assigneeId")) {
+    // Réaffecter donne l'accès à la nouvelle personne : droit de gestion.
+    if (!permissions.canManage) throw new TaskAccessError("FORBIDDEN", MANAGE_REFUSED);
+    await assertUserInWorkspace(actor, patch.assigneeId);
+  }
+
+  // ── Circuit de validation ──
+  const isApproval = patch.isApproval ?? record.isApproval;
+  const assigneeAfter = "assigneeId" in patch ? patch.assigneeId : record.assigneeId;
+  let approvalAfter = "approvalStatus" in patch ? patch.approvalStatus : record.approvalStatus;
+  if (changes.includes("approvalStatus") && patch.approvalStatus && patch.approvalStatus !== "PENDING" && !ctx.automation) {
+    // La décision revient à la personne responsable de la validation ; sans
+    // responsable, à un éditeur du projet.
+    const approver = assigneeAfter ? assigneeAfter === actor.id : permissions.canManage;
+    if (!approver) throw new TaskAccessError("FORBIDDEN", "Seule la personne chargée de la validation peut approuver ou demander des modifications.");
+  }
+  if (changes.includes("approvalStatus") && patch.approvalStatus === "APPROVED" && !changes.includes("status")) {
+    // Approuver termine la demande.
+    patch.status = "DONE";
+    changes.push("status");
+  }
+  if (changes.includes("approvalStatus") && patch.approvalStatus === "CHANGES_REQUESTED" && record.status === "DONE" && !changes.includes("status")) {
+    patch.status = record.lastActiveStatus ?? "IN_PROGRESS";
+    changes.push("status");
+  }
+  if (changes.includes("status") && patch.status === "DONE" && isApproval && approvalAfter !== "APPROVED") {
+    throw new TaskValidationError("Cette demande de validation doit être approuvée avant d'être terminée.");
+  }
+  if (changes.includes("status") && record.status === "DONE" && patch.status !== "DONE" && isApproval && approvalAfter === "APPROVED") {
+    // Rouvrir une demande approuvée la remet à valider.
+    patch.approvalStatus = "PENDING";
+    approvalAfter = "PENDING";
+    if (!changes.includes("approvalStatus")) changes.push("approvalStatus");
+  }
   await assertCrmLinks(actor, {
     contactId: changes.includes("contactId") ? patch.contactId : null,
     organizationId: changes.includes("organizationId") ? patch.organizationId : null,
@@ -687,6 +753,8 @@ export async function updateTaskFields(
       case "status":
         data.status = value as TaskItem["status"];
         data.completedAt = value === "DONE" ? new Date() : null;
+        // Mémorise le dernier statut actif : la réouverture y reviendra.
+        if (value === "DONE" && record.status !== "DONE") data.lastActiveStatus = record.status;
         break;
       case "isApproval":
         data.isApproval = value as boolean;

@@ -111,6 +111,7 @@ export function useTaskOps() {
         followUpId: null,
         version: 0,
         canEdit: true,
+        canManage: true,
         ...optimistic,
       };
       store.upsertTasks([temp]);

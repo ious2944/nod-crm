@@ -145,6 +145,9 @@ model User {
   /// Argon2id. Ne jamais journaliser, ne jamais renvoyer au client.
   passwordHash String    @map("password_hash")
   displayName  String?   @map("display_name")
+  /// Capacité de travail hebdomadaire (minutes) pour la vue Charge. `null` :
+  /// valeur par défaut de l'instance.
+  weeklyCapacityMinutes Int? @map("weekly_capacity_minutes")
   isActive     Boolean   @default(true) @map("is_active")
   lastLoginAt  DateTime? @map("last_login_at")
   createdAt    DateTime  @default(now()) @map("created_at")
@@ -156,6 +159,7 @@ model User {
 
   assignedTasks           Task[]                   @relation("TaskAssignee")
   createdTasks            Task[]                   @relation("TaskCreator")
+  deletedTasks            Task[]                   @relation("TaskDeleter")
   ownedProjects           Project[]                @relation("ProjectOwner")
   createdProjects         Project[]                @relation("ProjectCreator")
   projectMemberships      ProjectMember[]
@@ -344,6 +348,12 @@ model Task {
   /// occurrence ne peut être générée qu'une fois, même en cas de double clic.
   recurrenceOriginId String?     @unique @map("recurrence_origin_id") @db.Uuid
   estimatedMinutes Int?          @map("estimated_minutes")
+  /// Dernier statut actif avant achèvement : la réouverture y revient.
+  lastActiveStatus TaskStatus?   @map("last_active_status")
+  /// Corbeille : suppression logique. Une tâche supprimée n'apparaît plus
+  /// nulle part sauf dans la corbeille ; la suppression définitive est à part.
+  deletedAt      DateTime?       @map("deleted_at")
+  deletedById    String?         @map("deleted_by_id") @db.Uuid
   /// Incrémenté à chaque écriture : sert à la synchronisation temps réel et à
   /// la détection des modifications concurrentes.
   version        Int             @default(1)
@@ -357,6 +367,7 @@ model Task {
   opportunity      Opportunity?  @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
   organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   assignee         User?         @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  deletedBy        User?         @relation("TaskDeleter", fields: [deletedById], references: [id], onDelete: SetNull)
   createdBy        User?         @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
   parent           Task?         @relation("TaskSubtasks", fields: [parentId], references: [id], onDelete: Cascade)
   subtasks         Task[]        @relation("TaskSubtasks")
@@ -375,8 +386,11 @@ model Task {
   timeEntries   TaskTimeEntry[]
   notifications Notification[]
   automationRuns AutomationRun[]
+  reminders      TaskReminder[]
+  migrationNotes TaskMigrationNote[]
 
   @@index([workspaceId, completedAt, dueAt])
+  @@index([workspaceId, deletedAt])
   @@index([workspaceId, assigneeId, completedAt])
   @@index([contactId])
   @@index([followUpId])
@@ -429,6 +443,7 @@ model Project {
   rules         AutomationRule[]
   taskTemplates TaskTemplate[]
   forms         TaskForm[]
+  ownedFields   CustomField[]     @relation("ProjectOwnedFields")
 
   @@index([workspaceId, archivedAt, isTemplate])
   @@index([contactId])
@@ -551,12 +566,16 @@ model CustomField {
   workspaceId String          @map("workspace_id") @db.Uuid
   name        String
   type        CustomFieldType
+  /// Champ propre à un projet (`null` : champ partagé de l'espace). Ses
+  /// valeurs ne sont lues et modifiées qu'avec les droits sur ce projet.
+  projectId   String?         @map("project_id") @db.Uuid
   /// Options des champs de sélection : `[{ id, label, color }]`.
   options     Json            @default("[]")
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
 
   workspace Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?               @relation("ProjectOwnedFields", fields: [projectId], references: [id], onDelete: Cascade)
   projects  ProjectCustomField[]
   values    TaskCustomFieldValue[]
 
@@ -692,6 +711,9 @@ model TaskActivity {
   actorId          String?  @map("actor_id") @db.Uuid
   /// Règle d'automatisation à l'origine du changement, le cas échéant.
   automationRuleId String?  @map("automation_rule_id") @db.Uuid
+  /// Projet concerné (ajout, retrait, changement de section) : la ligne n'est
+  /// montrée qu'aux personnes qui peuvent lire ce projet.
+  projectId        String?  @map("project_id") @db.Uuid
   kind             String
   field            String?
   oldValue         String?  @map("old_value")
@@ -1082,4 +1104,58 @@ model AuditLog {
   @@index([workspaceId, entityType, entityId])
   @@index([workspaceId, userId, createdAt])
   @@map("audit_logs")
+}
+
+/// Rappel d'échéance, intégré ou issu d'une règle. `reminder_key` est la clé
+/// de déduplication commune : `builtin:<J-1|J0>:<tâche>:<échéance>` ou
+/// `rule:<règle>:<tâche>:<échéance>`. La ligne est réservée (PENDING) avant
+/// l'envoi : une exécution interrompue est reprise, jamais doublée.
+model TaskReminder {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  taskId      String    @map("task_id") @db.Uuid
+  reminderKey String    @unique @map("reminder_key")
+  kind        String
+  dueKey      String    @map("due_key")
+  status      String    @default("PENDING")
+  attempts    Int       @default(0)
+  lastError   String?   @map("last_error")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  processedAt DateTime? @map("processed_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@map("task_reminders")
+}
+
+/// Bail d'exécution d'une tâche planifiée : une seule instance à la fois,
+/// même avec plusieurs processus. Un bail expiré (processus arrêté en cours de
+/// route) est repris par l'exécution suivante.
+model JobLease {
+  job            String    @id
+  lockedUntil    DateTime? @map("locked_until")
+  lockedBy       String?   @map("locked_by")
+  lastStartedAt  DateTime? @map("last_started_at")
+  lastFinishedAt DateTime? @map("last_finished_at")
+  lastStatus     String?   @map("last_status")
+  lastMessage    String?   @map("last_message")
+
+  @@map("job_leases")
+}
+
+/// Signalements de la reprise des tâches historiques (migration V1.0) : ce que
+/// la migration n'a pas pu déduire de données explicites.
+model TaskMigrationNote {
+  taskId      String   @map("task_id") @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  /// `ASSIGNEE_UNKNOWN` | `CREATOR_UNKNOWN`
+  reason      String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, reason])
+  @@index([workspaceId, reason])
+  @@map("task_migration_notes")
 }

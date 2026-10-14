@@ -19,12 +19,28 @@ import type { ProjectRole } from "./types";
  *    avoir été restreint au rôle `COMMENTER`. Administrer (renommer, membres,
  *    archiver, supprimer) demande d'être propriétaire.
  *
- * Une tâche est visible si :
+ * Une tâche est visible si elle n'est pas dans la corbeille et :
  *   - elle n'appartient à aucun projet (comportement historique de la V0.4 :
  *     les tâches « libres » restent partagées dans l'espace) ;
  *   - ou elle appartient à au moins un projet lisible ;
  *   - ou l'utilisateur en est responsable, créateur, collaborateur ou abonné.
- * Une sous-tâche hérite de la visibilité de sa parente (un seul niveau).
+ * Une sous-tâche est visible si elle l'est elle-même à ce titre, ou si sa
+ * parente l'est (un seul niveau). La réciproque est fausse : le responsable
+ * d'une sous-tâche ne voit pas la parente pour autant.
+ *
+ * Cette visibilité « par implication » ne s'étend jamais au-delà de la tâche :
+ * le responsable d'une tâche d'un projet privé n'en voit ni les autres tâches,
+ * ni les sections, ni le nom du projet (voir `serialize.ts`).
+ *
+ * Droits sur une tâche visible (`evaluateTaskAccess`) :
+ *   - lire et commenter : toute personne qui la voit ;
+ *   - modifier ses champs : un éditeur d'un de ses projets, ou son
+ *     responsable / créateur / collaborateur (même commentateur ou non membre) ;
+ *   - gérer (supprimer, dupliquer, rattacher à un autre projet, changer de
+ *     parente, réaffecter, partager avec d'autres personnes) : un éditeur
+ *     d'un de ses projets — ou, pour une tâche libre, tout l'espace.
+ *     Un responsable non membre ne peut donc pas faire sortir la tâche de son
+ *     projet privé ni y donner accès à quelqu'un d'autre.
  */
 
 export interface Actor {
@@ -49,6 +65,7 @@ function ownTaskConditions(actor: Actor): Prisma.TaskWhereInput[] {
 
 function rootVisibleWhere(actor: Actor): Prisma.TaskWhereInput {
   return {
+    deletedAt: null,
     OR: [
       { projects: { none: {} } },
       { projects: { some: { project: readableProjectWhere(actor) } } },
@@ -61,10 +78,12 @@ function rootVisibleWhere(actor: Actor): Prisma.TaskWhereInput {
 export function visibleTaskWhere(actor: Actor): Prisma.TaskWhereInput {
   return {
     workspaceId: actor.workspaceId,
+    deletedAt: null,
     OR: [
       { parentId: null, AND: [rootVisibleWhere(actor)] },
       {
         parentId: { not: null },
+        parent: { deletedAt: null },
         OR: [...ownTaskConditions(actor), { parent: rootVisibleWhere(actor) }],
       },
     ],
@@ -135,8 +154,9 @@ export function taskAccessSelect(actor: Actor) {
     id: true,
     workspaceId: true,
     parentId: true,
+    deletedAt: true,
     ...rootSelect,
-    parent: { select: rootSelect },
+    parent: { select: { ...rootSelect, deletedAt: true } },
   } satisfies Prisma.TaskSelect;
 }
 
@@ -149,13 +169,16 @@ interface TaskAccessRoot {
 
 export interface TaskAccessInfo extends TaskAccessRoot {
   parentId: string | null;
-  parent: TaskAccessRoot | null;
+  deletedAt?: Date | null;
+  parent: (TaskAccessRoot & { deletedAt?: Date | null }) | null;
 }
 
 export interface TaskPermissions {
   canRead: boolean;
   canEdit: boolean;
   canComment: boolean;
+  /** Structure et partage : supprimer, dupliquer, déplacer, réaffecter, abonner d'autres personnes. */
+  canManage: boolean;
 }
 
 /**
@@ -182,12 +205,36 @@ export function evaluateTaskAccess(task: TaskAccessInfo, actor: Actor): TaskPerm
   const readableProject = projects.some(canReadProject);
   const editableProject = projects.some((p) => canEditProjectContent(p, actor));
 
-  const canRead = free || readableProject || self.owns || self.follows || top.owns || top.follows;
+  const deleted = Boolean(task.deletedAt || task.parent?.deletedAt);
+  const canRead =
+    !deleted && (free || readableProject || self.owns || self.follows || top.owns || top.follows);
   const canEdit =
     canRead &&
     (free || editableProject || self.owns || self.collaborates || top.owns || top.collaborates);
+  const canManage = canRead && (free || editableProject);
 
-  return { canRead, canEdit, canComment: canRead };
+  return { canRead, canEdit, canComment: canRead, canManage };
+}
+
+/**
+ * Droits sur une tâche **dans la corbeille** : la voir et la restaurer
+ * demandent de pouvoir la gérer (comme pour la supprimer). La suppression
+ * définitive demande d'administrer tous ses projets ; pour une tâche libre,
+ * d'en être le créateur ou la personne qui l'a supprimée.
+ */
+export function evaluateTrashAccess(
+  task: TaskAccessInfo & { createdById: string | null; deletedById: string | null },
+  actor: Actor,
+): { canRestore: boolean; canPurge: boolean } {
+  const root = task.parent ?? task;
+  const projects = root.projects.map((p) => p.project);
+  if (projects.length === 0) {
+    return { canRestore: true, canPurge: task.createdById === actor.id || task.deletedById === actor.id };
+  }
+  return {
+    canRestore: projects.some((p) => canEditProjectContent(p, actor)),
+    canPurge: projects.every((p) => canManageProject(p, actor)),
+  };
 }
 
 /** Erreur d'accès : message neutre, identique pour « absent » et « interdit ». */

@@ -123,6 +123,8 @@ export interface TaskItem {
   followUpId: string | null;
   version: number;
   canEdit: boolean;
+  /** Supprimer, dupliquer, déplacer, réaffecter, partager (voir `access.ts`). */
+  canManage: boolean;
 }
 
 export interface SectionItem {

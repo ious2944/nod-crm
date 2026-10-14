@@ -49,6 +49,7 @@ const task = (over: Partial<TaskItem> = {}): TaskItem => ({
   followUpId: null,
   version: 1,
   canEdit: true,
+  canManage: true,
   ...over,
 });
 

@@ -10,9 +10,9 @@
 --   * les tâches existantes restent dans la même table : la liste historique,
 --     le cockpit et les fiches CRM continuent de les lire telles quelles.
 --
--- Reprise de données en fin de fichier : statut dérivé de `completed_at`,
--- créateur et responsable dérivés du journal d'audit (ou de l'unique
--- utilisateur de l'espace).
+-- Reprise de données en fin de fichier : statut dérivé de `completed_at`.
+-- Le créateur est repris par la migration suivante ; le responsable n'est
+-- jamais déduit.
 
 -- CreateEnum
 CREATE TYPE "TaskStatus" AS ENUM ('TODO', 'IN_PROGRESS', 'WAITING', 'DONE');
@@ -697,27 +697,7 @@ ALTER TABLE "task_forms" ADD CONSTRAINT "task_forms_section_id_fkey" FOREIGN KEY
 -- 1. Statut : une tâche terminée est DONE, les autres restent TODO (défaut).
 UPDATE "tasks" SET "status" = 'DONE' WHERE "completed_at" IS NOT NULL;
 
--- 2. Créateur et responsable : l'auteur de l'événement d'audit CREATE.
-UPDATE "tasks" AS t
-SET "created_by_id" = a."user_id",
-    "assignee_id"   = a."user_id"
-FROM (
-  SELECT DISTINCT ON ("entity_id") "entity_id", "user_id"
-  FROM "audit_logs"
-  WHERE "entity_type" = 'Task' AND "action" = 'CREATE' AND "user_id" IS NOT NULL
-  ORDER BY "entity_id", "created_at"
-) AS a
-WHERE a."entity_id" = t."id"
-  AND EXISTS (SELECT 1 FROM "users" u WHERE u."id" = a."user_id" AND u."workspace_id" = t."workspace_id");
-
--- 3. Espaces à utilisateur unique : les tâches restantes lui reviennent.
-UPDATE "tasks" AS t
-SET "assignee_id"   = u."id",
-    "created_by_id" = COALESCE(t."created_by_id", u."id")
-FROM (
-  SELECT "workspace_id", MIN("id"::text)::uuid AS "id"
-  FROM "users"
-  GROUP BY "workspace_id"
-  HAVING COUNT(*) = 1
-) AS u
-WHERE t."workspace_id" = u."workspace_id" AND t."assignee_id" IS NULL;
+-- 2. Créateur et responsable : voir la migration suivante
+--    (20261014090000_work_management_hardening). Aucun responsable n'est
+--    déduit ici : l'auteur d'une création n'est pas nécessairement la personne
+--    responsable de la tâche.

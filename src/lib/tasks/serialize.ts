@@ -11,6 +11,8 @@ import {
   evaluateTaskAccess,
   projectAccessSelect,
   projectRole,
+  readableProjectWhere,
+  visibleTaskWhere,
   type Actor,
   type ProjectAccessInfo,
 } from "./access";
@@ -120,7 +122,7 @@ export function taskItemSelect(actor: Actor) {
         dateValue: true,
         boolValue: true,
         optionIds: true,
-        field: { select: { type: true } },
+        field: { select: { type: true, projectId: true } },
       },
     },
     followers: { where: { userId: actor.id }, select: { kind: true } },
@@ -133,9 +135,12 @@ export function taskItemSelect(actor: Actor) {
       },
     },
     parent: { select: access },
-    blockedBy: { select: { blockingId: true, blocking: { select: { status: true } } } },
-    blocking: { select: { blockedId: true } },
-    _count: { select: { subtasks: true, comments: true, attachments: true } },
+    blockedBy: {
+      where: { blocking: { deletedAt: null } },
+      select: { blockingId: true, blocking: { select: { status: true } } },
+    },
+    blocking: { where: { blocked: { deletedAt: null } }, select: { blockedId: true } },
+    _count: { select: { subtasks: { where: { deletedAt: null } }, comments: true, attachments: true } },
   } satisfies Prisma.TaskSelect;
 }
 
@@ -181,10 +186,17 @@ export async function hydrateTaskItems(actor: Actor, records: TaskItemRecord[]):
   if (records.length === 0) return [];
   const ids = records.map((r) => r.id);
 
-  const [doneCounts, spent] = await Promise.all([
+  const dependencyIds = [
+    ...new Set(records.flatMap((r) => [...r.blockedBy.map((d) => d.blockingId), ...r.blocking.map((d) => d.blockedId)])),
+  ];
+  const fieldProjectIds = [
+    ...new Set(records.flatMap((r) => r.customValues.map((v) => v.field.projectId).filter((id): id is string => Boolean(id)))),
+  ];
+
+  const [doneCounts, spent, visibleDeps, readableFieldProjects] = await Promise.all([
     prisma.task.groupBy({
       by: ["parentId"],
-      where: { workspaceId: actor.workspaceId, parentId: { in: ids }, status: "DONE" },
+      where: { workspaceId: actor.workspaceId, parentId: { in: ids }, status: "DONE", deletedAt: null },
       _count: { _all: true },
     }),
     prisma.taskTimeEntry.groupBy({
@@ -192,12 +204,30 @@ export async function hydrateTaskItems(actor: Actor, records: TaskItemRecord[]):
       where: { workspaceId: actor.workspaceId, taskId: { in: ids } },
       _sum: { minutes: true },
     }),
+    dependencyIds.length
+      ? prisma.task.findMany({ where: { AND: [visibleTaskWhere(actor), { id: { in: dependencyIds } }] }, select: { id: true } })
+      : Promise.resolve([]),
+    fieldProjectIds.length
+      ? prisma.project.findMany({ where: { AND: [readableProjectWhere(actor), { id: { in: fieldProjectIds } }] }, select: { id: true } })
+      : Promise.resolve([]),
   ]);
 
   const doneMap = new Map(doneCounts.map((row) => [row.parentId, row._count._all]));
   const spentMap = new Map(spent.map((row) => [row.taskId, row._sum.minutes ?? 0]));
+  const scope: VisibilityScope = {
+    visibleTaskIds: new Set(visibleDeps.map((t) => t.id)),
+    readableProjectIds: new Set(readableFieldProjects.map((p) => p.id)),
+  };
 
-  return records.map((record) => toTaskItem(actor, record, doneMap.get(record.id) ?? 0, spentMap.get(record.id) ?? 0));
+  return records.map((record) =>
+    toTaskItem(actor, record, doneMap.get(record.id) ?? 0, spentMap.get(record.id) ?? 0, scope),
+  );
+}
+
+/** Ce que l'acteur peut voir autour d'une tâche : dépendances et projets des champs. */
+export interface VisibilityScope {
+  visibleTaskIds: Set<string>;
+  readableProjectIds: Set<string>;
 }
 
 export function toTaskItem(
@@ -205,6 +235,7 @@ export function toTaskItem(
   record: TaskItemRecord,
   subtaskDoneCount: number,
   spentMinutes: number,
+  scope: VisibilityScope,
 ): TaskItem {
   const access = evaluateTaskAccess(
     {
@@ -218,8 +249,12 @@ export function toTaskItem(
     actor,
   );
 
+  // Valeur d'un champ propre à un projet : seulement si ce projet est lisible.
   const custom: Record<string, CustomFieldValue> = {};
-  for (const value of record.customValues) custom[value.fieldId] = customValueOf(value);
+  for (const value of record.customValues) {
+    if (value.field.projectId && !scope.readableProjectIds.has(value.field.projectId)) continue;
+    custom[value.fieldId] = customValueOf(value);
+  }
 
   const plain = toPlainText(record.notes);
 
@@ -254,8 +289,11 @@ export function toTaskItem(
     subtaskDoneCount,
     commentCount: record._count.comments,
     attachmentCount: record._count.attachments,
-    blockedByIds: record.blockedBy.map((d) => d.blockingId),
-    blockingIds: record.blocking.map((d) => d.blockedId),
+    // Les identifiants des tâches liées invisibles ne sont pas transmis ; le
+    // nombre de bloqueurs ouverts, lui, compte aussi ceux que l'acteur ne voit
+    // pas : la tâche est réellement bloquée.
+    blockedByIds: record.blockedBy.map((d) => d.blockingId).filter((id) => scope.visibleTaskIds.has(id)),
+    blockingIds: record.blocking.map((d) => d.blockedId).filter((id) => scope.visibleTaskIds.has(id)),
     openBlockerCount: record.blockedBy.filter((d) => d.blocking.status !== "DONE").length,
     recurrence: parseRecurrence(record.recurrence),
     hasDescription: Boolean(record.notes?.trim()),
@@ -266,6 +304,7 @@ export function toTaskItem(
     followUpId: record.followUpId,
     version: record.version,
     canEdit: access.canEdit,
+    canManage: access.canManage,
   };
 }
 
