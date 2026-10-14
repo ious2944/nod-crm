@@ -2,7 +2,7 @@
 
 import { Download, ExternalLink, Plus, Trash, Upload, Zap } from "lucide-react";
 import NextLink from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   deleteCustomFieldAction,
@@ -95,7 +95,9 @@ export function CustomizeDrawer({ project, sections, onClose, onChanged }: { pro
 /* ─── Champs ──────────────────────────────────────────────────────────────── */
 
 function FieldsTab({ project, onChanged }: { project: ProjectDetail; onChanged: () => void }) {
-  const fields = useWork((s) => s.context?.fields ?? []);
+  const allFields = useWork((s) => s.context?.fields);
+  // Champs de la bibliothèque + champs propres à ce projet (jamais ceux d'un autre projet).
+  const fields = useMemo(() => (allFields ?? []).filter((f) => f.projectId === null || f.projectId === project.id), [allFields, project.id]);
   const { run, reloadContext, store } = useWorkApi();
   const [editing, setEditing] = useState<CustomFieldDef | "new" | null>(null);
   const [deleting, setDeleting] = useState<CustomFieldDef | null>(null);
@@ -107,13 +109,16 @@ function FieldsTab({ project, onChanged }: { project: ProjectDetail; onChanged: 
   };
   return (
     <div className="space-y-3">
-      <p className="text-[12px] text-muted">Les champs sont définis pour tout l&apos;espace et activés projet par projet. Ils apparaissent dans le détail des tâches, les colonnes, les filtres, les tris et les regroupements.</p>
+      <p className="text-[12px] text-muted">Les champs de la bibliothèque sont partagés par l&apos;espace et activés projet par projet : une tâche présente dans plusieurs projets n&apos;a qu&apos;une valeur par champ. Un champ créé ici est propre à ce projet. Ils apparaissent dans le détail des tâches, les colonnes, les filtres, les tris et les regroupements.</p>
       <ul className="divide-y divide-border-subtle rounded-md border border-border-subtle">
         {fields.length === 0 && <li className="px-3 py-4 text-center text-[12px] text-muted">Aucun champ personnalisé.</li>}
         {fields.map((field) => (
           <li key={field.id} className="flex items-center gap-2 px-3 py-2">
             <input type="checkbox" aria-label={`Activer ${field.name} dans ce projet`} checked={project.customFieldIds.includes(field.id)} disabled={!project.canEdit} onChange={(e) => void toggle(field, e.target.checked)} className="accent-[var(--nod-accent)]" />
-            <span className="flex-1 text-[13px] text-ink">{field.name}</span>
+            <span className="flex-1 text-[13px] text-ink">
+              {field.name}
+              {field.projectId && <span className="ml-2 text-[11px] text-muted">(propre au projet)</span>}
+            </span>
             <span className="text-[11px] text-muted">{FIELD_TYPE_LABELS[field.type]}</span>
             <button type="button" className={BTN_GHOST} onClick={() => setEditing(field)}>
               Modifier

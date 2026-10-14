@@ -13,7 +13,9 @@ import { objectStore } from "@/lib/storage";
 import {
   canEditProjectContent,
   evaluateTaskAccess,
+  evaluateTrashAccess,
   projectAccessSelect,
+  readableProjectWhere,
   taskAccessSelect,
   TaskAccessError,
   TaskValidationError,
@@ -268,6 +270,11 @@ interface ActivityInput {
   field?: string | null;
   oldValue?: string | null;
   newValue?: string | null;
+  /**
+   * Projet concerné par la ligne (ajout, retrait, changement de section) : la
+   * ligne n'est montrée qu'aux personnes qui peuvent lire ce projet.
+   */
+  projectId?: string | null;
 }
 
 function activityRows(ctx: MutationContext, rows: ActivityInput[]) {
@@ -280,6 +287,7 @@ function activityRows(ctx: MutationContext, rows: ActivityInput[]) {
     field: row.field ?? null,
     oldValue: row.oldValue?.slice(0, 500) ?? null,
     newValue: row.newValue?.slice(0, 500) ?? null,
+    projectId: row.projectId ?? null,
   }));
 }
 
@@ -849,6 +857,17 @@ export async function updateTaskFields(
       taskId,
     });
   }
+  if (changes.includes("approvalStatus") && patch.approvalStatus === "PENDING" && record.approvalStatus === "CHANGES_REQUESTED" && assignee) {
+    // Nouvelle soumission après une demande de modifications.
+    await notify({
+      workspaceId: actor.workspaceId,
+      recipients: [assignee],
+      actorId: actorIdOf(ctx),
+      type: "APPROVAL",
+      title: `Validation demandée à nouveau : ${title}`,
+      taskId,
+    });
+  }
   if (changes.includes("approvalStatus") && patch.approvalStatus && patch.approvalStatus !== "PENDING") {
     await notify({
       workspaceId: actor.workspaceId,
@@ -897,7 +916,7 @@ export async function updateTaskFields(
 
   // Toutes les sous-tâches terminées : événement sur la parente + suggestion.
   if (changes.includes("status") && patch.status === "DONE" && record.parentId) {
-    const open = await prisma.task.count({ where: { parentId: record.parentId, status: { not: "DONE" } } });
+    const open = await prisma.task.count({ where: { parentId: record.parentId, status: { not: "DONE" }, deletedAt: null } });
     if (open === 0) {
       const parent = await prisma.task.findUnique({
         where: { id: record.parentId },
@@ -932,7 +951,7 @@ export async function spawnNextOccurrence(ctx: MutationContext, taskId: string):
       customValues: true,
       projects: true,
       followers: true,
-      subtasks: { orderBy: { subtaskPosition: "asc" } },
+      subtasks: { where: { deletedAt: null }, orderBy: { subtaskPosition: "asc" } },
       recurrenceNext: { select: { id: true } },
     },
   });
@@ -1044,21 +1063,32 @@ export async function spawnNextOccurrence(ctx: MutationContext, taskId: string):
 
 // ─── Suppression, duplication ─────────────────────────────────────────────────
 
+/**
+ * Met la tâche (et ses sous-tâches encore actives) à la corbeille. Rien n'est
+ * effacé : commentaires, pièces jointes, historique et liens restent en base
+ * et réapparaissent à la restauration. Les sous-tâches mises à la corbeille en
+ * même temps partagent le même horodatage `deleted_at`, qui sert à les
+ * restaurer ensemble.
+ */
 export async function deleteTask(ctx: MutationContext, taskId: string): Promise<{ id: string; parentId: string | null }> {
-  const { task } = await requireTaskEdit(ctx, taskId);
+  const { task } = await requireTaskManage(ctx, taskId);
   const projectIds = await projectIdsOf(taskId);
-  const attachments = await prisma.taskAttachment.findMany({
-    where: { OR: [{ taskId }, { task: { parentId: taskId } }] },
-    select: { storageKey: true },
-  });
+  const now = new Date();
 
-  await prisma.task.deleteMany({ where: { id: taskId, workspaceId: ctx.actor.workspaceId } });
-  for (const { storageKey } of attachments) {
-    await objectStore.remove(storageKey).catch(() => {});
-  }
-  if (task.parentId) {
-    await logActivity(ctx, [{ taskId: task.parentId, kind: "subtask_removed" }]);
-  }
+  await prisma.$transaction(async (tx) => {
+    await tx.task.updateMany({
+      where: { workspaceId: ctx.actor.workspaceId, deletedAt: null, OR: [{ id: taskId }, { parentId: taskId }] },
+      data: { deletedAt: now, deletedById: actorIdOf(ctx), version: { increment: 1 } },
+    });
+    await logActivity(
+      ctx,
+      [
+        { taskId, kind: "trashed" },
+        ...(task.parentId ? [{ taskId: task.parentId, kind: "subtask_removed" }] : []),
+      ],
+      tx,
+    );
+  });
   await audit(ctx, "DELETE", taskId);
   await publishChange({
     w: ctx.actor.workspaceId,
@@ -1070,19 +1100,132 @@ export async function deleteTask(ctx: MutationContext, taskId: string): Promise<
   return { id: taskId, parentId: task.parentId };
 }
 
+async function loadTrashed(ctx: MutationContext, taskId: string) {
+  const task = await prisma.task.findFirst({
+    where: { id: taskId, workspaceId: ctx.actor.workspaceId, deletedAt: { not: null } },
+    select: { ...taskAccessSelect(ctx.actor), createdById: true, deletedById: true },
+  });
+  if (!task) throw new TaskAccessError("NOT_FOUND");
+  const rights = evaluateTrashAccess(task, ctx.actor);
+  if (!rights.canRestore && !rights.canPurge) throw new TaskAccessError("NOT_FOUND");
+  return { task, rights };
+}
+
+export interface TrashItem {
+  id: string;
+  title: string;
+  deletedAt: string;
+  deletedBy: string | null;
+  parentTitle: string | null;
+  projects: string[];
+  subtaskCount: number;
+  canRestore: boolean;
+  canPurge: boolean;
+}
+
+/** Corbeille de l'espace, limitée aux tâches que l'acteur peut restaurer ou supprimer. */
+export async function listTrash(actor: Actor): Promise<TrashItem[]> {
+  const rows = await prisma.task.findMany({
+    where: {
+      workspaceId: actor.workspaceId,
+      deletedAt: { not: null },
+      // Les sous-tâches supprimées avec leur parente sont restaurées avec elle.
+      OR: [{ parentId: null }, { parent: { deletedAt: null } }],
+    },
+    select: {
+      ...taskAccessSelect(actor),
+      title: true,
+      createdById: true,
+      deletedById: true,
+      deletedBy: { select: { displayName: true, email: true } },
+      parent: { select: { ...taskAccessSelect(actor).parent.select, title: true } },
+      projects: { select: { project: { select: { ...projectAccessSelect(actor), name: true } } } },
+    },
+    orderBy: { deletedAt: "desc" },
+    take: 300,
+  });
+  const items: TrashItem[] = [];
+  for (const row of rows) {
+    const rights = evaluateTrashAccess(row, actor);
+    if (!rights.canRestore && !rights.canPurge) continue;
+    const subtaskCount = await prisma.task.count({ where: { parentId: row.id, deletedAt: row.deletedAt } });
+    const projects = (row.parent ?? row).projects
+      .map((p) => p.project as typeof p.project & { name?: string })
+      .filter((p) => p.visibility === "WORKSPACE" || p.members.length > 0)
+      .map((p) => p.name ?? "");
+    items.push({
+      id: row.id,
+      title: row.title,
+      deletedAt: row.deletedAt!.toISOString(),
+      deletedBy: row.deletedBy ? row.deletedBy.displayName?.trim() || row.deletedBy.email : null,
+      parentTitle: row.parent?.title ?? null,
+      projects,
+      subtaskCount,
+      ...rights,
+    });
+  }
+  return items;
+}
+
+/** Restaure une tâche et les sous-tâches mises à la corbeille avec elle. */
+export async function restoreTask(ctx: MutationContext, taskId: string): Promise<TaskItem> {
+  const { task, rights } = await loadTrashed(ctx, taskId);
+  if (!rights.canRestore) throw new TaskAccessError("FORBIDDEN", MANAGE_REFUSED);
+  if (task.parent?.deletedAt) throw new TaskValidationError("Restaurez d'abord la tâche parente.");
+  await prisma.$transaction(async (tx) => {
+    await tx.task.updateMany({
+      where: {
+        workspaceId: ctx.actor.workspaceId,
+        OR: [{ id: taskId }, { parentId: taskId, deletedAt: task.deletedAt }],
+      },
+      data: { deletedAt: null, deletedById: null, version: { increment: 1 } },
+    });
+    await logActivity(ctx, [{ taskId, kind: "restored" }], tx);
+  });
+  await audit(ctx, "UPDATE", taskId);
+  await broadcast(ctx, task.parentId ? [taskId, task.parentId] : [taskId], "task_created");
+  return getTaskItem(ctx, taskId);
+}
+
+/**
+ * Suppression définitive depuis la corbeille : réservée aux propriétaires de
+ * tous les projets de la tâche (ou, pour une tâche libre, à son créateur et à
+ * la personne qui l'a supprimée). Efface aussi les fichiers joints.
+ */
+export async function purgeTask(ctx: MutationContext, taskId: string): Promise<void> {
+  const { rights } = await loadTrashed(ctx, taskId);
+  if (!rights.canPurge) {
+    throw new TaskAccessError("FORBIDDEN", "Seul le propriétaire du projet peut supprimer définitivement cette tâche.");
+  }
+  const attachments = await prisma.taskAttachment.findMany({
+    where: { OR: [{ taskId }, { task: { parentId: taskId } }] },
+    select: { storageKey: true },
+  });
+  await prisma.task.deleteMany({ where: { id: taskId, workspaceId: ctx.actor.workspaceId, deletedAt: { not: null } } });
+  for (const { storageKey } of attachments) {
+    await objectStore.remove(storageKey).catch(() => {});
+  }
+  await audit(ctx, "DELETE", taskId);
+}
+
 export async function duplicateTask(
   ctx: MutationContext,
   taskId: string,
   options: { includeSubtasks?: boolean } = {},
 ): Promise<TaskItem> {
-  await requireTaskRead(ctx, taskId);
+  await requireTaskManage(ctx, taskId);
   const source = await prisma.task.findFirst({
     where: { id: taskId, workspaceId: ctx.actor.workspaceId },
-    include: { tags: true, customValues: true, projects: true, subtasks: { orderBy: { subtaskPosition: "asc" } } },
+    include: {
+      tags: true,
+      customValues: true,
+      projects: true,
+      subtasks: { where: { deletedAt: null }, orderBy: { subtaskPosition: "asc" } },
+    },
   });
   if (!source) throw new TaskAccessError("NOT_FOUND");
   for (const membership of source.projects) await requireProjectContentEdit(ctx, membership.projectId);
-  if (source.parentId) await requireTaskEdit(ctx, source.parentId);
+  if (source.parentId) await requireTaskManage(ctx, source.parentId);
 
   const created = await prisma.$transaction(async (tx) => {
     const copies: { projectId: string; sectionId: string | null; position: number }[] = [];
@@ -1208,8 +1351,8 @@ export async function moveTask(
     select: { sectionId: true, position: true },
   });
   if (!existing) {
-    // Ajouter une tâche à un nouveau projet exige de pouvoir la modifier.
-    await requireTaskEdit(ctx, input.taskId);
+    // Ajouter la tâche à un autre projet l'expose à ses membres : droit de gestion.
+    await requireTaskManage(ctx, input.taskId);
   }
 
   const neighbour = async (id: string | null | undefined) => {
@@ -1256,7 +1399,7 @@ export async function moveTask(
 
     if (!existing) {
       const project = await tx.project.findUnique({ where: { id: input.projectId }, select: { name: true } });
-      await logActivity(ctx, [{ taskId: input.taskId, kind: "project_added", newValue: project?.name }], tx);
+      await logActivity(ctx, [{ taskId: input.taskId, kind: "project_added", newValue: project?.name, projectId: input.projectId }], tx);
     } else if (existing.sectionId !== input.sectionId) {
       const [from, to] = await Promise.all([
         existing.sectionId ? tx.projectSection.findUnique({ where: { id: existing.sectionId }, select: { name: true } }) : null,
@@ -1264,7 +1407,7 @@ export async function moveTask(
       ]);
       await logActivity(
         ctx,
-        [{ taskId: input.taskId, kind: "moved", field: "Section", oldValue: from?.name ?? "Sans section", newValue: to?.name ?? "Sans section" }],
+        [{ taskId: input.taskId, kind: "moved", field: "Section", oldValue: from?.name ?? "Sans section", newValue: to?.name ?? "Sans section", projectId: input.projectId }],
         tx,
       );
     }
@@ -1289,13 +1432,13 @@ export async function addTaskToProject(
 }
 
 export async function removeTaskFromProject(ctx: MutationContext, taskId: string, projectId: string): Promise<TaskItem> {
-  await requireTaskEdit(ctx, taskId);
+  await requireTaskManage(ctx, taskId);
   await requireProjectContentEdit(ctx, projectId);
   const project = await prisma.project.findUnique({ where: { id: projectId }, select: { name: true } });
   const { count } = await prisma.taskProject.deleteMany({ where: { taskId, projectId, workspaceId: ctx.actor.workspaceId } });
   if (count) {
     await prisma.task.update({ where: { id: taskId }, data: { version: { increment: 1 } } });
-    await logActivity(ctx, [{ taskId, kind: "project_removed", oldValue: project?.name }]);
+    await logActivity(ctx, [{ taskId, kind: "project_removed", oldValue: project?.name, projectId }]);
     await publishChange({ w: ctx.actor.workspaceId, a: actorIdOf(ctx), t: [taskId], p: [projectId], k: "task_moved" });
   }
   return getTaskItem(ctx, taskId);
@@ -1334,12 +1477,13 @@ export async function moveSubtask(
 
 /** Convertit une sous-tâche en tâche indépendante, ou l'inverse. */
 export async function setTaskParent(ctx: MutationContext, taskId: string, parentId: string | null): Promise<TaskItem> {
-  const { task } = await requireTaskEdit(ctx, taskId);
+  // Changer de parente change qui peut voir la tâche : droit de gestion des deux côtés.
+  const { task } = await requireTaskManage(ctx, taskId);
   if (parentId) {
     if (parentId === taskId) throw new TaskValidationError("Une tâche ne peut pas être sa propre parente.");
-    const { task: parent } = await requireTaskEdit(ctx, parentId);
+    const { task: parent } = await requireTaskManage(ctx, parentId);
     if (parent.parentId) throw new TaskValidationError("Une sous-tâche ne peut pas avoir de sous-tâches.");
-    const children = await prisma.task.count({ where: { parentId: taskId } });
+    const children = await prisma.task.count({ where: { parentId: taskId, deletedAt: null } });
     if (children) throw new TaskValidationError("Cette tâche a déjà des sous-tâches.");
     await prisma.$transaction([
       prisma.taskProject.deleteMany({ where: { taskId } }),
@@ -1395,9 +1539,31 @@ async function writeCustomValue(
 ) {
   const field = await prisma.customField.findFirst({
     where: { id: fieldId, workspaceId: ctx.actor.workspaceId },
-    select: { id: true, name: true, type: true, options: true },
+    select: { id: true, name: true, type: true, options: true, projectId: true },
   });
   if (!field) throw new TaskValidationError("Champ personnalisé introuvable.");
+  if (field.projectId) {
+    // Champ propre à un projet : la tâche doit appartenir à ce projet (ou sa
+    // parente), et l'acteur doit pouvoir lire ce projet.
+    const owner = await prisma.task.findFirst({
+      where: {
+        id: taskId,
+        OR: [
+          { projects: { some: { projectId: field.projectId } } },
+          { parent: { projects: { some: { projectId: field.projectId } } } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (!owner) throw new TaskValidationError(`« ${field.name} » est propre à un autre projet.`);
+    if (!ctx.automation && !ctx.trusted) {
+      const project = await prisma.project.findFirst({
+        where: { AND: [readableProjectWhere(ctx.actor), { id: field.projectId }] },
+        select: { id: true },
+      });
+      if (!project) throw new TaskValidationError("Champ personnalisé introuvable.");
+    }
+  }
   const parsed = customValueSchema.safeParse(rawValue);
   if (!parsed.success) throw new TaskValidationError(`Valeur invalide pour « ${field.name} ».`);
   const value = parsed.data;
@@ -1539,10 +1705,11 @@ export async function setFollower(
   kind: "COLLABORATOR" | "FOLLOWER" | null,
 ): Promise<void> {
   const self = userId === ctx.actor.id;
-  // S'abonner soi-même demande seulement de pouvoir lire ; ajouter quelqu'un
-  // d'autre, ou devenir collaborateur, demande de pouvoir modifier.
+  // S'abonner (ou se désabonner) soi-même demande seulement de pouvoir lire.
+  // Abonner quelqu'un d'autre lui ouvre la tâche, et un collaborateur peut la
+  // modifier : ces deux cas demandent le droit de gestion.
   if (self && kind !== "COLLABORATOR") await requireTaskRead(ctx, taskId);
-  else await requireTaskEdit(ctx, taskId);
+  else await requireTaskManage(ctx, taskId);
   await assertUserInWorkspace(ctx.actor, userId);
 
   const label = await userLabel(userId);
@@ -1634,13 +1801,18 @@ export async function addComment(ctx: MutationContext, taskId: string, rawBody: 
         })
       ).map((u) => u.id)
     : [];
+  // Une mention n'ouvre jamais la tâche : seules les personnes qui la lisent
+  // déjà sont abonnées et notifiées.
+  const readableMentions = validMentions.length
+    ? await readersAmong(ctx.actor.workspaceId, taskId, validMentions)
+    : [];
 
   const comment = await prisma.$transaction(async (tx) => {
     const created = await tx.comment.create({
       data: { workspaceId: ctx.actor.workspaceId, taskId, authorId: actorIdOf(ctx), body },
       select: { id: true },
     });
-    const followers = [actorIdOf(ctx), ...validMentions].filter((v): v is string => Boolean(v));
+    const followers = [actorIdOf(ctx), ...readableMentions].filter((v): v is string => Boolean(v));
     if (followers.length) {
       await tx.taskFollower.createMany({
         data: followers.map((userId) => ({ taskId, userId, kind: "FOLLOWER" as const })),
@@ -1656,10 +1828,10 @@ export async function addComment(ctx: MutationContext, taskId: string, rawBody: 
   );
   const preview = toPlainText(body).slice(0, 200);
 
-  if (validMentions.length) {
+  if (readableMentions.length) {
     await notify({
       workspaceId: ctx.actor.workspaceId,
-      recipients: validMentions,
+      recipients: readableMentions,
       actorId: actorIdOf(ctx),
       type: "MENTIONED",
       title: `Mention dans « ${task?.title ?? "une tâche"} »`,
@@ -1670,7 +1842,7 @@ export async function addComment(ctx: MutationContext, taskId: string, rawBody: 
   }
   await notify({
     workspaceId: ctx.actor.workspaceId,
-    recipients: [...followerIds, task?.assigneeId].filter((id) => id && !validMentions.includes(id)),
+    recipients: [...followerIds, task?.assigneeId].filter((id) => id && !readableMentions.includes(id)),
     actorId: actorIdOf(ctx),
     type: "COMMENT",
     title: `Nouveau commentaire sur « ${task?.title ?? "une tâche"} »`,

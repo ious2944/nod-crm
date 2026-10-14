@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { PRIORITY_LABELS, STATUS_LABELS, TASK_PRIORITIES, TASK_STATUSES } from "@/lib/tasks/constants";
 import { minutesLabel, startOfWeekKey, shortDate } from "@/lib/tasks/format";
 import { addDays } from "@/lib/tasks/recurrence";
+import { computeStats } from "@/lib/tasks/project-stats";
 import type { TaskItem } from "@/lib/tasks/types";
 
 import { useToday } from "./pickers";
@@ -29,17 +30,6 @@ const PRIORITY_BAR: Record<string, string> = {
   HIGH: "bg-late-fg",
   URGENT: "bg-critical-fg",
 };
-
-export function computeStats(tasks: TaskItem[], today: string) {
-  const top = tasks.filter((t) => !t.parentId);
-  const done = top.filter((t) => t.status === "DONE");
-  const open = top.filter((t) => t.status !== "DONE");
-  const overdue = open.filter((t) => t.dueDate && t.dueDate < today);
-  const blocked = open.filter((t) => t.openBlockerCount > 0);
-  const estimated = tasks.reduce((s, t) => s + (t.estimatedMinutes ?? 0), 0);
-  const spent = tasks.reduce((s, t) => s + t.spentMinutes, 0);
-  return { top, done, open, overdue, blocked, estimated, spent, progress: top.length ? done.length / top.length : 0 };
-}
 
 function Tile({ label, value, tone = "text-ink", hint }: { label: string; value: string | number; tone?: string; hint?: string }) {
   return (

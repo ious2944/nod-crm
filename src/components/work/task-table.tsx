@@ -260,7 +260,7 @@ export function TaskTable({
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
       if (flatIds[index - 1]) focusRow(flatIds[index - 1]);
-    } else if (event.key === "Delete" && task.canEdit) {
+    } else if (event.key === "Delete" && task.canManage) {
       event.preventDefault();
       menu.askDelete(task);
     } else if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {

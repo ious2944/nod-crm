@@ -44,6 +44,7 @@ import { DashboardView } from "./dashboard-view";
 import { OverviewView } from "./overview-view";
 import { DeleteSectionModal, MembersModal, NewTaskModal, ProjectFormModal, StatusUpdateModal } from "./project-dialogs";
 import { fetchJson, useHydrate, useWork, useWorkApi, type ChangeEvent } from "./store";
+import { useSearchMatches } from "./use-search-matches";
 import { TaskTable } from "./task-table";
 import { useTaskOps } from "./task-ops";
 import { TimelineView } from "./timeline-view";
@@ -149,6 +150,7 @@ export function ProjectView({ initial, initialTab, savedViews: initialViews }: {
   }, [allTasks, projectTasks]);
 
   const fields = useMemo(() => (context?.fields ?? []).filter((f) => project.customFieldIds.includes(f.id)), [context, project.customFieldIds]);
+  const searchMatches = useSearchMatches(config.filters.search, { projectId });
   const queryCtx = useMemo(
     () => ({
       today: context?.today ?? new Date().toISOString().slice(0, 10),
@@ -158,8 +160,9 @@ export function ProjectView({ initial, initialTab, savedViews: initialViews }: {
       projectId,
       sections,
       projectNames: new Map((context?.projects ?? []).map((p) => [p.id, p.name])),
+      searchMatches,
     }),
-    [context, projectId, sections],
+    [context, projectId, sections, searchMatches],
   );
 
   const listGroups = useMemo(() => runQuery(projectTasks, config, queryCtx), [projectTasks, config, queryCtx]);
@@ -414,8 +417,8 @@ export function ProjectView({ initial, initialTab, savedViews: initialViews }: {
           sections={sections}
           taskCount={projectTasks.filter((t: TaskItem) => t.memberships.some((m) => m.projectId === projectId && m.sectionId === sectionToDelete.id)).length}
           onClose={() => setSectionToDelete(null)}
-          onConfirm={async (mode, target) => {
-            const ok = await run(() => deleteSectionAction(sectionToDelete.id, mode, target));
+          onConfirm={async (target) => {
+            const ok = await run(() => deleteSectionAction(sectionToDelete.id, target));
             setSectionToDelete(null);
             if (ok !== null) await reload();
           }}

@@ -20,6 +20,33 @@ export const COCKPIT_FILTERS = [
 
 export type CockpitFilter = (typeof COCKPIT_FILTERS)[number]["key"];
 
+/**
+ * Portée des tâches du cockpit. Par défaut, comme avant la V1.0, toutes les
+ * tâches que l'utilisateur peut lire (celles des collègues comprises) ; « Mes
+ * tâches » restreint à celles dont il est responsable. Dans les deux cas, la
+ * visibilité (projets privés, corbeille) est appliquée côté serveur.
+ */
+export const TASK_SCOPES = [
+  { key: "all", label: "Toutes les tâches accessibles" },
+  { key: "mine", label: "Mes tâches" },
+] as const;
+
+export type TaskScope = (typeof TASK_SCOPES)[number]["key"];
+
+export function parseTaskScope(value: string | string[] | undefined): TaskScope {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw === "mine" ? "mine" : "all";
+}
+
+/** Lien du cockpit qui conserve les deux réglages (filtre d'attention, portée). */
+export function todayHref(filter: CockpitFilter, scope: TaskScope): string {
+  const params = new URLSearchParams();
+  if (filter !== "all") params.set("f", filter);
+  if (scope !== "all") params.set("t", scope);
+  const query = params.toString();
+  return query ? `/today?${query}` : "/today";
+}
+
 /** Les quatre indicateurs, dans l'ordre d'affichage. « Tout » n'en est pas un. */
 export const ATTENTION_KEYS = ["late", "today", "upcoming", "waiting"] as const;
 

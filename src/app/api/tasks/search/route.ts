@@ -1,8 +1,11 @@
 import { viewConfigSchema } from "@/lib/tasks/query-engine";
 import { json, withActor } from "@/lib/tasks/route-helpers";
-import { searchTasks } from "@/lib/tasks/work-queries";
+import { searchTaskIds, searchTasks } from "@/lib/tasks/work-queries";
 
-/** Recherche serveur : `?filters=<JSON>` (titre + description complète, permissions appliquées). */
+/**
+ * Recherche serveur : `?filters=<JSON>` (titre + description complète,
+ * permissions appliquées). `&idsOnly=1` : identifiants seulement.
+ */
 export async function GET(request: Request): Promise<Response> {
   return withActor(async (actor) => {
     const raw = new URL(request.url).searchParams.get("filters") ?? "{}";
@@ -14,6 +17,9 @@ export async function GET(request: Request): Promise<Response> {
     }
     const parsed = viewConfigSchema.shape.filters.safeParse(filters);
     if (!parsed.success) return json({ error: "Filtres invalides." }, { status: 400 });
+    if (new URL(request.url).searchParams.get("idsOnly") === "1") {
+      return json({ ids: await searchTaskIds(actor, parsed.data) });
+    }
     return json({ tasks: await searchTasks(actor, parsed.data) });
   });
 }

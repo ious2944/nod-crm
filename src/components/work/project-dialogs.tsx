@@ -552,10 +552,9 @@ export function DeleteSectionModal({
   sections: SectionItem[];
   taskCount: number;
   onClose: () => void;
-  onConfirm: (mode: "keep" | "delete", target: string | null) => Promise<void>;
+  onConfirm: (target: string | null) => Promise<void>;
 }) {
   const others = sections.filter((s) => s.id !== section.id);
-  const [mode, setMode] = useState<"keep" | "delete">("keep");
   const [target, setTarget] = useState<string | null>(others[0]?.id ?? null);
   return (
     <Modal
@@ -568,7 +567,7 @@ export function DeleteSectionModal({
           <button type="button" className={BTN_SECONDARY} onClick={onClose}>
             Annuler
           </button>
-          <button type="button" className={`${BTN_PRIMARY} bg-critical-fg hover:bg-critical-fg`} onClick={() => void onConfirm(mode, mode === "keep" ? target : null)}>
+          <button type="button" className={`${BTN_PRIMARY} bg-critical-fg hover:bg-critical-fg`} onClick={() => void onConfirm(target)}>
             Supprimer la section
           </button>
         </>
@@ -578,11 +577,10 @@ export function DeleteSectionModal({
         <p className="text-[13px] text-muted">Cette section est vide.</p>
       ) : (
         <fieldset className="space-y-2 text-[13px]">
-          <legend className="mb-1 text-muted">Elle contient {taskCount} tâche(s).</legend>
+          <legend className="mb-1 text-muted">Elle contient {taskCount} tâche(s). Aucune tâche n&apos;est supprimée : elles sont déplacées.</legend>
           <label className="flex items-center gap-2">
-            <input type="radio" name="mode" checked={mode === "keep"} onChange={() => setMode("keep")} />
             Déplacer les tâches vers
-            <select aria-label="Section de destination" value={target ?? ""} onChange={(e) => setTarget(e.target.value || null)} disabled={mode !== "keep"} className={`${INPUT} w-auto py-1`}>
+            <select aria-label="Section de destination" value={target ?? ""} onChange={(e) => setTarget(e.target.value || null)} className={`${INPUT} w-auto py-1`}>
               <option value="">Sans section</option>
               {others.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -590,10 +588,6 @@ export function DeleteSectionModal({
                 </option>
               ))}
             </select>
-          </label>
-          <label className="flex items-center gap-2">
-            <input type="radio" name="mode" checked={mode === "delete"} onChange={() => setMode("delete")} />
-            Supprimer aussi les tâches (celles présentes dans d&apos;autres projets sont seulement retirées de celui-ci)
           </label>
         </fieldset>
       )}

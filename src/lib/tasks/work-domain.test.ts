@@ -50,6 +50,7 @@ const task = (over: Partial<TaskItem> = {}): TaskItem => ({
   version: 1,
   canEdit: true,
   canManage: true,
+    lastActiveStatus: null,
   ...over,
 });
 

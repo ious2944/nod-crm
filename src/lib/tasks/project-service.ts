@@ -561,7 +561,7 @@ export async function createSection(
 async function requireSection(actor: Actor, sectionId: string) {
   const section = await prisma.projectSection.findFirst({
     where: { id: sectionId, workspaceId: actor.workspaceId },
-    select: { id: true, projectId: true, position: true },
+    select: { id: true, projectId: true, position: true, name: true },
   });
   if (!section) throw new TaskAccessError("NOT_FOUND", "Section introuvable.");
   await requireProjectEdit(actor, section.projectId);
@@ -609,41 +609,60 @@ export async function moveSection(
  * `targetSectionId` (ou « Sans section ») ; `mode = "delete"` : les tâches qui
  * n'appartiennent qu'à ce projet sont supprimées, les autres retirées du projet.
  */
+/**
+ * Supprime une section **sans jamais supprimer de tâche** : toutes ses tâches
+ * (corbeille comprise, pour qu'une restauration retrouve un emplacement
+ * valide) passent dans `targetSectionId`, ou dans « Sans section » (`null`),
+ * à la suite des tâches déjà présentes et dans leur ordre actuel.
+ */
 export async function deleteSection(
   actor: Actor,
   sectionId: string,
-  mode: "keep" | "delete",
   targetSectionId: string | null = null,
-): Promise<void> {
+): Promise<{ moved: number }> {
   const section = await requireSection(actor, sectionId);
   if (targetSectionId) {
     const target = await prisma.projectSection.findFirst({ where: { id: targetSectionId, projectId: section.projectId } });
     if (!target || target.id === sectionId) throw new TaskValidationError("Section de destination invalide.");
   }
+  const target = targetSectionId
+    ? await prisma.projectSection.findUnique({ where: { id: targetSectionId }, select: { name: true } })
+    : null;
   const memberships = await prisma.taskProject.findMany({
-    where: { sectionId },
-    select: { taskId: true, task: { select: { _count: { select: { projects: true } } } } },
+    where: { sectionId, projectId: section.projectId },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+    select: { taskId: true },
   });
 
   await prisma.$transaction(async (tx) => {
-    if (mode === "keep") {
-      const agg = await tx.taskProject.aggregate({ where: { projectId: section.projectId, sectionId: targetSectionId }, _max: { position: true } });
-      let position = agg._max.position ?? 0;
-      for (const m of memberships) {
-        position += POSITION_STEP;
-        await tx.taskProject.update({
-          where: { taskId_projectId: { taskId: m.taskId, projectId: section.projectId } },
-          data: { sectionId: targetSectionId, position },
-        });
-      }
-    } else {
-      const exclusive = memberships.filter((m) => m.task._count.projects === 1).map((m) => m.taskId);
-      await tx.task.deleteMany({ where: { id: { in: exclusive }, workspaceId: actor.workspaceId } });
-      await tx.taskProject.deleteMany({ where: { sectionId } });
+    const agg = await tx.taskProject.aggregate({ where: { projectId: section.projectId, sectionId: targetSectionId }, _max: { position: true } });
+    let position = agg._max.position ?? 0;
+    for (const m of memberships) {
+      position += POSITION_STEP;
+      await tx.taskProject.update({
+        where: { taskId_projectId: { taskId: m.taskId, projectId: section.projectId } },
+        data: { sectionId: targetSectionId, position },
+      });
+    }
+    if (memberships.length) {
+      await tx.task.updateMany({ where: { id: { in: memberships.map((m) => m.taskId) } }, data: { version: { increment: 1 } } });
+      await tx.taskActivity.createMany({
+        data: memberships.map((m) => ({
+          workspaceId: actor.workspaceId,
+          taskId: m.taskId,
+          actorId: actor.id,
+          projectId: section.projectId,
+          kind: "moved",
+          field: "Section",
+          oldValue: section.name.slice(0, 500),
+          newValue: target?.name.slice(0, 500) ?? "Sans section",
+        })),
+      });
     }
     await tx.projectSection.delete({ where: { id: sectionId } });
   });
   await changed(actor, [section.projectId], "section");
+  return { moved: memberships.length };
 }
 
 // ─── Points d'avancement ──────────────────────────────────────────────────────
@@ -707,8 +726,11 @@ export async function commentStatusUpdate(actor: Actor, statusUpdateId: string, 
 
 export async function setProjectField(actor: Actor, projectId: string, fieldId: string, enabled: boolean): Promise<void> {
   await requireProjectEdit(actor, projectId);
-  const field = await prisma.customField.findFirst({ where: { id: fieldId, workspaceId: actor.workspaceId }, select: { id: true } });
+  const field = await prisma.customField.findFirst({ where: { id: fieldId, workspaceId: actor.workspaceId }, select: { id: true, projectId: true } });
   if (!field) throw new TaskValidationError("Champ introuvable.");
+  if (field.projectId && field.projectId !== projectId) {
+    throw new TaskValidationError("Ce champ est propre à un autre projet ; ajoutez un champ de la bibliothèque.");
+  }
   if (enabled) {
     const agg = await prisma.projectCustomField.aggregate({ where: { projectId }, _max: { position: true } });
     await prisma.projectCustomField.upsert({

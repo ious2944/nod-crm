@@ -22,6 +22,8 @@ export interface TaskRecord {
     title: string;
     contact: { firstName: string; lastName: string } | null;
   } | null;
+  /** V1.0 : responsable, pour distinguer ses tâches de celles des collègues. */
+  assignee?: { id: string; displayName: string | null; email: string } | null;
 }
 
 /** Ce que reçoivent les composants React : sérialisable, sans logique restante. */
@@ -45,9 +47,13 @@ export interface TaskView {
   /** « Validation commerciale — Camille » : de quoi comprendre le lien sans le suivre. */
   followUpLabel: string | null;
   isDemo: boolean;
+  /** Responsable (nom affiché), `null` si la tâche n'est pas affectée. */
+  assigneeName: string | null;
+  /** La tâche est affectée à l'utilisateur qui consulte. */
+  assignedToMe: boolean;
 }
 
-export function toTaskView(record: TaskRecord, now: Date, timeZone: string): TaskView {
+export function toTaskView(record: TaskRecord, now: Date, timeZone: string, viewerId?: string): TaskView {
   const timing = computeTaskTiming(record, now, timeZone);
 
   return {
@@ -67,6 +73,8 @@ export function toTaskView(record: TaskRecord, now: Date, timeZone: string): Tas
     followUpId: record.followUp?.id ?? null,
     followUpLabel: record.followUp ? followUpLinkLabel(record.followUp) : null,
     isDemo: record.isDemo,
+    assigneeName: record.assignee ? record.assignee.displayName?.trim() || record.assignee.email.split("@")[0] : null,
+    assignedToMe: Boolean(viewerId && record.assignee?.id === viewerId),
   };
 }
 

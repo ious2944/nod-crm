@@ -222,8 +222,8 @@ export async function applyTaskAction(formData: FormData): Promise<void> {
   const { id, intent, days } = parsed.data;
 
   const task = await prisma.task.findFirst({
-    where: { id, workspaceId },
-    select: { id: true, dueAt: true, completedAt: true, status: true, opportunityId: true },
+    where: { id, workspaceId, deletedAt: null },
+    select: { id: true, dueAt: true, completedAt: true, status: true, opportunityId: true, lastActiveStatus: true },
   });
 
   if (!task) {
@@ -254,7 +254,8 @@ export async function applyTaskAction(formData: FormData): Promise<void> {
     intent === "complete"
       ? { status: "DONE" as const }
       : intent === "reopen"
-        ? { status: "TODO" as const }
+        ? // Rouvrir revient au dernier statut actif (« En cours », « En attente »…).
+          { status: task.lastActiveStatus ?? ("TODO" as const) }
         : { dueDate: dayKey(shiftDueDate(base, days ?? 1, APP_TIME_ZONE), APP_TIME_ZONE) };
 
   // Écriture conditionnelle : la valeur lue juste avant sert de base. Deux

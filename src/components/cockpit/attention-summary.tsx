@@ -1,7 +1,7 @@
 import Link from "next/link";
 
-import type { AttentionCounters, AttentionKey, CockpitFilter } from "@/lib/cockpit/filters";
-import { ATTENTION_KEYS } from "@/lib/cockpit/filters";
+import type { AttentionCounters, AttentionKey, CockpitFilter, TaskScope } from "@/lib/cockpit/filters";
+import { ATTENTION_KEYS, todayHref } from "@/lib/cockpit/filters";
 
 /**
  * Les quatre indicateurs d'attention — V0.7 Lumina Enterprise.
@@ -33,9 +33,11 @@ const TONE: Record<AttentionKey, string> = {
 export function AttentionSummary({
   counters,
   filter,
+  scope = "all",
 }: {
   counters: AttentionCounters;
   filter: CockpitFilter;
+  scope?: TaskScope;
 }) {
   return (
     <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -47,7 +49,7 @@ export function AttentionSummary({
         return (
           <li key={key}>
             <Link
-              href={active ? "/today" : `/today?f=${key}`}
+              href={todayHref(active ? "all" : key, scope)}
               aria-current={active ? "true" : undefined}
               className={`flex items-center gap-3 rounded-xl border bg-surface p-3.5 shadow-card transition-all hover:shadow-card-hover ${
                 isAlert

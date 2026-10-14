@@ -69,8 +69,9 @@ export function toFieldDef(field: {
   name: string;
   type: CustomFieldDef["type"];
   options: unknown;
+  projectId?: string | null;
 }): CustomFieldDef {
-  return { id: field.id, name: field.name, type: field.type, options: parseOptions(field.options) };
+  return { id: field.id, name: field.name, type: field.type, options: parseOptions(field.options), projectId: field.projectId ?? null };
 }
 
 export function parseRecurrence(value: unknown): RecurrenceRule | null {
@@ -92,6 +93,7 @@ export function taskItemSelect(actor: Actor) {
     title: true,
     notes: true,
     status: true,
+    lastActiveStatus: true,
     priority: true,
     assigneeId: true,
     createdById: true,
@@ -305,6 +307,7 @@ export function toTaskItem(
     version: record.version,
     canEdit: access.canEdit,
     canManage: access.canManage,
+    lastActiveStatus: record.lastActiveStatus,
   };
 }
 

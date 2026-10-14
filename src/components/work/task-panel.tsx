@@ -287,7 +287,7 @@ function TaskPanel({ taskId }: { taskId: string }) {
               onSelect: () => void run(() => taskToTemplateAction(task.id, task.memberships[0]?.projectId ?? null), "Modèle de tâche enregistré."),
             },
             ...(task.parentId
-              ? [{ label: "Convertir en tâche indépendante", icon: FolderInput, disabled: !canEdit, onSelect: () => void refresh(() => setTaskParentAction(task.id, null)) }]
+              ? [{ label: "Convertir en tâche indépendante", icon: FolderInput, disabled: !task.canManage, onSelect: () => void refresh(() => setTaskParentAction(task.id, null)) }]
               : []),
           ]}
         >
@@ -304,6 +304,7 @@ function TaskPanel({ taskId }: { taskId: string }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="space-y-4 px-5 py-4">
           {!canEdit && <p className="rounded-md bg-surface-muted px-3 py-2 text-[12px] text-muted">Lecture seule : vous pouvez commenter mais pas modifier cette tâche.</p>}
+          {canEdit && !task.canManage && <p className="rounded-md bg-surface-muted px-3 py-2 text-[12px] text-muted">Vous pouvez modifier cette tâche, mais seul un éditeur du projet peut la réaffecter, la partager, la déplacer ou la supprimer.</p>}
           {openBlockers.length > 0 && (
             <p className="flex items-center gap-2 rounded-md bg-critical-bg px-3 py-2 text-[12px] text-critical-fg">
               <Ban className="h-3.5 w-3.5" /> Bloquée par {openBlockers.length} tâche(s) non terminée(s).
@@ -351,7 +352,7 @@ function TaskPanel({ taskId }: { taskId: string }) {
           {/* Champs */}
           <div className="divide-y divide-border-subtle/0">
             <Row label="Responsable">
-              <AssigneeField task={task} disabled={!canEdit} onChange={(assigneeId) => update({ assigneeId })} />
+              <AssigneeField task={task} disabled={!task.canManage} onChange={(assigneeId) => update({ assigneeId })} />
             </Row>
             <Row label="Dates">
               <DatePicker
@@ -376,7 +377,7 @@ function TaskPanel({ taskId }: { taskId: string }) {
             </Row>
             {!task.parentId && (
               <Row label="Projets">
-                <ProjectsField task={task} detail={detail} disabled={!canEdit} ops={ops} reload={load} />
+                <ProjectsField task={task} detail={detail} disabled={!task.canManage} ops={ops} reload={load} />
               </Row>
             )}
             <Row label="Dépendances">
@@ -431,7 +432,7 @@ function TaskPanel({ taskId }: { taskId: string }) {
               </Row>
             )}
             <Row label="Collaborateurs">
-              <FollowersField detail={detail} disabled={!canEdit} kind="COLLABORATOR" onChange={(userId, on) => refresh(() => setFollowerAction(task.id, userId, on ? "COLLABORATOR" : null))} />
+              <FollowersField detail={detail} disabled={!task.canManage} kind="COLLABORATOR" onChange={(userId, on) => refresh(() => setFollowerAction(task.id, userId, on ? "COLLABORATOR" : null))} />
             </Row>
           </div>
 
@@ -532,7 +533,7 @@ function TaskPanel({ taskId }: { taskId: string }) {
       {/* Abonnés */}
       <div className="flex items-center gap-2 border-t border-border-subtle px-4 py-2 text-[12px] text-muted">
         <span>Abonnés</span>
-        <FollowersField detail={detail} disabled={false} kind="ALL" onChange={(userId, on) => refresh(() => setFollowerAction(task.id, userId, on ? "FOLLOWER" : null))} />
+        <FollowersField detail={detail} disabled={!task.canManage} kind="ALL" onChange={(userId, on) => refresh(() => setFollowerAction(task.id, userId, on ? "FOLLOWER" : null))} />
         <span className="flex-1" />
         <button type="button" className="font-medium text-ink hover:text-accent" onClick={() => void refresh(() => setFollowerAction(task.id, me, following ? null : "FOLLOWER"))}>
           {following ? "Ne plus suivre" : "Suivre"}
@@ -938,7 +939,7 @@ function SubtaskRow({ task, ops, today, onOpen }: { task: TaskItem; ops: ReturnT
       <div className={`min-w-0 flex-1 ${task.status === "DONE" ? "text-muted line-through" : ""}`}>
         <InlineText value={task.title} label="Nom de la sous-tâche" disabled={!task.canEdit} onSave={(title) => void ops.update(task, { title })} className="block truncate text-[13px]" inputClassName="py-0.5 text-[13px]" />
       </div>
-      <UserPicker value={task.assigneeId} onChange={(assigneeId) => void ops.update(task, { assigneeId })} disabled={!task.canEdit} className="rounded-full">
+      <UserPicker value={task.assigneeId} onChange={(assigneeId) => void ops.update(task, { assigneeId })} disabled={!task.canManage} className="rounded-full">
         <Avatar user={user} size={20} />
       </UserPicker>
       <DatePicker value={{ dueDate: task.dueDate, startDate: task.startDate, dueTime: task.dueTime }} onChange={(v) => void ops.update(task, { dueDate: v.dueDate, startDate: v.startDate, dueTime: v.dueTime })} disabled={!task.canEdit} className="min-w-12 rounded px-1 py-0.5 text-left hover:bg-surface-muted" label="Échéance de la sous-tâche">

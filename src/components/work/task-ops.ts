@@ -12,6 +12,7 @@ import {
   duplicateTaskAction,
   moveTaskAction,
   removeTaskFromProjectAction,
+  restoreTaskAction,
   setCustomFieldValueAction,
   setTaskTagsAction,
   updateTaskAction,
@@ -48,7 +49,8 @@ export function useTaskOps() {
   const toggleComplete = useCallback(
     async (task: TaskItem) => {
       const done = task.status !== "DONE";
-      const result = await update(task, { status: done ? "DONE" : "TODO" });
+      // Rouvrir revient au dernier statut actif connu (« En cours »…), pas à « À faire ».
+      const result = await update(task, { status: done ? "DONE" : (task.lastActiveStatus ?? "TODO") });
       if (result && done) {
         store.toast("success", `« ${task.title} » terminée.`, {
           label: "Annuler",
@@ -112,6 +114,7 @@ export function useTaskOps() {
         version: 0,
         canEdit: true,
         canManage: true,
+        lastActiveStatus: null,
         ...optimistic,
       };
       store.upsertTasks([temp]);
@@ -155,7 +158,15 @@ export function useTaskOps() {
         const parent = store.state.tasks[task.parentId];
         if (parent) store.patchTask(parent.id, { subtaskCount: Math.max(0, parent.subtaskCount - 1), subtaskDoneCount: Math.max(0, parent.subtaskDoneCount - (task.status === "DONE" ? 1 : 0)) });
       }
-      store.toast("success", "Tâche supprimée.");
+      store.toast("success", "Tâche placée dans la corbeille.", {
+        label: "Annuler",
+        run: () => {
+          void (async () => {
+            const restored = await run(() => restoreTaskAction(task.id));
+            if (restored) store.upsertTasks([restored]);
+          })();
+        },
+      });
       return true;
     },
     [run, store],
@@ -265,7 +276,7 @@ export function useTaskOps() {
         store.upsertTasks(restore);
         store.toast("error", `${result.failed.length} tâche(s) non supprimée(s) : ${result.failed[0].error}`);
       } else {
-        store.toast("success", `${result.deleted.length} tâche(s) supprimée(s).`);
+        store.toast("success", `${result.deleted.length} tâche(s) placée(s) dans la corbeille.`);
       }
     },
     [run, store],

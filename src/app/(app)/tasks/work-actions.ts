@@ -34,6 +34,14 @@ export async function deleteTaskAction(taskId: string) {
   return runAction((actor) => service.deleteTask(ctx(actor), taskId));
 }
 
+export async function restoreTaskAction(taskId: string) {
+  return runAction((actor) => service.restoreTask(ctx(actor), taskId));
+}
+
+export async function purgeTaskAction(taskId: string) {
+  return runAction((actor) => service.purgeTask(ctx(actor), taskId));
+}
+
 export async function duplicateTaskAction(taskId: string, includeSubtasks = true) {
   return runAction((actor) => service.duplicateTask(ctx(actor), taskId, { includeSubtasks }));
 }
@@ -192,8 +200,8 @@ export async function moveSectionAction(sectionId: string, beforeId: string | nu
   return runAction((actor) => projects.moveSection(actor, sectionId, beforeId, afterId));
 }
 
-export async function deleteSectionAction(sectionId: string, mode: "keep" | "delete", targetSectionId: string | null) {
-  return runAction((actor) => projects.deleteSection(actor, sectionId, mode, targetSectionId));
+export async function deleteSectionAction(sectionId: string, targetSectionId: string | null) {
+  return runAction((actor) => projects.deleteSection(actor, sectionId, targetSectionId));
 }
 
 export async function postStatusUpdateAction(projectId: string, input: unknown) {
@@ -283,4 +291,8 @@ export async function markNotificationsAction(ids: string[] | "all", change: { r
 
 export async function setNotificationPreferenceAction(type: string, inApp: boolean) {
   return runAction((actor) => settings.setNotificationPreference(actor, type, inApp));
+}
+
+export async function setWeeklyCapacityAction(minutes: number | null) {
+  return runAction((actor) => settings.setWeeklyCapacity(actor, minutes));
 }

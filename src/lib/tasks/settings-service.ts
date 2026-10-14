@@ -79,6 +79,8 @@ export async function saveCustomField(actor: Actor, fieldId: string | null, raw:
   if (fieldId) {
     const existing = await prisma.customField.findFirst({ where: { id: fieldId, workspaceId: actor.workspaceId } });
     if (!existing) throw new TaskAccessError("NOT_FOUND");
+    // Un champ propre à un projet se modifie avec les droits d'édition de ce projet.
+    if (existing.projectId) await requireProjectEdit(actor, existing.projectId);
     if (existing.type !== input.type) throw new TaskValidationError("Le type d'un champ existant ne peut pas changer.");
     await prisma.customField.update({ where: { id: fieldId }, data: { name: input.name, options } });
     // Options supprimées : on retire leurs valeurs pour ne pas laisser d'orphelins.
@@ -92,13 +94,15 @@ export async function saveCustomField(actor: Actor, fieldId: string | null, raw:
       }
     }
   } else {
+    if (projectId) await requireProjectEdit(actor, projectId);
+    // Créé depuis un projet : le champ appartient à ce projet et n'est
+    // utilisable que là. Créé depuis la bibliothèque : partagé par l'espace.
     const created = await prisma.customField.create({
-      data: { workspaceId: actor.workspaceId, name: input.name, type: input.type, options },
+      data: { workspaceId: actor.workspaceId, name: input.name, type: input.type, options, projectId: projectId ?? null },
       select: { id: true },
     });
     id = created.id;
     if (projectId) {
-      await requireProjectEdit(actor, projectId);
       await prisma.projectCustomField.create({ data: { projectId, fieldId: id, position: Date.now() / 1000 } });
     }
   }
@@ -114,6 +118,9 @@ export async function saveCustomField(actor: Actor, fieldId: string | null, raw:
 }
 
 export async function deleteCustomField(actor: Actor, fieldId: string): Promise<void> {
+  const field = await prisma.customField.findFirst({ where: { id: fieldId, workspaceId: actor.workspaceId }, select: { projectId: true } });
+  if (!field) throw new TaskAccessError("NOT_FOUND");
+  if (field.projectId) await requireProjectEdit(actor, field.projectId);
   const { count } = await prisma.customField.deleteMany({ where: { id: fieldId, workspaceId: actor.workspaceId } });
   if (!count) throw new TaskAccessError("NOT_FOUND");
   await recordAudit({ workspaceId: actor.workspaceId, userId: actor.id, action: "DELETE", entityType: AUDIT_ENTITY_TYPES.CUSTOM_FIELD, entityId: fieldId });
@@ -414,6 +421,22 @@ export async function setNotificationPreference(actor: Actor, type: string, inAp
     create: { userId: actor.id, type, inApp },
     update: { inApp },
   });
+}
+
+/**
+ * Capacité hebdomadaire de l'utilisateur pour la vue Charge. Chacun règle la
+ * sienne (NOD CRM n'a pas de rôle d'administrateur) ; `null` revient à la
+ * valeur par défaut.
+ */
+export async function setWeeklyCapacity(actor: Actor, minutes: number | null): Promise<void> {
+  if (minutes !== null && (!Number.isInteger(minutes) || minutes < 60 || minutes > 80 * 60)) {
+    throw new TaskValidationError("Capacité invalide (entre 1 h et 80 h par semaine).");
+  }
+  await prisma.user.updateMany({
+    where: { id: actor.id, workspaceId: actor.workspaceId },
+    data: { weeklyCapacityMinutes: minutes },
+  });
+  await publishChange({ w: actor.workspaceId, a: actor.id, k: "context" });
 }
 
 // ─── Import CSV ───────────────────────────────────────────────────────────────

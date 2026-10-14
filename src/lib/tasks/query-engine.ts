@@ -135,6 +135,8 @@ export interface QueryContext {
   users?: ReadonlyMap<string, UserRef>;
   /** Projet courant : la section et l'ordre manuel sont lus dans cette appartenance. */
   projectId?: string | null;
+  /** Tâches dont la description complète contient la recherche (réponse du serveur). */
+  searchMatches?: ReadonlySet<string> | null;
 }
 
 function normalize(text: string): string {
@@ -208,7 +210,10 @@ export function matchesFilters(task: TaskItem, filters: TaskFilters, ctx: QueryC
 
   if (filters.search?.trim()) {
     const needle = normalize(filters.search.trim());
-    if (!normalize(`${task.title} ${task.excerpt}`).includes(needle)) return false;
+    // Titre et extrait locaux, ou correspondance trouvée par le serveur dans
+    // la description complète (`searchMatches`).
+    const local = normalize(`${task.title} ${task.excerpt}`).includes(needle);
+    if (!local && !ctx.searchMatches?.has(task.id)) return false;
   }
 
   if (filters.assigneeIds?.length) {

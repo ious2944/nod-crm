@@ -9,7 +9,7 @@ import { VISIBILITY_LABELS } from "@/lib/tasks/constants";
 import { relativeTime, shortDate } from "@/lib/tasks/format";
 import type { StatusUpdateItem, TaskItem } from "@/lib/tasks/types";
 
-import { computeStats } from "./dashboard-view";
+import { computeStats } from "@/lib/tasks/project-stats";
 import { useToday } from "./pickers";
 import { RichText } from "./rich-text";
 import { useWork, useWorkApi } from "./store";

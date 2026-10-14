@@ -70,7 +70,11 @@ export async function getWorkContext(actor: Actor): Promise<WorkContext> {
       orderBy: [{ displayName: "asc" }, { email: "asc" }],
     }),
     prisma.tag.findMany({ where: { workspaceId: actor.workspaceId }, orderBy: { name: "asc" }, select: { id: true, name: true, color: true } }),
-    prisma.customField.findMany({ where: { workspaceId: actor.workspaceId }, orderBy: { createdAt: "asc" } }),
+    // Champs de la bibliothèque + champs propres aux projets lisibles uniquement.
+    prisma.customField.findMany({
+      where: { workspaceId: actor.workspaceId, OR: [{ projectId: null }, { project: readableProjectWhere(actor) }] },
+      orderBy: { createdAt: "asc" },
+    }),
     prisma.project.findMany({
       where: readableProjectWhere(actor),
       select: projectSummarySelect(actor),
@@ -230,11 +234,13 @@ export async function listProjects(
   const ids = projects.map((p) => p.id);
   const today = startOfDay(todayKey(), APP_TIME_ZONE);
   const [totals, done, overdue, members] = await Promise.all([
-    prisma.taskProject.groupBy({ by: ["projectId"], where: { projectId: { in: ids } }, _count: { _all: true } }),
-    prisma.taskProject.groupBy({ by: ["projectId"], where: { projectId: { in: ids }, task: { status: "DONE" } }, _count: { _all: true } }),
+    // Seules les tâches principales ont une appartenance à un projet : les
+    // sous-tâches ne sont pas comptées deux fois. La corbeille est exclue.
+    prisma.taskProject.groupBy({ by: ["projectId"], where: { projectId: { in: ids }, task: { deletedAt: null } }, _count: { _all: true } }),
+    prisma.taskProject.groupBy({ by: ["projectId"], where: { projectId: { in: ids }, task: { status: "DONE", deletedAt: null } }, _count: { _all: true } }),
     prisma.taskProject.groupBy({
       by: ["projectId"],
-      where: { projectId: { in: ids }, task: { status: { not: "DONE" }, dueAt: { lt: today } } },
+      where: { projectId: { in: ids }, task: { status: { not: "DONE" }, dueAt: { lt: today }, deletedAt: null } },
       _count: { _all: true },
     }),
     prisma.projectMember.findMany({ where: { projectId: { in: ids } }, select: { projectId: true, userId: true } }),
@@ -287,6 +293,8 @@ function toRef(task: { id: string; title: string; status: TaskItem["status"]; du
 
 const REF_SELECT = { id: true, title: true, status: true, dueAt: true, startAt: true, assigneeId: true } as const;
 
+const PROJECT_ACTIVITY_KINDS = new Set(["project_added", "project_removed", "moved"]);
+
 export async function getTaskDetail(actor: Actor, taskId: string): Promise<TaskDetail> {
   const access = await prisma.task.findFirst({
     where: { id: taskId, workspaceId: actor.workspaceId },
@@ -301,8 +309,8 @@ export async function getTaskDetail(actor: Actor, taskId: string): Promise<TaskD
     select: {
       ...taskItemSelect(actor),
       parent: { select: { ...REF_SELECT, ...taskItemSelect(actor).parent.select } },
-      blockedBy: { select: { blockingId: true, blocking: { select: REF_SELECT } } },
-      blocking: { select: { blockedId: true, blocked: { select: REF_SELECT } } },
+      blockedBy: { where: { blocking: { deletedAt: null } }, select: { blockingId: true, blocking: { select: REF_SELECT } } },
+      blocking: { where: { blocked: { deletedAt: null } }, select: { blockedId: true, blocked: { select: REF_SELECT } } },
       followers: { select: { userId: true, kind: true } },
       contact: { select: { id: true, firstName: true, lastName: true } },
       organization: { select: { id: true, name: true } },
@@ -318,7 +326,15 @@ export async function getTaskDetail(actor: Actor, taskId: string): Promise<TaskD
         where: {
           AND: [
             visibleTaskWhere(actor),
-            { id: { in: [...record.blockedBy.map((d) => d.blockingId), ...record.blocking.map((d) => d.blockedId)] } },
+            {
+              id: {
+                in: [
+                  ...record.blockedBy.map((d) => d.blockingId),
+                  ...record.blocking.map((d) => d.blockedId),
+                  ...(record.parentId ? [record.parentId] : []),
+                ],
+              },
+            },
           ],
         },
         select: { id: true },
@@ -336,12 +352,26 @@ export async function getTaskDetail(actor: Actor, taskId: string): Promise<TaskD
   ]);
 
   const [subtasks, comments, attachments, activity, timeEntries] = await Promise.all([
-    loadTaskItems(actor, { parentId: taskId }, { orderBy: [{ subtaskPosition: "asc" }, { createdAt: "asc" }] }),
+    loadTaskItems(actor, { AND: [visibleTaskWhere(actor), { parentId: taskId }] }, { orderBy: [{ subtaskPosition: "asc" }, { createdAt: "asc" }] }),
     prisma.comment.findMany({ where: { taskId }, orderBy: { createdAt: "asc" }, select: COMMENT_SELECT, take: 500 }),
     prisma.taskAttachment.findMany({ where: { taskId }, orderBy: { createdAt: "asc" } }),
+    // Les lignes liées à un projet (ajout, retrait, section) ne sont montrées
+    // qu'aux personnes qui peuvent lire ce projet : son nom n'est pas divulgué.
     prisma.taskActivity.findMany({ where: { taskId }, orderBy: { createdAt: "desc" }, take: 200 }),
     prisma.taskTimeEntry.findMany({ where: { taskId }, orderBy: { spentAt: "desc" }, take: 200 }),
   ]);
+
+  const activityProjectIds = [...new Set(activity.map((a) => a.projectId).filter((id): id is string => Boolean(id)))];
+  const readableActivityProjects = new Set(
+    activityProjectIds.length
+      ? (
+          await prisma.project.findMany({
+            where: { AND: [readableProjectWhere(actor), { id: { in: activityProjectIds } }] },
+            select: { id: true },
+          })
+        ).map((p) => p.id)
+      : [],
+  );
 
   const projectIds = item.memberships.map((m) => m.projectId);
   const projects = projectIds.length
@@ -354,7 +384,8 @@ export async function getTaskDetail(actor: Actor, taskId: string): Promise<TaskD
   return {
     task: item,
     description: record.notes,
-    parent: record.parent ? toRef(record.parent) : null,
+    // La parente n'est nommée que si l'acteur peut la lire.
+    parent: record.parent && record.parentId && visible.has(record.parentId) ? toRef(record.parent) : null,
     subtasks,
     blockedBy: record.blockedBy.filter((d) => visible.has(d.blockingId)).map((d) => toRef(d.blocking)),
     blocking: record.blocking.filter((d) => visible.has(d.blockedId)).map((d) => toRef(d.blocked)),
@@ -371,7 +402,14 @@ export async function getTaskDetail(actor: Actor, taskId: string): Promise<TaskD
         url: `/api/tasks/attachments/${a.id}`,
       }),
     ),
-    activity: activity.map(
+    activity: activity
+      .filter((a) =>
+        a.projectId
+          ? readableActivityProjects.has(a.projectId)
+          : // Lignes antérieures à la colonne : projet inconnu, donc masquées.
+            !PROJECT_ACTIVITY_KINDS.has(a.kind),
+      )
+      .map(
       (a): ActivityItem => ({
         id: a.id,
         actorId: a.actorId,
@@ -419,6 +457,20 @@ export async function resolveTaskLocation(actor: Actor, taskId: string): Promise
  * — une tâche d'un projet privé n'apparaît jamais à un non-membre.
  */
 export async function searchTasks(actor: Actor, filters: TaskFilters, limit = 300): Promise<TaskItem[]> {
+  return loadTaskItems(actor, searchWhere(actor, filters), { orderBy: [{ updatedAt: "desc" }], take: limit });
+}
+
+/**
+ * Identifiants seulement : sert aux recherches des vues projet et « Mes
+ * tâches », qui filtrent côté client mais doivent trouver un mot placé
+ * n'importe où dans la description (le client n'en a que 300 caractères).
+ */
+export async function searchTaskIds(actor: Actor, filters: TaskFilters, limit = 5000): Promise<string[]> {
+  const rows = await prisma.task.findMany({ where: searchWhere(actor, filters), select: { id: true }, take: limit });
+  return rows.map((r) => r.id);
+}
+
+function searchWhere(actor: Actor, filters: TaskFilters): Prisma.TaskWhereInput {
   const and: Prisma.TaskWhereInput[] = [visibleTaskWhere(actor), NOT_TEMPLATE_TASK];
   const text = filters.search?.trim();
   if (text) {
@@ -429,7 +481,10 @@ export async function searchTasks(actor: Actor, filters: TaskFilters, limit = 30
     const real = ids.filter((id) => id !== "none");
     and.push({ OR: [...(real.length ? [{ assigneeId: { in: real } }] : []), ...(ids.includes("none") ? [{ assigneeId: null }] : [])] });
   }
-  if (filters.projectIds?.length) and.push({ projects: { some: { projectId: { in: filters.projectIds } } } });
+  if (filters.projectIds?.length) {
+    // Filtrer par un projet illisible révélerait quelles tâches visibles en font partie.
+    and.push({ projects: { some: { projectId: { in: filters.projectIds }, project: readableProjectWhere(actor) } } });
+  }
   if (filters.statuses?.length) and.push({ status: { in: filters.statuses } });
   if (filters.priorities?.length) and.push({ priority: { in: filters.priorities } });
   if (filters.tagIds?.length) and.push({ tags: { some: { tagId: { in: filters.tagIds } } } });
@@ -443,9 +498,9 @@ export async function searchTasks(actor: Actor, filters: TaskFilters, limit = 30
   if (filters.due === "overdue") and.push({ dueAt: { lt: startOfDay(todayKey(), APP_TIME_ZONE) }, status: { not: "DONE" } });
   if (filters.due === "today") and.push({ dueAt: { gte: startOfDay(todayKey(), APP_TIME_ZONE), lte: endOfDay(todayKey(), APP_TIME_ZONE) } });
   if (filters.milestonesOnly) and.push({ isMilestone: true });
-  if (filters.blockedOnly) and.push({ blockedBy: { some: { blocking: { status: { not: "DONE" } } } } });
+  if (filters.blockedOnly) and.push({ blockedBy: { some: { blocking: { status: { not: "DONE" }, deletedAt: null } } } });
 
-  return loadTaskItems(actor, { AND: and }, { orderBy: [{ updatedAt: "desc" }], take: limit });
+  return { AND: and };
 }
 
 export async function getSavedViews(actor: Actor, scope?: string) {
@@ -579,7 +634,23 @@ export async function listNotifications(actor: Actor, archived = false): Promise
     orderBy: { createdAt: "desc" },
     take: 200,
   });
-  return rows.map((n) => ({
+  // Une notification ne survit pas à la perte d'accès : tâche à la corbeille,
+  // retirée du projet, projet devenu privé… Elle est masquée, pas supprimée.
+  const taskIds = [...new Set(rows.map((n) => n.taskId).filter((id): id is string => Boolean(id)))];
+  const projectIds = [...new Set(rows.map((n) => n.projectId).filter((id): id is string => Boolean(id)))];
+  const [visibleTasks, readableProjects] = await Promise.all([
+    taskIds.length
+      ? prisma.task.findMany({ where: { AND: [visibleTaskWhere(actor), { id: { in: taskIds } }] }, select: { id: true } })
+      : [],
+    projectIds.length
+      ? prisma.project.findMany({ where: { AND: [readableProjectWhere(actor), { id: { in: projectIds } }] }, select: { id: true } })
+      : [],
+  ]);
+  const okTasks = new Set(visibleTasks.map((t) => t.id));
+  const okProjects = new Set(readableProjects.map((p) => p.id));
+  return rows
+    .filter((n) => (n.taskId ? okTasks.has(n.taskId) : n.projectId ? okProjects.has(n.projectId) : true))
+    .map((n) => ({
     id: n.id,
     type: n.type,
     title: n.title,
@@ -702,22 +773,32 @@ export async function listForms(actor: Actor) {
 
 // ─── Synthèse multi-projets et charge ─────────────────────────────────────────
 
+/**
+ * Données de la vue Charge : tâches ouvertes et affectées qui touchent la
+ * période (ou la précèdent : en retard), plus celles sans date, à lister à
+ * part ; et la capacité hebdomadaire de chaque personne. Le calcul lui-même
+ * est dans `workload.ts`.
+ */
 export async function getWorkload(actor: Actor, fromKey: string, weeks: number) {
-  const from = startOfDay(fromKey, APP_TIME_ZONE);
   const toKeyStr = new Date(Date.parse(`${fromKey}T00:00:00Z`) + (weeks * 7 - 1) * 86_400_000).toISOString().slice(0, 10);
-  const tasks = await loadTaskItems(
-    actor,
-    {
-      AND: [
-        visibleTaskWhere(actor),
-        NOT_TEMPLATE_TASK,
-        { status: { not: "DONE" }, assigneeId: { not: null } },
-        { OR: [{ dueAt: { gte: from, lte: endOfDay(toKeyStr, APP_TIME_ZONE) } }, { dueAt: { lt: from } }] },
-      ],
-    },
-    { take: 5000 },
-  );
-  return { tasks, from: fromKey, to: toKeyStr };
+  const end = endOfDay(toKeyStr, APP_TIME_ZONE);
+  const [tasks, users] = await Promise.all([
+    loadTaskItems(
+      actor,
+      {
+        AND: [
+          visibleTaskWhere(actor),
+          NOT_TEMPLATE_TASK,
+          { status: { not: "DONE" }, assigneeId: { not: null } },
+          { OR: [{ dueAt: null, startAt: null }, { dueAt: { lte: end } }, { startAt: { lte: end } }] },
+        ],
+      },
+      { take: 5000 },
+    ),
+    prisma.user.findMany({ where: { workspaceId: actor.workspaceId }, select: { id: true, weeklyCapacityMinutes: true } }),
+  ]);
+  const capacities = Object.fromEntries(users.map((u) => [u.id, u.weeklyCapacityMinutes]));
+  return { tasks, from: fromKey, to: toKeyStr, capacities };
 }
 
 export function editableProjectIds(projects: ProjectSummary[]): string[] {

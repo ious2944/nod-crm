@@ -40,18 +40,18 @@ export function useTaskMenu(ops: TaskOps, projectId: string | null) {
         onSelect: () => void ops.toggleComplete(task),
         hint: "Ctrl+Entrée",
       },
-      { label: "Dupliquer", icon: Copy, disabled: !task.canEdit, onSelect: () => void ops.duplicate(task) },
+      { label: "Dupliquer", icon: Copy, disabled: !task.canManage, onSelect: () => void ops.duplicate(task) },
       { label: "Copier le lien", icon: LinkIcon, onSelect: () => void ops.copyLink(task) },
       { label: "Ouvrir dans un nouvel onglet", icon: ExternalLink, onSelect: () => window.open(`/tasks/t/${task.id}`, "_blank", "noopener") },
     ];
     if (!task.parentId) {
       entries.push({ separator: true });
       if (projectId) {
-        entries.push({ label: "Déplacer vers un autre projet…", icon: FolderInput, disabled: !task.canEdit, onSelect: () => setPicker({ task, mode: "move", ...at }) });
+        entries.push({ label: "Déplacer vers un autre projet…", icon: FolderInput, disabled: !task.canManage, onSelect: () => setPicker({ task, mode: "move", ...at }) });
       }
-      entries.push({ label: "Ajouter à un autre projet…", icon: FolderInput, disabled: !task.canEdit, onSelect: () => setPicker({ task, mode: "add", ...at }) });
+      entries.push({ label: "Ajouter à un autre projet…", icon: FolderInput, disabled: !task.canManage, onSelect: () => setPicker({ task, mode: "add", ...at }) });
     }
-    entries.push({ separator: true }, { label: "Supprimer", icon: Trash, danger: true, disabled: !task.canEdit, onSelect: () => setConfirm(task), hint: "Suppr" });
+    entries.push({ separator: true }, { label: "Mettre à la corbeille", icon: Trash, danger: true, disabled: !task.canManage, onSelect: () => setConfirm(task), hint: "Suppr" });
     return entries;
   };
 
@@ -59,17 +59,17 @@ export function useTaskMenu(ops: TaskOps, projectId: string | null) {
     <>
       <ConfirmModal
         open={confirm !== null}
-        title="Supprimer la tâche ?"
+        title="Mettre la tâche à la corbeille ?"
         description={
           confirm ? (
             <>
-              « {confirm.title} » sera supprimée définitivement
-              {confirm.subtaskCount ? `, avec ses ${confirm.subtaskCount} sous-tâche(s)` : ""}, ainsi que ses commentaires et pièces jointes.
+              « {confirm.title} » sera placée dans la corbeille
+              {confirm.subtaskCount ? `, avec ses ${confirm.subtaskCount} sous-tâche(s)` : ""}. Commentaires, pièces jointes et historique sont conservés ; elle pourra être restaurée depuis la corbeille.
               {confirm.memberships.length > 1 && " Elle disparaîtra de tous ses projets."}
             </>
           ) : null
         }
-        confirmLabel="Supprimer"
+        confirmLabel="Mettre à la corbeille"
         onClose={() => setConfirm(null)}
         onConfirm={async () => {
           if (confirm) await ops.remove(confirm);

@@ -64,6 +64,8 @@ export interface CustomFieldDef {
   name: string;
   type: CustomFieldType;
   options: CustomFieldOption[];
+  /** Champ propre à un projet (créé depuis ce projet) ; `null` : bibliothèque partagée. */
+  projectId: string | null;
 }
 
 /**
@@ -125,6 +127,8 @@ export interface TaskItem {
   canEdit: boolean;
   /** Supprimer, dupliquer, déplacer, réaffecter, partager (voir `access.ts`). */
   canManage: boolean;
+  /** Statut avant l'achèvement : la réouverture y revient. */
+  lastActiveStatus: TaskStatus | null;
 }
 
 export interface SectionItem {

@@ -10,6 +10,7 @@ import type { TaskItem } from "@/lib/tasks/types";
 import { allColumns, DEFAULT_MY_COLUMNS, readLocal, writeLocal } from "./columns";
 import { NewTaskModal } from "./project-dialogs";
 import { fetchJson, useHydrate, useWork, useWorkApi } from "./store";
+import { useSearchMatches } from "./use-search-matches";
 import { TaskTable } from "./task-table";
 import { useTaskOps } from "./task-ops";
 import { Toolbar, type SavedViewItem } from "./toolbar";
@@ -69,6 +70,7 @@ export function MyTasksView({ initial, savedViews }: { initial: TaskItem[]; save
   // Tâches affectées à l'utilisateur, lues dans le store partagé : une tâche
   // réaffectée depuis le panneau disparaît d'ici immédiatement.
   const mine = useMemo(() => Object.values(allTasks).filter((t) => me && t.assigneeId === me && !t.id.startsWith("tmp-x")), [allTasks, me]);
+  const searchMatches = useSearchMatches(config.filters.search, { mine: true });
   const queryCtx = useMemo(
     () => ({
       today: context?.today ?? new Date().toISOString().slice(0, 10),
@@ -76,8 +78,9 @@ export function MyTasksView({ initial, savedViews }: { initial: TaskItem[]; save
       fields: new Map((context?.fields ?? []).map((f) => [f.id, f])),
       users: new Map((context?.users ?? []).map((u) => [u.id, u])),
       projectNames: new Map((context?.projects ?? []).map((p) => [p.id, p.name])),
+      searchMatches,
     }),
-    [context, me],
+    [context, me, searchMatches],
   );
   const groups = useMemo(() => {
     const result = runQuery(mine, config, queryCtx);

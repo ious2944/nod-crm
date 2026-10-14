@@ -3,6 +3,8 @@ import "server-only";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
 import { getWorkspaceIdForPage } from "@/lib/workspace";
+import { requireUser } from "@/lib/auth/dal";
+import { NOT_TEMPLATE_TASK, visibleTaskWhere } from "@/lib/tasks/access";
 import { filterToStatuses, type StatusFilter } from "./filters";
 import type { OpportunityPickerOption } from "./domain";
 import {
@@ -109,13 +111,18 @@ export async function getOpportunityDetail(
   id: string,
 ): Promise<OpportunityDetail | null> {
   const workspaceId = await getWorkspaceIdForPage();
+  const user = await requireUser();
 
   const record = await prisma.opportunity.findFirst({
     where: { id, workspaceId },
     include: {
       ...OPPORTUNITY_INCLUDE,
       tasks: {
-        where: { completedAt: null },
+        // V1.0 : mêmes règles que le module Tâches (projets privés, corbeille).
+        where: {
+          completedAt: null,
+          AND: [visibleTaskWhere({ id: user.id, workspaceId: user.workspaceId }), NOT_TEMPLATE_TASK],
+        },
         orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
         select: {
           id: true,

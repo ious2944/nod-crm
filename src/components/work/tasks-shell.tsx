@@ -11,6 +11,7 @@ import {
   Search,
   Settings,
   Star,
+  Trash,
 } from "lucide-react";
 import NextLink from "next/link";
 import { usePathname } from "next/navigation";
@@ -39,6 +40,7 @@ const MORE = [
   { href: "/tasks/portfolio", label: "Synthèse des projets", icon: ChartColumn },
   { href: "/tasks/workload", label: "Charge de travail", icon: Gauge },
   { href: "/tasks/forms", label: "Formulaires", icon: ClipboardList },
+  { href: "/tasks/trash", label: "Corbeille", icon: Trash },
   { href: "/tasks/settings", label: "Réglages", icon: Settings },
 ];
 
