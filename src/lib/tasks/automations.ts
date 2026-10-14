@@ -252,7 +252,8 @@ export async function processEvents(ctx: MutationContext, events: TaskEvent[]): 
   const workspaceId = ctx.actor.workspaceId;
   const triggers = [...new Set(events.map((e) => e.type))] as AutomationTrigger[];
   const rules = await prisma.automationRule.findMany({
-    where: { workspaceId, isEnabled: true, trigger: { in: triggers } },
+    // Les règles d'un projet de la corbeille ne s'exécutent plus.
+    where: { workspaceId, isEnabled: true, trigger: { in: triggers }, OR: [{ projectId: null }, { project: { deletedAt: null } }] },
     orderBy: { createdAt: "asc" },
   });
   if (rules.length === 0) return;
@@ -276,7 +277,9 @@ registerEventSink(processEvents);
 
 /** Exécute une règle pour un événement produit hors requête (tâche planifiée). */
 export async function runScheduledRule(ruleId: string, event: TaskEvent, eventKey: string): Promise<"done" | "missing"> {
-  const rule = await prisma.automationRule.findFirst({ where: { id: ruleId, isEnabled: true } });
+  const rule = await prisma.automationRule.findFirst({
+    where: { id: ruleId, isEnabled: true, OR: [{ projectId: null }, { project: { deletedAt: null } }] },
+  });
   if (!rule) return "missing";
   await runRule(rule, event, eventKey);
   return "done";

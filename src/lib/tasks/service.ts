@@ -12,6 +12,7 @@ import { objectStore } from "@/lib/storage";
 
 import {
   canEditProjectContent,
+  canReadProject,
   evaluateTaskAccess,
   evaluateTrashAccess,
   projectAccessSelect,
@@ -177,10 +178,10 @@ async function requireProjectContentEdit(ctx: MutationContext, projectId: string
     where: { id: projectId, workspaceId: ctx.actor.workspaceId },
     select: projectAccessSelect(ctx.actor),
   });
-  if (!project) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+  // Un projet de la corbeille n'accepte rien, pas même d'une règle.
+  if (!project || project.deletedAt) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
   if (!ctx.automation && !ctx.trusted) {
-    const readable = project.visibility === "WORKSPACE" || project.members.length > 0;
-    if (!readable) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+    if (!canReadProject(project)) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
     if (!canEditProjectContent(project, ctx.actor)) {
       throw new TaskAccessError(
         "FORBIDDEN",
@@ -1103,9 +1104,11 @@ export async function deleteTask(ctx: MutationContext, taskId: string): Promise<
 async function loadTrashed(ctx: MutationContext, taskId: string) {
   const task = await prisma.task.findFirst({
     where: { id: taskId, workspaceId: ctx.actor.workspaceId, deletedAt: { not: null } },
-    select: { ...taskAccessSelect(ctx.actor), createdById: true, deletedById: true },
+    select: { ...taskAccessSelect(ctx.actor), createdById: true, deletedById: true, deletedWithProjectId: true },
   });
   if (!task) throw new TaskAccessError("NOT_FOUND");
+  // Supprimée avec son projet : introuvable ici, elle se restaure avec lui
+  // (`evaluateTrashAccess` refuse), sans révéler le projet.
   const rights = evaluateTrashAccess(task, ctx.actor);
   if (!rights.canRestore && !rights.canPurge) throw new TaskAccessError("NOT_FOUND");
   return { task, rights };
@@ -1129,6 +1132,8 @@ export async function listTrash(actor: Actor): Promise<TrashItem[]> {
     where: {
       workspaceId: actor.workspaceId,
       deletedAt: { not: null },
+      // Supprimées avec leur projet : elles figurent sous ce projet.
+      deletedWithProjectId: null,
       // Les sous-tâches supprimées avec leur parente sont restaurées avec elle.
       OR: [{ parentId: null }, { parent: { deletedAt: null } }],
     },
@@ -1151,7 +1156,7 @@ export async function listTrash(actor: Actor): Promise<TrashItem[]> {
     const subtaskCount = await prisma.task.count({ where: { parentId: row.id, deletedAt: row.deletedAt } });
     const projects = (row.parent ?? row).projects
       .map((p) => p.project as typeof p.project & { name?: string })
-      .filter((p) => p.visibility === "WORKSPACE" || p.members.length > 0)
+      .filter((p) => canReadProject(p))
       .map((p) => p.name ?? "");
     items.push({
       id: row.id,
@@ -1894,9 +1899,7 @@ export async function toggleReaction(ctx: MutationContext, commentId: string, em
       where: { id: comment.statusUpdate.projectId, workspaceId: ctx.actor.workspaceId },
       select: projectAccessSelect(ctx.actor),
     });
-    if (!project || (project.visibility === "PRIVATE" && project.members.length === 0)) {
-      throw new TaskAccessError("NOT_FOUND");
-    }
+    if (!project || !canReadProject(project)) throw new TaskAccessError("NOT_FOUND");
   }
   const key = { commentId_userId_emoji: { commentId, userId: ctx.actor.id, emoji } };
   const existing = await prisma.commentReaction.findUnique({ where: key });

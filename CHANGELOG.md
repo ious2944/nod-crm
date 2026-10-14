@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Trash for tasks (soft delete, restore, permanent deletion for project
   owners) at `/tasks/trash`.
+- Project trash: deleting a project is a restorable soft delete. Its exclusive
+  tasks go to the trash with it (nothing erased, never workspace-visible),
+  shared tasks stay in their other projects, rules and reminders ignore it;
+  restoring brings back sections, memberships and those tasks (not tasks
+  deleted individually before); permanent deletion is a separate owner action
+  that never erases a task still linked to another kept project.
+- `scripts/migration-check.mjs`: diagnosis of the migration history and guarded
+  checksum reconciliation (state C only, after schema verification).
 - Scheduled due-date reminders (`task_reminders`, `job_leases`): in-process
   timer, single run at a time across instances, resumable, deduplicated with
   automation rules, no catch-up of past due dates. `NOD_SCHEDULER`,
@@ -52,6 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   access; notifications, history, search filters and exports hide what the
   reader cannot access.
 - Due-date reminders no longer depend on user activity.
+- Scheduler hardening: the lease is extended before every delivery (a holder
+  that lost it stops immediately and never releases another's lease); rows
+  are validated only while still pending; interrupted rule runs are reported;
+  `TASK_REMINDER_LEASE_SECONDS`. Database sessions idle inside a transaction
+  are evicted after 30 s (`idle_in_transaction_session_timeout`), so a frozen
+  process cannot block the others.
+- `instrumentation.ts` imports its Node.js code only under
+  `NEXT_RUNTIME === "nodejs"` (no Node API warnings in the Edge bundle).
 
 ### Fixed
 
@@ -62,13 +78,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Migration
 
-- `20261013120000_work_management` — additive. Backfills `status` from
-  `completed_at` only.
+- `20261013120000_work_management` — restored byte-for-byte to its first
+  published version (`81c4b0c`), which databases may have applied; a later
+  revision (`c199fdd`) had changed it in place.
 - `20261014090000_work_management_hardening` — additive. Trash, last active
-  status, project-owned fields, capacity, reminders, leases. Legacy tasks: the
-  creator is taken from the `Task / CREATE` audit row when its author still
-  belongs to the workspace; **no assignee is ever inferred**. Every legacy task
-  with unknown assignee or creator is listed in `task_migration_notes`.
+  status, project-owned fields, capacity, reminders, leases, legacy-task notes.
+- `20261014091000_work_management_legacy_reconcile` — corrective, idempotent:
+  removes assignees/creators inferred by the first migration on legacy tasks
+  never used since, keeps and flags the ambiguous ones, never touches an
+  assignment made or changed in V1.0; every decision recorded in
+  `task_migration_notes` with the previous value.
+- `20261014092000_project_trash` — additive.
+- Upgrade paths (never applied / first version / revised version) and the
+  reconciliation procedure are documented in `docs/tasks.md`; no reset is
+  needed in any state.
 
 **Post-V0.9 bugfixes.**
 

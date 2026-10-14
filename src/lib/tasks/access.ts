@@ -51,6 +51,8 @@ export interface Actor {
 export function readableProjectWhere(actor: Actor): Prisma.ProjectWhereInput {
   return {
     workspaceId: actor.workspaceId,
+    // Un projet de la corbeille n'est lisible par personne (voir `evaluateProjectTrashAccess`).
+    deletedAt: null,
     OR: [{ visibility: "WORKSPACE" }, { members: { some: { userId: actor.id } } }],
   };
 }
@@ -104,6 +106,7 @@ export function projectAccessSelect(actor: Actor) {
     isTemplate: true,
     ownerId: true,
     createdById: true,
+    deletedAt: true,
     members: { where: { userId: actor.id }, select: { role: true } },
   } satisfies Prisma.ProjectSelect;
 }
@@ -115,6 +118,7 @@ export interface ProjectAccessInfo {
   isTemplate: boolean;
   ownerId: string | null;
   createdById: string | null;
+  deletedAt?: Date | null;
   members: { role: ProjectRole }[];
 }
 
@@ -123,12 +127,13 @@ export function projectRole(project: ProjectAccessInfo): ProjectRole | null {
 }
 
 export function canReadProject(project: ProjectAccessInfo): boolean {
+  if (project.deletedAt) return false;
   return project.visibility === "WORKSPACE" || project.members.length > 0;
 }
 
 /** Modifier le contenu (tâches, sections) d'un projet. */
 export function canEditProjectContent(project: ProjectAccessInfo, actor: Actor): boolean {
-  if (project.archivedAt) return false;
+  if (project.archivedAt || project.deletedAt) return false;
   const role = projectRole(project);
   if (role === "OWNER" || role === "EDITOR") return true;
   if (role === "COMMENTER") return false;
@@ -138,8 +143,24 @@ export function canEditProjectContent(project: ProjectAccessInfo, actor: Actor):
 
 /** Administrer le projet : réglages, membres, archivage, suppression. */
 export function canManageProject(project: ProjectAccessInfo, actor: Actor): boolean {
+  if (project.deletedAt) return false;
+  return isProjectOwner(project, actor);
+}
+
+/** Propriétaire du projet, qu'il soit actif ou dans la corbeille. */
+export function isProjectOwner(project: ProjectAccessInfo, actor: Actor): boolean {
   const role = projectRole(project);
   return role === "OWNER" || project.ownerId === actor.id || (project.ownerId === null && project.createdById === actor.id);
+}
+
+/**
+ * Corbeille des projets : seul le propriétaire voit un projet supprimé, le
+ * restaure ou le supprime définitivement. Ses tâches restent inaccessibles à
+ * tous tant qu'il n'est pas restauré.
+ */
+export function evaluateProjectTrashAccess(project: ProjectAccessInfo, actor: Actor): { canRestore: boolean; canPurge: boolean } {
+  const owner = Boolean(project.deletedAt) && isProjectOwner(project, actor);
+  return { canRestore: owner, canPurge: owner };
 }
 
 export function taskAccessSelect(actor: Actor) {
@@ -200,8 +221,12 @@ export function evaluateTaskAccess(task: TaskAccessInfo, actor: Actor): TaskPerm
   const self = involvement(task);
   const top = involvement(root);
 
-  const projects = root.projects.map((p) => p.project);
-  const free = projects.length === 0;
+  const all = root.projects.map((p) => p.project);
+  // Les appartenances à un projet de la corbeille sont conservées (pour la
+  // restauration) mais ne donnent aucun droit ; elles ne rendent pas non plus
+  // la tâche « libre ».
+  const projects = all.filter((p) => !p.deletedAt);
+  const free = all.length === 0;
   const readableProject = projects.some(canReadProject);
   const editableProject = projects.some((p) => canEditProjectContent(p, actor));
 
@@ -223,11 +248,18 @@ export function evaluateTaskAccess(task: TaskAccessInfo, actor: Actor): TaskPerm
  * d'en être le créateur ou la personne qui l'a supprimée.
  */
 export function evaluateTrashAccess(
-  task: TaskAccessInfo & { createdById: string | null; deletedById: string | null },
+  task: TaskAccessInfo & { createdById: string | null; deletedById: string | null; deletedWithProjectId?: string | null },
   actor: Actor,
 ): { canRestore: boolean; canPurge: boolean } {
+  // Mise à la corbeille avec son projet : elle se restaure avec lui.
+  if (task.deletedWithProjectId) return { canRestore: false, canPurge: false };
   const root = task.parent ?? task;
-  const projects = root.projects.map((p) => p.project);
+  const all = root.projects.map((p) => p.project);
+  const projects = all.filter((p) => !p.deletedAt);
+  // Tous ses projets sont dans la corbeille : elle n'est pas « libre » pour
+  // autant (ce serait l'ouvrir à tout l'espace) — on attend la restauration
+  // d'un projet.
+  if (all.length > 0 && projects.length === 0) return { canRestore: false, canPurge: false };
   if (projects.length === 0) {
     return { canRestore: true, canPurge: task.createdById === actor.id || task.deletedById === actor.id };
   }

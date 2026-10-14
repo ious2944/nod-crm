@@ -180,6 +180,14 @@ export async function deleteProjectAction(projectId: string) {
   return runAction((actor) => projects.deleteProject(actor, projectId));
 }
 
+export async function restoreProjectAction(projectId: string) {
+  return runAction((actor) => projects.restoreProject(actor, projectId));
+}
+
+export async function purgeProjectAction(projectId: string) {
+  return runAction((actor) => projects.purgeProject(actor, projectId));
+}
+
 export async function setProjectMemberAction(projectId: string, userId: string, role: ProjectRole | null) {
   return runAction((actor) => projects.setProjectMember(actor, projectId, userId, role));
 }

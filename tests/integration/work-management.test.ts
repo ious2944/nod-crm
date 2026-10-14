@@ -136,7 +136,7 @@ describe("gestion de travail", () => {
       expect(detail.activity).toContainEqual(expect.objectContaining({ actorId: alice.userId, field: "Statut", oldValue: "À faire", newValue: "En cours" }));
     });
 
-    it("duplique, archive (lecture seule) puis supprime un projet en gardant les tâches multi-projets", async () => {
+    it("duplique, archive (lecture seule) puis met un projet à la corbeille en gardant les tâches multi-projets", async () => {
       const p1 = await newProject("P1");
       const p2 = await newProject("P2");
       const shared = ok(await createTaskAction({ title: "Partagée", projectId: p1.id }));
@@ -153,8 +153,9 @@ describe("gestion de travail", () => {
 
       const report = ok(await deleteProjectAction(p1.id));
       expect(report).toEqual({ deletedTasks: 1, keptTasks: 1 });
-      expect(await prisma.task.findUnique({ where: { id: own.id } })).toBeNull();
-      expect(await prisma.task.findUnique({ where: { id: shared.id } })).not.toBeNull();
+      // Suppression logique : la tâche exclusive est conservée, à la corbeille avec son projet.
+      expect(await prisma.task.findUniqueOrThrow({ where: { id: own.id } })).toMatchObject({ deletedWithProjectId: p1.id });
+      expect((await prisma.task.findUniqueOrThrow({ where: { id: shared.id } })).deletedAt).toBeNull();
     });
   });
 

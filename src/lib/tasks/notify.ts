@@ -76,10 +76,10 @@ export async function notify(input: NotifyInput): Promise<number> {
         id: input.projectId,
         workspaceId: input.workspaceId,
       },
-      select: { visibility: true, members: { where: { userId: { in: allowed } }, select: { userId: true } } },
+      select: { visibility: true, deletedAt: true, members: { where: { userId: { in: allowed } }, select: { userId: true } } },
     });
     const project = readers[0];
-    if (!project) return 0;
+    if (!project || project.deletedAt) return 0;
     if (project.visibility === "PRIVATE") {
       const memberIds = new Set(project.members.map((m) => m.userId));
       allowed = allowed.filter((id) => memberIds.has(id));

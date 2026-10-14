@@ -11,6 +11,7 @@ import { objectStore } from "@/lib/storage";
 import {
   canEditProjectContent,
   canManageProject,
+  evaluateProjectTrashAccess,
   canReadProject,
   projectAccessSelect,
   TaskAccessError,
@@ -458,26 +459,196 @@ export async function setProjectArchived(actor: Actor, projectId: string, archiv
  * avec lui ; celles qui appartiennent aussi à d'autres projets sont conservées
  * (elles perdent seulement cette appartenance).
  */
+/**
+ * Supprime un projet en le **mettant à la corbeille** : rien n'est effacé.
+ *
+ * - le projet disparaît des vues ; sections, membres, champs, règles,
+ *   formulaires et rattachements `task_projects` sont conservés ;
+ * - ses tâches **exclusives** (aucun autre projet actif) et leurs sous-tâches
+ *   encore actives passent à la corbeille avec lui
+ *   (`deleted_with_project_id`), avec commentaires, fichiers, champs,
+ *   historique et liens CRM ; elles ne deviennent jamais « libres » ;
+ * - les tâches présentes dans un autre projet actif y restent disponibles.
+ */
 export async function deleteProject(actor: Actor, projectId: string): Promise<{ deletedTasks: number; keptTasks: number }> {
   await requireProjectManage(actor, projectId);
-  const memberships = await prisma.taskProject.findMany({
-    where: { projectId },
-    select: { taskId: true, task: { select: { _count: { select: { projects: true } } } } },
+  const now = new Date();
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.project.update({ where: { id: projectId }, data: { deletedAt: now, deletedById: actor.id, version: { increment: 1 } } });
+    const memberships = await tx.taskProject.findMany({
+      where: { projectId, task: { deletedAt: null, parentId: null } },
+      select: { taskId: true, task: { select: { projects: { where: { projectId: { not: projectId }, project: { deletedAt: null } }, select: { projectId: true } } } } },
+    });
+    const exclusive = memberships.filter((m) => m.task.projects.length === 0).map((m) => m.taskId);
+    if (exclusive.length) {
+      await tx.task.updateMany({
+        where: { workspaceId: actor.workspaceId, deletedAt: null, OR: [{ id: { in: exclusive } }, { parentId: { in: exclusive } }] },
+        data: { deletedAt: now, deletedById: actor.id, deletedWithProjectId: projectId, version: { increment: 1 } },
+      });
+      await tx.taskActivity.createMany({
+        data: exclusive.map((taskId) => ({ workspaceId: actor.workspaceId, taskId, actorId: actor.id, projectId, kind: "project_trashed" })),
+      });
+    }
+    return { deletedTasks: exclusive.length, keptTasks: memberships.length - exclusive.length };
   });
-  const exclusive = memberships.filter((m) => m.task._count.projects === 1).map((m) => m.taskId);
+  await auditProject(actor, "DELETE", projectId);
+  await changed(actor, [projectId], "project_deleted");
+  return result;
+}
+
+async function loadTrashedProject(actor: Actor, projectId: string) {
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, workspaceId: actor.workspaceId, deletedAt: { not: null } },
+    select: { ...projectAccessSelect(actor), name: true },
+  });
+  if (!project) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+  const rights = evaluateProjectTrashAccess(project, actor);
+  if (!rights.canRestore && !rights.canPurge) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+  return { project, rights };
+}
+
+export interface ProjectTrashItem {
+  id: string;
+  name: string;
+  color: string;
+  icon: string;
+  visibility: "WORKSPACE" | "PRIVATE";
+  deletedAt: string;
+  deletedBy: string | null;
+  /** Tâches mises à la corbeille avec le projet (sous-tâches comprises). */
+  taskCount: number;
+  canRestore: boolean;
+  canPurge: boolean;
+}
+
+/** Projets de la corbeille visibles par l'acteur : ceux dont il est propriétaire. */
+export async function listProjectTrash(actor: Actor): Promise<ProjectTrashItem[]> {
+  const rows = await prisma.project.findMany({
+    where: { workspaceId: actor.workspaceId, deletedAt: { not: null } },
+    select: {
+      ...projectAccessSelect(actor),
+      name: true,
+      color: true,
+      icon: true,
+      deletedBy: { select: { displayName: true, email: true } },
+      _count: { select: { trashedTasks: true } },
+    },
+    orderBy: { deletedAt: "desc" },
+  });
+  return rows
+    .map((p) => ({ p, rights: evaluateProjectTrashAccess(p, actor) }))
+    .filter(({ rights }) => rights.canRestore || rights.canPurge)
+    .map(({ p, rights }) => ({
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      icon: p.icon,
+      visibility: p.visibility,
+      deletedAt: p.deletedAt!.toISOString(),
+      deletedBy: p.deletedBy ? p.deletedBy.displayName?.trim() || p.deletedBy.email : null,
+      taskCount: p._count.trashedTasks,
+      ...rights,
+    }));
+}
+
+/**
+ * Restaure un projet : il réapparaît avec ses sections et rattachements ; les
+ * tâches mises à la corbeille **avec lui** reviennent, de même que celles
+ * qu'avait rendues inactives la suppression d'un autre projet et qui
+ * appartiennent aussi à celui-ci. Une tâche supprimée individuellement avant
+ * lui reste dans la corbeille des tâches.
+ */
+export async function restoreProject(actor: Actor, projectId: string): Promise<{ restoredTasks: number }> {
+  const { rights } = await loadTrashedProject(actor, projectId);
+  if (!rights.canRestore) throw new TaskAccessError("FORBIDDEN", "Seul le propriétaire du projet peut le restaurer.");
+  const restored = await prisma.$transaction(async (tx) => {
+    await tx.project.update({ where: { id: projectId }, data: { deletedAt: null, deletedById: null, version: { increment: 1 } } });
+    const roots = await tx.task.findMany({
+      where: {
+        workspaceId: actor.workspaceId,
+        parentId: null,
+        OR: [
+          { deletedWithProjectId: projectId },
+          { deletedWithProjectId: { not: null }, deletedWithProject: { deletedAt: { not: null } }, projects: { some: { projectId } } },
+        ],
+      },
+      select: { id: true, deletedWithProjectId: true },
+    });
+    for (const root of roots) {
+      await tx.task.updateMany({
+        where: {
+          workspaceId: actor.workspaceId,
+          deletedWithProjectId: root.deletedWithProjectId,
+          OR: [{ id: root.id }, { parentId: root.id }],
+        },
+        data: { deletedAt: null, deletedById: null, deletedWithProjectId: null, version: { increment: 1 } },
+      });
+    }
+    if (roots.length) {
+      await tx.taskActivity.createMany({
+        data: roots.map((r) => ({ workspaceId: actor.workspaceId, taskId: r.id, actorId: actor.id, projectId, kind: "project_restored" })),
+      });
+    }
+    return roots.length;
+  });
+  await auditProject(actor, "RESTORE", projectId);
+  await changed(actor, [projectId], "project");
+  return { restoredTasks: restored };
+}
+
+/**
+ * Suppression définitive d'un projet de la corbeille (propriétaire, action
+ * distincte). Efface le projet, ses sections et rattachements, et les tâches
+ * qui n'appartiennent à aucun autre projet conservé (actif ou en corbeille) :
+ * celles mises à la corbeille avec lui et celles déjà supprimées
+ * individuellement — sans projet restant, elles deviendraient des tâches
+ * « libres » visibles de tout l'espace. Une tâche liée à un autre projet
+ * conservé n'est jamais effacée : elle suit ce projet.
+ */
+export async function purgeProject(actor: Actor, projectId: string): Promise<{ purgedTasks: number; keptTasks: number }> {
+  const { rights } = await loadTrashedProject(actor, projectId);
+  if (!rights.canPurge) throw new TaskAccessError("FORBIDDEN", "Seul le propriétaire du projet peut le supprimer définitivement.");
+
+  const candidates = await prisma.task.findMany({
+    where: {
+      workspaceId: actor.workspaceId,
+      parentId: null,
+      deletedAt: { not: null },
+      OR: [{ deletedWithProjectId: projectId }, { projects: { some: { projectId } } }],
+    },
+    select: {
+      id: true,
+      deletedWithProjectId: true,
+      projects: { where: { projectId: { not: projectId } }, select: { projectId: true, project: { select: { deletedAt: true } } } },
+    },
+  });
+  const purge = candidates.filter((t) => t.projects.length === 0).map((t) => t.id);
+  const kept = candidates.filter((t) => t.projects.length > 0 && t.deletedWithProjectId === projectId);
   const attachments = await prisma.taskAttachment.findMany({
-    where: { OR: [{ taskId: { in: exclusive } }, { task: { parentId: { in: exclusive } } }] },
+    where: { OR: [{ taskId: { in: purge } }, { task: { parentId: { in: purge } } }] },
     select: { storageKey: true },
   });
 
-  await prisma.$transaction([
-    prisma.task.deleteMany({ where: { id: { in: exclusive }, workspaceId: actor.workspaceId } }),
-    prisma.project.deleteMany({ where: { id: projectId, workspaceId: actor.workspaceId } }),
-  ]);
+  await prisma.$transaction(async (tx) => {
+    for (const task of kept) {
+      // Encore liée à un autre projet : elle suit celui-ci (actif → elle
+      // revient ; en corbeille → elle se restaurera avec lui).
+      const active = task.projects.find((p) => !p.project.deletedAt);
+      const next = active ? null : task.projects[0].projectId;
+      await tx.task.updateMany({
+        where: { workspaceId: actor.workspaceId, deletedWithProjectId: projectId, OR: [{ id: task.id }, { parentId: task.id }] },
+        data: active
+          ? { deletedAt: null, deletedById: null, deletedWithProjectId: null }
+          : { deletedWithProjectId: next },
+      });
+    }
+    await tx.task.deleteMany({ where: { workspaceId: actor.workspaceId, id: { in: purge } } });
+    await tx.project.deleteMany({ where: { id: projectId, workspaceId: actor.workspaceId, deletedAt: { not: null } } });
+  });
   for (const { storageKey } of attachments) await objectStore.remove(storageKey).catch(() => {});
-  await auditProject(actor, "DELETE", projectId);
+  await recordAudit({ workspaceId: actor.workspaceId, userId: actor.id, action: "DELETE", entityType: AUDIT_ENTITY_TYPES.PROJECT, entityId: projectId });
   await changed(actor, [projectId], "project_deleted");
-  return { deletedTasks: exclusive.length, keptTasks: memberships.length - exclusive.length };
+  return { purgedTasks: purge.length, keptTasks: kept.length };
 }
 
 // ─── Membres et favoris ───────────────────────────────────────────────────────

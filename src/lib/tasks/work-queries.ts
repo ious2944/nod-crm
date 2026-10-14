@@ -10,6 +10,7 @@ import {
   canReadProject,
   evaluateTaskAccess,
   NOT_TEMPLATE_TASK,
+  projectAccessSelect,
   readableProjectWhere,
   taskAccessSelect,
   TaskAccessError,
@@ -441,11 +442,16 @@ export async function getTaskDetail(actor: Actor, taskId: string): Promise<TaskD
 export async function resolveTaskLocation(actor: Actor, taskId: string): Promise<string> {
   const task = await prisma.task.findFirst({
     where: { AND: [visibleTaskWhere(actor), { id: taskId }] },
-    select: { id: true, parentId: true, projects: { select: { projectId: true, project: { select: { visibility: true, members: { where: { userId: actor.id }, select: { role: true } } } } } }, parent: { select: { projects: { select: { projectId: true } } } } },
+    select: {
+      id: true,
+      parentId: true,
+      projects: { select: { projectId: true, project: { select: projectAccessSelect(actor) } } },
+      parent: { select: { projects: { select: { projectId: true, project: { select: projectAccessSelect(actor) } } } } },
+    },
   });
   if (!task) throw new TaskAccessError("NOT_FOUND");
-  const readable = task.projects.find((p) => p.project.visibility === "WORKSPACE" || p.project.members.length > 0);
-  const projectId = readable?.projectId ?? task.parent?.projects[0]?.projectId;
+  const readable = [...task.projects, ...(task.parent?.projects ?? [])].find((p) => canReadProject(p.project));
+  const projectId = readable?.projectId;
   return projectId ? `/tasks/projects/${projectId}?view=list&task=${taskId}` : `/tasks?task=${taskId}`;
 }
 

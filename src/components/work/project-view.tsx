@@ -247,7 +247,7 @@ export function ProjectView({ initial, initialTab, savedViews: initialViews }: {
     project.archived
       ? { label: "Désarchiver", icon: ArchiveRestore, disabled: !project.canManage, onSelect: async () => { if ((await run(() => archiveProjectAction(projectId, false), "Projet désarchivé.")) !== null) void reload(); } }
       : { label: "Archiver", icon: Archive, disabled: !project.canManage, onSelect: async () => { if ((await run(() => archiveProjectAction(projectId, true), "Projet archivé.")) !== null) void reload(); } },
-    { label: "Supprimer le projet", icon: Trash, danger: true, disabled: !project.canManage, onSelect: () => setModal("delete") },
+    { label: "Mettre le projet à la corbeille", icon: Trash, danger: true, disabled: !project.canManage, onSelect: () => setModal("delete") },
   ];
 
   return (
@@ -394,18 +394,18 @@ export function ProjectView({ initial, initialTab, savedViews: initialViews }: {
       {modal === "delete" && (
         <ConfirmModal
           open
-          title="Supprimer le projet ?"
+          title="Mettre le projet à la corbeille ?"
           description={
             <>
-              « {project.name} » sera supprimé définitivement. Les tâches qui n&apos;appartiennent qu&apos;à ce projet seront supprimées avec lui ; celles qui appartiennent aussi à d&apos;autres projets seront conservées. Pour garder l&apos;historique, préférez l&apos;archivage.
+              « {project.name} » disparaîtra des vues. Les tâches qui n&apos;appartiennent qu&apos;à ce projet passent dans la corbeille avec lui, sans rien perdre (sous-tâches, commentaires, fichiers, historique) ; celles qui appartiennent aussi à d&apos;autres projets y restent disponibles. Vous pourrez le restaurer depuis la corbeille.
             </>
           }
-          confirmLabel="Supprimer définitivement"
+          confirmLabel="Mettre à la corbeille"
           onClose={() => setModal(null)}
           onConfirm={async () => {
             const result = await run(() => deleteProjectAction(projectId));
             if (result) {
-              store.toast("success", `Projet supprimé (${result.deletedTasks} tâche(s) supprimée(s), ${result.keptTasks} conservée(s) dans d'autres projets).`);
+              store.toast("success", `Projet placé dans la corbeille (${result.deletedTasks} tâche(s) avec lui, ${result.keptTasks} conservée(s) dans d'autres projets).`);
               router.push("/tasks/projects");
             }
           }}

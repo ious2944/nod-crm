@@ -139,27 +139,28 @@ model Workspace {
 /// est donc entièrement déterminé par la session : il n'est jamais lu depuis
 /// une entrée client.
 model User {
-  id           String    @id @default(uuid()) @db.Uuid
-  workspaceId  String    @map("workspace_id") @db.Uuid
-  email        String    @unique
+  id                    String    @id @default(uuid()) @db.Uuid
+  workspaceId           String    @map("workspace_id") @db.Uuid
+  email                 String    @unique
   /// Argon2id. Ne jamais journaliser, ne jamais renvoyer au client.
-  passwordHash String    @map("password_hash")
-  displayName  String?   @map("display_name")
+  passwordHash          String    @map("password_hash")
+  displayName           String?   @map("display_name")
   /// Capacité de travail hebdomadaire (minutes) pour la vue Charge. `null` :
   /// valeur par défaut de l'instance.
-  weeklyCapacityMinutes Int? @map("weekly_capacity_minutes")
-  isActive     Boolean   @default(true) @map("is_active")
-  lastLoginAt  DateTime? @map("last_login_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  weeklyCapacityMinutes Int?      @map("weekly_capacity_minutes")
+  isActive              Boolean   @default(true) @map("is_active")
+  lastLoginAt           DateTime? @map("last_login_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sessions  Session[]
   auditLogs AuditLog[]
 
   assignedTasks           Task[]                   @relation("TaskAssignee")
   createdTasks            Task[]                   @relation("TaskCreator")
   deletedTasks            Task[]                   @relation("TaskDeleter")
+  deletedProjects         Project[]                @relation("ProjectDeleter")
   ownedProjects           Project[]                @relation("ProjectOwner")
   createdProjects         Project[]                @relation("ProjectCreator")
   projectMemberships      ProjectMember[]
@@ -279,23 +280,23 @@ model Contact {
 }
 
 model FollowUp {
-  id             String         @id @default(uuid()) @db.Uuid
-  workspaceId    String         @map("workspace_id") @db.Uuid
-  contactId      String?        @map("contact_id") @db.Uuid
+  id            String         @id @default(uuid()) @db.Uuid
+  workspaceId   String         @map("workspace_id") @db.Uuid
+  contactId     String?        @map("contact_id") @db.Uuid
   /// Lien facultatif vers une opportunité commerciale. N'altère pas le
   /// fonctionnement normal du suivi (balle, relance, Today).
-  opportunityId  String?        @map("opportunity_id") @db.Uuid
-  title          String
-  description    String?
-  status         FollowUpStatus @default(OPEN)
-  ballOwner      BallOwner      @default(THEM) @map("ball_owner")
-  dueAt          DateTime       @map("due_at")
-  nudgeCount     Int            @default(0) @map("nudge_count")
-  lastNudgedAt   DateTime?      @map("last_nudged_at")
-  isDemo         Boolean        @default(false) @map("is_demo")
-  createdAt      DateTime       @default(now()) @map("created_at")
-  updatedAt      DateTime       @updatedAt @map("updated_at")
-  completedAt    DateTime?      @map("completed_at")
+  opportunityId String?        @map("opportunity_id") @db.Uuid
+  title         String
+  description   String?
+  status        FollowUpStatus @default(OPEN)
+  ballOwner     BallOwner      @default(THEM) @map("ball_owner")
+  dueAt         DateTime       @map("due_at")
+  nudgeCount    Int            @default(0) @map("nudge_count")
+  lastNudgedAt  DateTime?      @map("last_nudged_at")
+  isDemo        Boolean        @default(false) @map("is_demo")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  completedAt   DateTime?      @map("completed_at")
 
   workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   contact     Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
@@ -313,78 +314,82 @@ model FollowUp {
 /// historique, le cockpit, les projets, « Mes tâches » et les fiches CRM lisent
 /// toutes les mêmes lignes — il n'existe pas de second système de tâches.
 model Task {
-  id             String          @id @default(uuid()) @db.Uuid
-  workspaceId    String          @map("workspace_id") @db.Uuid
-  contactId      String?         @map("contact_id") @db.Uuid
-  followUpId     String?         @map("follow_up_id") @db.Uuid
+  id                   String          @id @default(uuid()) @db.Uuid
+  workspaceId          String          @map("workspace_id") @db.Uuid
+  contactId            String?         @map("contact_id") @db.Uuid
+  followUpId           String?         @map("follow_up_id") @db.Uuid
   /// Lien facultatif vers une opportunité commerciale. N'altère pas le
   /// fonctionnement normal de la tâche.
-  opportunityId  String?         @map("opportunity_id") @db.Uuid
+  opportunityId        String?         @map("opportunity_id") @db.Uuid
   /// Lien facultatif vers une organisation (entreprise / client).
-  organizationId String?         @map("organization_id") @db.Uuid
-  title          String
+  organizationId       String?         @map("organization_id") @db.Uuid
+  title                String
   /// Description enrichie (Markdown restreint, rendu échappé côté client).
-  notes          String?
+  notes                String?
   /// Échéance : minuit local (APP_TIME_ZONE). Facultative depuis la V1.0.
-  dueAt          DateTime?       @map("due_at")
+  dueAt                DateTime?       @map("due_at")
   /// Heure facultative `HH:MM`, heure murale dans APP_TIME_ZONE.
-  dueTime        String?         @map("due_time")
+  dueTime              String?         @map("due_time")
   /// Date de début : minuit local (APP_TIME_ZONE).
-  startAt        DateTime?       @map("start_at")
-  completedAt    DateTime?       @map("completed_at")
-  status         TaskStatus      @default(TODO)
-  priority       TaskPriority    @default(NORMAL)
-  assigneeId     String?         @map("assignee_id") @db.Uuid
-  createdById    String?         @map("created_by_id") @db.Uuid
+  startAt              DateTime?       @map("start_at")
+  completedAt          DateTime?       @map("completed_at")
+  status               TaskStatus      @default(TODO)
+  priority             TaskPriority    @default(NORMAL)
+  assigneeId           String?         @map("assignee_id") @db.Uuid
+  createdById          String?         @map("created_by_id") @db.Uuid
   /// Sous-tâche : un seul niveau. Supprimer la parente supprime ses sous-tâches.
-  parentId       String?         @map("parent_id") @db.Uuid
-  subtaskPosition Float          @default(0) @map("subtask_position")
-  isMilestone    Boolean         @default(false) @map("is_milestone")
-  isApproval     Boolean         @default(false) @map("is_approval")
-  approvalStatus ApprovalStatus? @map("approval_status")
+  parentId             String?         @map("parent_id") @db.Uuid
+  subtaskPosition      Float           @default(0) @map("subtask_position")
+  isMilestone          Boolean         @default(false) @map("is_milestone")
+  isApproval           Boolean         @default(false) @map("is_approval")
+  approvalStatus       ApprovalStatus? @map("approval_status")
   /// Règle de récurrence (voir `src/lib/tasks/recurrence.ts`).
-  recurrence     Json?
+  recurrence           Json?
   /// Tâche dont l'achèvement a produit cette occurrence. `@unique` : une
   /// occurrence ne peut être générée qu'une fois, même en cas de double clic.
-  recurrenceOriginId String?     @unique @map("recurrence_origin_id") @db.Uuid
-  estimatedMinutes Int?          @map("estimated_minutes")
+  recurrenceOriginId   String?         @unique @map("recurrence_origin_id") @db.Uuid
+  estimatedMinutes     Int?            @map("estimated_minutes")
   /// Dernier statut actif avant achèvement : la réouverture y revient.
-  lastActiveStatus TaskStatus?   @map("last_active_status")
+  lastActiveStatus     TaskStatus?     @map("last_active_status")
   /// Corbeille : suppression logique. Une tâche supprimée n'apparaît plus
   /// nulle part sauf dans la corbeille ; la suppression définitive est à part.
-  deletedAt      DateTime?       @map("deleted_at")
-  deletedById    String?         @map("deleted_by_id") @db.Uuid
+  deletedAt            DateTime?       @map("deleted_at")
+  deletedById          String?         @map("deleted_by_id") @db.Uuid
+  /// Mise à la corbeille par la suppression de ce projet (et non
+  /// individuellement) : restaurée avec lui. `null` : suppression propre.
+  deletedWithProjectId String?         @map("deleted_with_project_id") @db.Uuid
   /// Incrémenté à chaque écriture : sert à la synchronisation temps réel et à
   /// la détection des modifications concurrentes.
-  version        Int             @default(1)
-  isDemo         Boolean         @default(false) @map("is_demo")
-  createdAt      DateTime        @default(now()) @map("created_at")
-  updatedAt      DateTime        @updatedAt @map("updated_at")
+  version              Int             @default(1)
+  isDemo               Boolean         @default(false) @map("is_demo")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
 
-  workspace        Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  contact          Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  followUp         FollowUp?     @relation(fields: [followUpId], references: [id], onDelete: SetNull)
-  opportunity      Opportunity?  @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
-  organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  assignee         User?         @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  deletedBy        User?         @relation("TaskDeleter", fields: [deletedById], references: [id], onDelete: SetNull)
-  createdBy        User?         @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  parent           Task?         @relation("TaskSubtasks", fields: [parentId], references: [id], onDelete: Cascade)
-  subtasks         Task[]        @relation("TaskSubtasks")
-  recurrenceOrigin Task?         @relation("TaskRecurrence", fields: [recurrenceOriginId], references: [id], onDelete: SetNull)
-  recurrenceNext   Task?         @relation("TaskRecurrence")
+  workspace          Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact            Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  followUp           FollowUp?     @relation(fields: [followUpId], references: [id], onDelete: SetNull)
+  opportunity        Opportunity?  @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  organization       Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  assignee           User?         @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  deletedBy          User?         @relation("TaskDeleter", fields: [deletedById], references: [id], onDelete: SetNull)
+  deletedWithProject Project?      @relation("TaskDeletedWithProject", fields: [deletedWithProjectId], references: [id], onDelete: SetNull)
+  createdBy          User?         @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  parent             Task?         @relation("TaskSubtasks", fields: [parentId], references: [id], onDelete: Cascade)
+  subtasks           Task[]        @relation("TaskSubtasks")
+  recurrenceOrigin   Task?         @relation("TaskRecurrence", fields: [recurrenceOriginId], references: [id], onDelete: SetNull)
+  recurrenceNext     Task?         @relation("TaskRecurrence")
 
-  projects      TaskProject[]
-  tags          TaskTag[]
-  customValues  TaskCustomFieldValue[]
-  followers     TaskFollower[]
-  blocking      TaskDependency[]         @relation("DependencyBlocking")
-  blockedBy     TaskDependency[]         @relation("DependencyBlocked")
-  attachments   TaskAttachment[]
-  comments      Comment[]
-  activities    TaskActivity[]
-  timeEntries   TaskTimeEntry[]
-  notifications Notification[]
+  projects       TaskProject[]
+  tags           TaskTag[]
+  customValues   TaskCustomFieldValue[]
+  followers      TaskFollower[]
+  blocking       TaskDependency[]       @relation("DependencyBlocking")
+  blockedBy      TaskDependency[]       @relation("DependencyBlocked")
+  attachments    TaskAttachment[]
+  comments       Comment[]
+  activities     TaskActivity[]
+  timeEntries    TaskTimeEntry[]
+  notifications  Notification[]
   automationRuns AutomationRun[]
   reminders      TaskReminder[]
   migrationNotes TaskMigrationNote[]
@@ -426,13 +431,18 @@ model Project {
   version        Int               @default(1)
   createdAt      DateTime          @default(now()) @map("created_at")
   updatedAt      DateTime          @updatedAt @map("updated_at")
+  /// Corbeille : projet supprimé (restaurable). Ses sections, membres et
+  /// rattachements sont conservés ; voir `docs/tasks.md`.
+  deletedAt      DateTime?         @map("deleted_at")
+  deletedById    String?           @map("deleted_by_id") @db.Uuid
 
-  workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  owner         User?         @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  createdBy     User?         @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  contact       Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  organization  Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  opportunity   Opportunity?  @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  workspace     Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  deletedBy     User?                 @relation("ProjectDeleter", fields: [deletedById], references: [id], onDelete: SetNull)
+  owner         User?                 @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdBy     User?                 @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  contact       Contact?              @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  organization  Organization?         @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  opportunity   Opportunity?          @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
   members       ProjectMember[]
   sections      ProjectSection[]
   tasks         TaskProject[]
@@ -443,9 +453,11 @@ model Project {
   rules         AutomationRule[]
   taskTemplates TaskTemplate[]
   forms         TaskForm[]
-  ownedFields   CustomField[]     @relation("ProjectOwnedFields")
+  ownedFields   CustomField[]         @relation("ProjectOwnedFields")
+  trashedTasks  Task[]                @relation("TaskDeletedWithProject")
 
   @@index([workspaceId, archivedAt, isTemplate])
+  @@index([workspaceId, deletedAt])
   @@index([contactId])
   @@index([organizationId])
   @@index([opportunityId])
@@ -777,9 +789,9 @@ model Notification {
 }
 
 model NotificationPreference {
-  userId  String  @map("user_id") @db.Uuid
-  type    String
-  inApp   Boolean @default(true) @map("in_app")
+  userId String  @map("user_id") @db.Uuid
+  type   String
+  inApp  Boolean @default(true) @map("in_app")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -940,26 +952,26 @@ model Opportunity {
 
 /// V0.8 — entrée du registre des traitements RGPD.
 model PrivacyTreatment {
-  id                String    @id @default(uuid()) @db.Uuid
-  workspaceId       String    @map("workspace_id") @db.Uuid
-  name              String
-  purpose           String
-  description       String?
-  owner             String?
-  dataSubjects      String?   @map("data_subjects")
-  dataCategories    String?   @map("data_categories")
-  legalBasis        String    @default("TO_DETERMINE") @map("legal_basis")
-  retentionPeriod   String?   @map("retention_period")
-  recipients        String?
-  transferOutsideEea String   @default("UNKNOWN") @map("transfer_outside_eea")
-  securityMeasures  String?   @map("security_measures")
-  lastReviewedAt    DateTime? @map("last_reviewed_at")
-  nextReviewAt      DateTime? @map("next_review_at")
-  status            String    @default("ACTIVE")
-  archivedAt        DateTime? @map("archived_at")
-  isDemo            Boolean   @default(false) @map("is_demo")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  id                 String    @id @default(uuid()) @db.Uuid
+  workspaceId        String    @map("workspace_id") @db.Uuid
+  name               String
+  purpose            String
+  description        String?
+  owner              String?
+  dataSubjects       String?   @map("data_subjects")
+  dataCategories     String?   @map("data_categories")
+  legalBasis         String    @default("TO_DETERMINE") @map("legal_basis")
+  retentionPeriod    String?   @map("retention_period")
+  recipients         String?
+  transferOutsideEea String    @default("UNKNOWN") @map("transfer_outside_eea")
+  securityMeasures   String?   @map("security_measures")
+  lastReviewedAt     DateTime? @map("last_reviewed_at")
+  nextReviewAt       DateTime? @map("next_review_at")
+  status             String    @default("ACTIVE")
+  archivedAt         DateTime? @map("archived_at")
+  isDemo             Boolean   @default(false) @map("is_demo")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
   workspace  Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   processors PrivacyTreatmentProcessor[]
@@ -971,25 +983,25 @@ model PrivacyTreatment {
 
 /// V0.8 — prestataire / sous-traitant intervenant sur des données personnelles.
 model PrivacyProcessor {
-  id                 String    @id @default(uuid()) @db.Uuid
-  workspaceId        String    @map("workspace_id") @db.Uuid
-  name               String
-  service            String
-  category           String?
-  dataCategories     String?   @map("data_categories")
-  purpose            String?
-  country            String?
-  eeaStatus          String    @default("UNKNOWN") @map("eea_status")
-  dpaStatus          String    @default("TO_REVIEW") @map("dpa_status")
-  dpaUrl             String?   @map("dpa_url")
-  subprocessorsStatus String   @default("UNKNOWN") @map("subprocessors_status")
-  notes              String?
-  lastReviewedAt     DateTime? @map("last_reviewed_at")
-  nextReviewAt       DateTime? @map("next_review_at")
-  archivedAt         DateTime? @map("archived_at")
-  isDemo             Boolean   @default(false) @map("is_demo")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  id                  String    @id @default(uuid()) @db.Uuid
+  workspaceId         String    @map("workspace_id") @db.Uuid
+  name                String
+  service             String
+  category            String?
+  dataCategories      String?   @map("data_categories")
+  purpose             String?
+  country             String?
+  eeaStatus           String    @default("UNKNOWN") @map("eea_status")
+  dpaStatus           String    @default("TO_REVIEW") @map("dpa_status")
+  dpaUrl              String?   @map("dpa_url")
+  subprocessorsStatus String    @default("UNKNOWN") @map("subprocessors_status")
+  notes               String?
+  lastReviewedAt      DateTime? @map("last_reviewed_at")
+  nextReviewAt        DateTime? @map("next_review_at")
+  archivedAt          DateTime? @map("archived_at")
+  isDemo              Boolean   @default(false) @map("is_demo")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
   workspace  Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   treatments PrivacyTreatmentProcessor[]
@@ -1149,8 +1161,11 @@ model JobLease {
 model TaskMigrationNote {
   taskId      String   @map("task_id") @db.Uuid
   workspaceId String   @map("workspace_id") @db.Uuid
-  /// `ASSIGNEE_UNKNOWN` | `CREATOR_UNKNOWN`
+  /// `ASSIGNEE_UNKNOWN` | `CREATOR_UNKNOWN` | `ASSIGNEE_INFERRED_REVERTED` |
+  /// `CREATOR_INFERRED_REVERTED` | `ASSIGNEE_INFERRED_KEPT` | `CREATOR_INFERRED_KEPT`
   reason      String
+  /// Valeur concernée (identifiant de l'utilisateur déduit), pour vérification.
+  detail      String?
   createdAt   DateTime @default(now()) @map("created_at")
 
   task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)

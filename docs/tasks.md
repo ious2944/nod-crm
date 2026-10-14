@@ -20,7 +20,7 @@ follow-ups keep independent states.
 | `/tasks/search` | Server-side search (title **and** full description) with combinable filters |
 | `/tasks/portfolio` | Multi-project overview |
 | `/tasks/workload?from=&weeks=` | Remaining estimate per assignee and week, against each person's capacity |
-| `/tasks/trash` | Deleted tasks: restore, permanent deletion |
+| `/tasks/trash` | Deleted projects and tasks: restore, permanent deletion |
 | `/tasks/forms`, `/tasks/forms/[id]` | Internal request forms |
 | `/tasks/settings` | Tags and custom-field library |
 | `/tasks/t/[id]` | Direct link to a task (opens its first readable project with the panel) |
@@ -35,6 +35,9 @@ authenticated layout.
 | --- | --- |
 | `prisma/migrations/20261013120000_work_management` | additive migration (status backfill) |
 | `prisma/migrations/20261014090000_work_management_hardening` | trash, last active status, project fields, capacity, reminders, leases, legacy-task report |
+| `prisma/migrations/20261014091000_work_management_legacy_reconcile` | corrective: undoes the inferred assignees/creators of the first migration |
+| `prisma/migrations/20261014092000_project_trash` | project trash |
+| `scripts/migration-check.mjs` | migration-history diagnosis and guarded checksum reconciliation |
 | `src/lib/tasks/types.ts`, `constants.ts` | client-safe types, labels, palettes |
 | `src/lib/tasks/access.ts` | **permissions** (workspace, project visibility, roles) |
 | `src/lib/tasks/service.ts` | task mutations (create/update/move/delete/duplicate, tags, custom fields, dependencies, followers, time, comments) |
@@ -82,45 +85,103 @@ it. Deleted tasks keep their row (`deleted_at`, `deleted_by_id`).
 
 `npm run db:deploy` applies, in order:
 
-1. `20261013120000_work_management` — additive: no table or column is dropped
-   or renamed; only `tasks.due_at NOT NULL` is relaxed. Backfill: completed
-   tasks become `DONE` (`completed_at` is explicit data). Nothing else is
-   inferred.
-2. `20261014090000_work_management_hardening` — additive. For **legacy tasks**
-   (rows with no `task_activities`, i.e. created before V1.0):
-   - `created_by_id` comes from the earliest `audit_logs` row
-     `Task / CREATE` for that task, **only** if its author still exists in the
-     same workspace (a deactivated user is kept: it is a historical fact).
-     An `UPDATE` author is never taken as creator.
-   - **No assignee is ever inferred** — not from the creator, not from an
-     editor, not from a single-user workspace. Legacy tasks stay unassigned and
-     visible to the workspace, as before.
-   - Every legacy task whose assignee or creator is unknown gets a row in
-     `task_migration_notes` (`ASSIGNEE_UNKNOWN`, `CREATOR_UNKNOWN`).
+1. `20261013120000_work_management` — additive DDL (no table or column dropped
+   or renamed; only `tasks.due_at NOT NULL` is relaxed). It is kept **exactly as
+   first published** (commit `81c4b0c`, SHA-256 `7a410c8d…`), because databases
+   may have applied it: it backfills `status` from `completed_at`, and also
+   *inferred* creator and assignee from the `Task / CREATE` audit author or the
+   single user of a workspace. That inference is undone by migration 3.
+2. `20261014090000_work_management_hardening` — additive (trash, last active
+   status, project-owned fields, capacity, reminders, leases, legacy-task
+   report). Creator from the audit `CREATE` author only when it still belongs
+   to the workspace; notes for unknown creators/assignees.
+3. `20261014091000_work_management_legacy_reconcile` — corrective, idempotent,
+   one atomic block. On **legacy tasks** (created before migration 1 was applied,
+   per `_prisma_migrations.finished_at`, and without a V1.0 creation row):
+   - an assignee without any `Responsable` history line can only come from the
+     old backfill (V0.x had no assignees; V1.0 logs every assignment):
+     - task never used since (no history, no comment) → **removed**, noted
+       `ASSIGNEE_INFERRED_REVERTED` (previous user in `detail`) and
+       `ASSIGNEE_UNKNOWN`;
+     - task used since → **kept** and noted `ASSIGNEE_INFERRED_KEPT`: ambiguous,
+       for a human to check;
+   - an assignment made or changed in V1.0 is **never** touched;
+   - a creator not backed by the audit `CREATE` author (single-user rule) gets
+     the same treatment (`CREATOR_INFERRED_REVERTED` / `CREATOR_INFERRED_KEPT`);
+   - wrong `*_UNKNOWN` notes on V1.0 tasks (subtasks copied without history)
+     are removed.
+4. `20261014092000_project_trash` — additive (project trash, see below).
+
+No step deletes or rewrites business data other than the inferred
+assignee/creator values listed above, each one recorded with its previous
+value.
+
+#### Upgrade path by initial state
+
+`node scripts/migration-check.mjs` (read-only; also runs in the production
+image: `docker compose run --rm app node scripts/migration-check.mjs`) reports
+which state a database is in by comparing `_prisma_migrations` with the files:
+
+| State | Recorded checksum of `20261013120000` | Procedure |
+| --- | --- | --- |
+| **A** — module never applied (e.g. `main`) | none | `npm run db:deploy` |
+| **B** — first version applied (`81c4b0c`) | `7a410c8d…` (= file) | `npm run db:deploy` |
+| **C** — revised version applied (`c199fdd` … `cc1240c`) | `b7fae256…` | reconcile, then `npm run db:deploy` |
+
+Why state C needs a reconciliation: `migrate deploy` silently accepts a modified
+migration, but `migrate dev` then demands a **reset** (verified). The revised
+file differed from the first one only by comments and two data-backfill
+statements — the DDL is byte-for-byte identical (asserted by the test below) —
+and the data outcome is made identical by migration 3. Procedure, never a reset:
+
+```sh
+pg_dump -Fc "$DATABASE_URL" -f before-v1-reconcile.dump   # 1. backup
+node scripts/migration-check.mjs                           # 2. must say « État C »
+node scripts/migration-check.mjs --reconcile               # 3. guarded rewrite of the checksum
+npm run db:deploy                                          # 4. applies migrations 3 and 4
+node scripts/migration-check.mjs                           # 5. no « ≠ » line left
+npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script
+                                                           # 6. must print an empty migration
+```
+
+`--reconcile` writes **only** if: the recorded checksum is exactly the revised
+one, the migration finished and was not rolled back, no other migration
+diverges, the file on disk is the original, and every schema object the
+migration creates (types, tables, columns, indexes, constraints) exists in the
+database. It updates that single `_prisma_migrations.checksum` in a
+transaction; otherwise it exits with an error and writes nothing.
 
 Report after deployment (read-only):
 
 ```sql
 -- Volumes by reason
 SELECT reason, count(*) FROM task_migration_notes GROUP BY reason;
--- Tasks to assign by hand, per workspace
+-- Ambiguous inferred assignments kept: to confirm or change by hand
+SELECT w.slug, t.id, t.title, n.reason, n.detail AS inferred_user
+  FROM task_migration_notes n JOIN tasks t ON t.id = n.task_id JOIN workspaces w ON w.id = t.workspace_id
+ WHERE n.reason LIKE '%_INFERRED_KEPT' ORDER BY w.slug, t.title;
+-- Tasks still to assign
 SELECT w.slug, t.id, t.title, t.due_at, t.status
-  FROM task_migration_notes n
-  JOIN tasks t ON t.id = n.task_id
-  JOIN workspaces w ON w.id = t.workspace_id
- WHERE n.reason = 'ASSIGNEE_UNKNOWN' AND t.deleted_at IS NULL
+  FROM task_migration_notes n JOIN tasks t ON t.id = n.task_id JOIN workspaces w ON w.id = t.workspace_id
+ WHERE n.reason = 'ASSIGNEE_UNKNOWN' AND t.assignee_id IS NULL AND t.deleted_at IS NULL
  ORDER BY w.slug, t.due_at NULLS LAST;
 ```
 
-`tests/integration/migration-work-management.test.ts` replays both migrations
-on a disposable PostgreSQL schema (never the development or production
-database) seeded with several users, a deactivated user, a deleted user,
-tasks with and without audit rows, a forged cross-workspace audit row,
-completed tasks, a single-user workspace and a task without due date, and
-compares rows before/after (volumes, CRM links, dates).
+Verification:
 
-If a database was migrated with an earlier revision of this branch, reset that
-development database: the first migration was revised before merge.
+- `tests/integration/migration-work-management.test.ts` replays states A, B and
+  C on disposable PostgreSQL schemas (never the development or production
+  database), recording `_prisma_migrations` like Prisma: several users, a
+  deactivated user, a deleted user, tasks with and without audit rows, a forged
+  cross-workspace audit row, completed tasks, single-user workspaces, a task
+  without due date, V1.0 usage (reassignment, edit, comment, new tasks and
+  copied subtasks). It compares rows before/after (volumes, CRM links, dates,
+  audit log), checks every assignee/creator decision and note, re-runs the
+  corrective migrations (no change, no duplicate) and exercises
+  `migration-check.mjs` (states, refusal on a missing index, reconciliation).
+- The same three paths were also run with the real Prisma CLI on disposable
+  databases (`main` → state → current tree): `migrate deploy`, `migrate status`
+  “up to date”, `migrate diff` empty, `migrate dev --create-only` without reset.
 
 ## Permissions (checked on the server)
 
@@ -186,9 +247,10 @@ Side doors are closed the same way:
   opaque server-generated keys, served only by `/api/tasks/attachments/[id]`
   after a read check, with `nosniff`, sandboxed CSP and `attachment`
   disposition (images/PDF inline). Upload checks `Origin`.
-- **Deleting a project** (owner only, explicit confirmation) deletes the tasks
-  that belong to no other project permanently: moving them to the trash would
-  turn them into project-less tasks visible to the whole workspace.
+- **Project trash** (see *Task lifecycle*): a deleted project and the tasks
+  deleted with it are readable by nobody; only the project owner sees it in the
+  trash. A task never becomes “project-less” (workspace-visible) because its
+  projects were deleted: its memberships are kept.
 
 ### Cockpit `/today`
 
@@ -207,6 +269,27 @@ The cockpit reads through the same `visibleTaskWhere` (plus “not in the trash�
 - **Trash**: deleting a task (and the subtasks still active) sets `deleted_at`;
   comments, files and history stay. Restoring brings back the subtasks deleted
   with it (same timestamp), not those deleted earlier.
+- **Project trash**: deleting a project (owner) sets `projects.deleted_at`; it
+  disappears from every view, search, CRM sheet, notification and context.
+  Sections, members, fields, rules, forms and `task_projects` rows are kept.
+  - Its **exclusive** tasks (no other *active* project) and their active
+    subtasks go to the trash with it (`tasks.deleted_with_project_id`), with
+    comments, files, field values, history and CRM links untouched. They are
+    not listed in the task trash (they come back with the project) and nobody
+    can open them.
+  - Tasks also in another active project stay available there; the deleted
+    project's membership is hidden but kept.
+  - Rules of a deleted project no longer run, and reminders ignore its
+    inactive tasks.
+  - **Restore** (owner): the project, its sections and memberships return; the
+    tasks deleted with it come back (and tasks made inactive by the deletion of
+    another project that also belong to it). Tasks or subtasks deleted
+    individually before it stay in the task trash.
+  - **Delete permanently** (owner, separate action from the trash): erases the
+    project and the tasks belonging to no other kept project (active or in the
+    trash), including those deleted individually before. A task still linked to
+    another kept project is never erased; if that project is in the trash, the
+    task follows it.
 - **Completion**: `DONE` sets `completed_at`; any other status clears it.
   Reopening (cockpit, list checkbox) goes back to `last_active_status`.
 - **Approval**: an approval request cannot be completed before it is approved.
@@ -277,9 +360,29 @@ logged-in user.
   twice, whatever the number of runs, instances or retries.
 - **Simultaneous runs**: a lease row in `job_leases` (atomic conditional update)
   lets a single run through; others return immediately (`skipped: "locked"`).
-  A lease left by a killed process expires after 10 minutes.
+- **Stale holder**: the lease is extended before **every** delivery; a process
+  that lost it (suspended longer than the lease, taken over meanwhile) stops at
+  once (`lostLease`) and never releases a lease that is no longer its own. A row
+  is validated only if it is still `PENDING`. Prisma runs each write in its own
+  transaction (BEGIN / statement / COMMIT): a process frozen between two would
+  hold row locks, so every application connection sets
+  `idle_in_transaction_session_timeout = 30 s` and PostgreSQL evicts it.
 - **Resumption**: reserved rows still `PENDING` are processed by the next run;
-  a failure is retried up to 5 times, then marked `FAILED` with the error.
+  a failure is retried up to 5 times, then marked `FAILED` with the error. A
+  crash between creating a notification and validating its row re-delivers
+  the row, and the `dedupe_key` prevents a second notification. A rule run
+  interrupted inside its actions is not replayed (rule actions are not all
+  idempotent): it is marked `ERROR` (“interrompue”) and the reminder `SKIPPED`.
+- **Recovery delay** after a crash *during* a run: at most the lease
+  (`TASK_REMINDER_LEASE_SECONDS`, 600 s by default) plus one period. A crash
+  between runs holds no lease: the next tick of another instance proceeds.
+  Measured with two `next start` servers (lease 30 s, period 1 min): reminder
+  sent by the survivor 52 s after `kill -9` of the holder.
+- **Reminders that became old during an outage**: nothing is caught up. On
+  restart, reminders are planned for tasks due today or tomorrow only: a missed
+  “day before” reminder is replaced by the “due today” one; if the due date
+  itself passed during the outage, no reminder is sent, and rows reserved before
+  the outage are marked `SKIPPED` (“Échéance dépassée : rappel trop ancien.”).
 - **Stale reminders**: no catch-up. Nothing is planned for past due dates; a
   pending row whose due date has passed, whose due date changed, or whose task
   was completed, deleted or unassigned is marked `SKIPPED` with the reason.
@@ -291,6 +394,7 @@ Deployment configuration (`.env` / `docker-compose.yml`):
 | --- | --- | --- |
 | `NOD_SCHEDULER` | `on` | `off` disables the timer on this instance (e.g. extra instances). Keep it `on` on at least one. |
 | `TASK_REMINDER_INTERVAL_MINUTES` | `5` | Period, 1–60. A reminder is late by at most one period. |
+| `TASK_REMINDER_LEASE_SECONDS` | `600` | Lease duration, 30–3600: the takeover delay after a crash during a run. Must exceed the longest run. |
 | `APP_TIME_ZONE` | `Europe/Paris` | Day boundaries for “today / tomorrow”. |
 
 Monitoring: `SELECT * FROM job_leases;` shows the last run (status and
@@ -331,4 +435,5 @@ opportunities.
 - Workload capacity is a weekly figure per user, set by the user; no holidays
   or part-time calendar.
 - Notifications are in-app only (no e-mail transport).
-- The trash has no automatic purge.
+- The trash (tasks and projects) has no automatic purge.
+- A rule run interrupted by a crash is reported, not replayed.

@@ -107,6 +107,37 @@ await page.locator("[data-row-id]").first().waitFor();
 await page.waitForTimeout(600);
 check("tâche restaurée dans son projet", (await page.locator("[data-row-id]").count()) === 2);
 
+// Projet : mise à la corbeille puis restauration, avec ses tâches.
+await page.goto(projectUrl + "?view=list");
+await page.locator("[data-row-id]").first().waitFor();
+await page.getByRole("button", { name: "Actions du projet" }).click();
+await page.getByRole("menuitem", { name: "Mettre le projet à la corbeille" }).click();
+await page.getByRole("button", { name: "Mettre à la corbeille" }).click();
+await page.waitForURL(/\/tasks\/projects$/);
+await page.waitForTimeout(800);
+check("projet supprimé : absent de la liste des projets", !(await page.locator("main").innerText()).includes(name));
+// Page 404 de Next (rendue en flux : le statut HTTP reste 200, comme pour un
+// projet privé illisible).
+await page.goto(projectUrl);
+await page.waitForTimeout(800);
+check("projet supprimé : introuvable par son adresse", (await page.locator("body").innerText()).includes("could not be found"));
+await page.goto(`${BASE}/tasks/trash`);
+const trashedProject = page.getByRole("region", { name: "Projets dans la corbeille" }).locator("li", { hasText: name });
+await trashedProject.waitFor({ timeout: 10000 });
+check("projet dans la corbeille avec ses tâches", (await trashedProject.innerText()).includes("2 tâche(s) avec lui"));
+check("tâches du projet absentes de la corbeille des tâches", (await page.locator("li", { hasText: "Tâche E2E 1" }).count()) === 0);
+await page.screenshot({ path: `${shots}/trash-project.png` });
+await trashedProject.getByRole("button", { name: "Restaurer le projet" }).click();
+await page.waitForTimeout(1200);
+check("projet restauré : retiré de la corbeille", (await page.getByRole("region", { name: "Projets dans la corbeille" }).count()) === 0);
+await page.goto(projectUrl + "?view=list");
+await page.locator("[data-row-id]").first().waitFor({ timeout: 15000 });
+await page.waitForTimeout(600);
+check("projet restauré avec ses deux tâches", (await page.locator("[data-row-id]").count()) === 2);
+await page.getByRole("tab", { name: "Tableau", exact: true }).click();
+await page.locator('section[aria-label="En cours"]').waitFor();
+check("tâche restaurée dans sa section", (await page.locator('section[aria-label="En cours"]').innerText()).includes("Tâche E2E 1"));
+
 // Cockpit : filtre « Mes tâches / Toutes les tâches accessibles ».
 await page.goto(`${BASE}/today`);
 const scope = page.getByRole("navigation", { name: "Portée des tâches" });

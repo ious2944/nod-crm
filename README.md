@@ -64,7 +64,7 @@ An Asana-style work-management module built on the **same `tasks` table** as bef
 
 - **Navigation**: Mes tâches (grouped Overdue / Today / Upcoming / No date), Projects, Notifications, Favourites, plus Search, Portfolio, Workload, Forms, Trash and Settings.
 - **Permissions** (server-side): private projects, per-project roles, and a separate *manage* right — an assignee who is not a project member can work on their task but cannot reassign, share, move or delete it, and never sees the rest of the project. See the policy in [docs/tasks.md](docs/tasks.md#permissions-checked-on-the-server).
-- **Projects**: name, description, colour, icon, owner, members and roles, dates, visibility (workspace / private), status updates with comments and history, favourites, templates, duplicate, archive, delete; sections can be created, renamed, reordered and deleted (their tasks move to a chosen section or « Sans section », never deleted). Deleted tasks go to a trash and can be restored; permanent deletion is reserved to project owners.
+- **Projects**: name, description, colour, icon, owner, members and roles, dates, visibility (workspace / private), status updates with comments and history, favourites, templates, duplicate, archive, delete; sections can be created, renamed, reordered and deleted (their tasks move to a chosen section or « Sans section », never deleted). Deleted tasks **and projects** go to a trash and can be restored: a deleted project keeps its sections, memberships and tasks (comments, files, fields, history, CRM links), never exposes a private project's tasks, and is erased only by a separate permanent deletion by its owner.
 - **Views on the same data**: Overview, List (compact, collapsible sections, configurable and resizable columns, inline editing, expandable subtasks, quick add, multi-select bulk actions, context menus, keyboard), Board (by section or status), Calendar (month/week, drag to reschedule), Timeline/Gantt (bars, milestones, dependency arrows, move/resize, conflicts flagged, cascading shift only when explicitly enabled) and Dashboard.
 - **Tasks**: rich description, assignee, collaborators and followers, start/due date and optional time, status (À faire / En cours / En attente / Terminé), priority, tags, custom fields, multi-project membership, subtasks, blocked-by / blocking dependencies (cycles refused), milestones, recurrence, estimate and time tracking, attachments, comments with @mentions and reactions, change history, approval workflow, direct link `/tasks/t/<id>`.
 - **Collaboration**: in-app notifications with read/unread/archive and per-type preferences; real-time refresh of other users' views (PostgreSQL LISTEN/NOTIFY → SSE); concurrent edits are detected per field instead of silently overwritten.
@@ -223,6 +223,8 @@ The seed refuses to run when `NODE_ENV=production` unless `ALLOW_DEMO_SEED=1` is
 
 The `migrate` service runs `prisma migrate deploy` before the application starts on every `docker compose up`. There is nothing to run by hand.
 
+Upgrading a database that ran a pre-release build of the V1.0 work-management branch: run `node scripts/migration-check.mjs` first (read-only). It tells which of three states the database is in and, for the only state that needs it, how to reconcile the migration history **without a reset and without data loss**. See [docs/tasks.md](docs/tasks.md#upgrade-path-by-initial-state).
+
 ---
 
 ## Requirements
@@ -253,6 +255,7 @@ Every variable is documented in [`.env.example`](.env.example). Summary:
 | `APP_TIME_ZONE` | no | Time zone for day-level due dates and reminders. Default `Europe/Paris`. |
 | `NOD_SCHEDULER` | no | `off` disables the in-process due-date reminder timer on this instance. Default `on`. |
 | `TASK_REMINDER_INTERVAL_MINUTES` | no | Reminder job period, 1–60 minutes. Default `5`. |
+| `TASK_REMINDER_LEASE_SECONDS` | no | Reminder job lease, 30–3600 s: takeover delay after a crash during a run. Default `600`. |
 | `APP_HOST_PORT` / `APP_BIND_ADDRESS` | no | Published address. Default `127.0.0.1:3000`. |
 | `POSTGRES_VOLUME_NAME` | no | Docker volume holding PostgreSQL data. |
 | `TEST_DATABASE_URL` | tests only | Separate database for integration tests; the suite truncates it. |
@@ -327,7 +330,7 @@ Known and accepted in V0.9:
 - Contact photos live on a volume rather than in PostgreSQL. Backup includes them, but restore remains a manual step; see [docs/backup-restore.md](docs/backup-restore.md).
 - Follow-ups can be edited, but ball ownership and status remain quick-action-only.
 - E-mail notifications are not sent: NOD CRM has no mail transport yet. Notifications are in-app only.
-- Due-date reminders run on an in-process timer (every 5 minutes by default) guarded by a database lease; they are deduplicated, resumed after interruption and never sent for past due dates. They are in-app only. A process that is down at the reminder time sends it at the next run, as long as the due date has not passed.
+- Due-date reminders run on an in-process timer (every 5 minutes by default) guarded by a database lease; they are deduplicated, resumed after interruption and never sent for past due dates. They are in-app only. A process that is down at the reminder time sends it at the next run, as long as the due date has not passed. After a crash during a run, another instance takes over once the lease expires (10 minutes by default).
 - Workload capacity is set by each user for themselves; there is no administrator role to set it for others.
 - Subtasks are one level deep. Large project lists render incrementally (150 rows per section, “show more”) rather than with full virtualisation.
 - Quick actions require JavaScript. The login screen does not.

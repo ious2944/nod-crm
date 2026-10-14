@@ -45,12 +45,24 @@ import { notify } from "./notify";
  */
 
 export const REMINDER_JOB = "task-reminders";
-const LEASE_TTL_MS = 10 * 60_000;
+const DEFAULT_LEASE_SECONDS = 600;
+
+/**
+ * Durée du bail (`TASK_REMINDER_LEASE_SECONDS`, 30–3600 s, 600 par défaut) :
+ * c'est le délai maximal avant qu'une autre instance reprenne le travail d'un
+ * processus arrêté brutalement en cours d'exécution.
+ */
+export function leaseTtlMs(raw = process.env.TASK_REMINDER_LEASE_SECONDS): number {
+  const seconds = Number(raw);
+  return (Number.isFinite(seconds) && seconds >= 30 && seconds <= 3600 ? seconds : DEFAULT_LEASE_SECONDS) * 1000;
+}
 const MAX_ATTEMPTS = 5;
 const BATCH = 500;
 
 export interface ReminderRunReport {
   skipped?: "locked";
+  /** Le bail a expiré pendant le traitement (processus suspendu) : arrêt immédiat. */
+  lostLease?: boolean;
   planned: number;
   sent: number;
   skippedStale: number;
@@ -91,7 +103,9 @@ async function planReminders(today: string): Promise<number> {
     planned += count;
   }
 
-  const rules = await prisma.automationRule.findMany({ where: { isEnabled: true, trigger: "DUE_DATE_APPROACHING" } });
+  const rules = await prisma.automationRule.findMany({
+    where: { isEnabled: true, trigger: "DUE_DATE_APPROACHING", OR: [{ projectId: null }, { project: { deletedAt: null } }] },
+  });
   for (const rule of rules) {
     const definition = parseRule(rule);
     if (!definition) continue;
@@ -159,6 +173,23 @@ async function deliver(
   }
 
   const ruleId = reminder.kind.slice("rule:".length);
+  // Exécution de règle interrompue (processus arrêté entre la réservation de
+  // `automation_runs` et sa fin) : elle n'est pas rejouée — les actions d'une
+  // règle ne sont pas toutes idempotentes — mais elle est rendue visible.
+  const interrupted = await prisma.automationRun.findFirst({
+    where: { ruleId, eventKey: reminder.reminderKey },
+    select: { id: true, status: true, createdAt: true },
+  });
+  if (interrupted) {
+    if (interrupted.status === "RUNNING" && interrupted.createdAt.getTime() < Date.now() - leaseTtlMs()) {
+      await prisma.automationRun.update({
+        where: { id: interrupted.id },
+        data: { status: "ERROR", message: "Exécution interrompue par l'arrêt du processus ; non rejouée." },
+      });
+      return { status: "SKIPPED", reason: "Exécution de règle interrompue ; non rejouée (voir automation_runs)." };
+    }
+    if (interrupted.status !== "RUNNING") return { status: "SENT" }; // déjà exécutée
+  }
   const event: TaskEvent = {
     id: reminder.reminderKey,
     type: "DUE_DATE_APPROACHING",
@@ -170,17 +201,41 @@ async function deliver(
   const rule = await prisma.automationRule.findUnique({ where: { id: ruleId }, select: { projectId: true } });
   event.projectId = rule?.projectId ?? null;
   const result = await runScheduledRule(ruleId, event, reminder.reminderKey);
-  return result === "missing" ? { status: "SKIPPED", reason: "Règle supprimée ou désactivée." } : { status: "SENT" };
+  return result === "missing" ? { status: "SKIPPED", reason: "Règle supprimée, désactivée ou projet dans la corbeille." } : { status: "SENT" };
+}
+
+export interface ReminderRunOptions {
+  now?: Date;
+  holder?: string;
+  leaseTtlMs?: number;
+  /**
+   * Points d'observation pour les tests de reprise (arrêt brutal entre la
+   * notification et la validation, processus suspendu). Jamais utilisés par
+   * l'application.
+   */
+  hooks?: {
+    beforeDeliver?: (index: number) => Promise<void> | void;
+    afterDeliver?: (index: number) => Promise<void> | void;
+  };
 }
 
 /**
  * Une exécution complète. Sûre à appeler n'importe quand, autant de fois que
  * l'on veut, depuis n'importe quelle instance.
+ *
+ * Garde-fou contre un ancien détenteur : avant **chaque** envoi, le bail est
+ * prolongé ; s'il a été perdu (processus suspendu plus longtemps que le bail,
+ * repris entre-temps par une autre instance), le traitement s'arrête aussitôt.
+ * La validation d'une ligne n'a lieu que si elle est encore `PENDING`. Dans
+ * l'intervalle de quelques millisecondes qui subsiste, la clé de
+ * déduplication de la notification et l'unicité de `automation_runs`
+ * empêchent tout doublon.
  */
-export async function runTaskReminders(options: { now?: Date; holder?: string } = {}): Promise<ReminderRunReport> {
+export async function runTaskReminders(options: ReminderRunOptions = {}): Promise<ReminderRunReport> {
   const holder = options.holder ?? `${process.pid}:${randomUUID()}`;
+  const ttl = options.leaseTtlMs ?? leaseTtlMs();
   const report: ReminderRunReport = { planned: 0, sent: 0, skippedStale: 0, failed: 0, pendingLeft: 0 };
-  if (!(await acquireLease(REMINDER_JOB, holder, LEASE_TTL_MS))) return { ...report, skipped: "locked" };
+  if (!(await acquireLease(REMINDER_JOB, holder, ttl))) return { ...report, skipped: "locked" };
 
   try {
     const today = dayKey(options.now ?? new Date(), APP_TIME_ZONE);
@@ -193,11 +248,16 @@ export async function runTaskReminders(options: { now?: Date; holder?: string } 
       take: BATCH,
     });
     for (const [index, reminder] of pending.entries()) {
-      if (index > 0 && index % 100 === 0 && !(await renewLease(REMINDER_JOB, holder, LEASE_TTL_MS))) break;
+      await options.hooks?.beforeDeliver?.(index);
+      if (!(await renewLease(REMINDER_JOB, holder, ttl))) {
+        report.lostLease = true;
+        break;
+      }
       try {
         const outcome = await deliver(reminder, today);
-        await prisma.taskReminder.update({
-          where: { id: reminder.id },
+        await options.hooks?.afterDeliver?.(index);
+        const { count } = await prisma.taskReminder.updateMany({
+          where: { id: reminder.id, status: "PENDING" },
           data: {
             status: outcome.status,
             processedAt: new Date(),
@@ -205,12 +265,13 @@ export async function runTaskReminders(options: { now?: Date; holder?: string } 
             lastError: outcome.status === "SKIPPED" ? outcome.reason : null,
           },
         });
+        if (count === 0) continue; // validée entre-temps par une autre exécution
         if (outcome.status === "SENT") report.sent += 1;
         else report.skippedStale += 1;
       } catch (error) {
         const attempts = reminder.attempts + 1;
-        await prisma.taskReminder.update({
-          where: { id: reminder.id },
+        await prisma.taskReminder.updateMany({
+          where: { id: reminder.id, status: "PENDING" },
           data: {
             attempts,
             status: attempts >= MAX_ATTEMPTS ? "FAILED" : "PENDING",
@@ -221,12 +282,9 @@ export async function runTaskReminders(options: { now?: Date; holder?: string } 
       }
     }
     report.pendingLeft = await prisma.taskReminder.count({ where: { status: "PENDING", attempts: { lt: MAX_ATTEMPTS } } });
-    await releaseLease(
-      REMINDER_JOB,
-      holder,
-      "SUCCESS",
-      `planifiés ${report.planned}, envoyés ${report.sent}, ignorés ${report.skippedStale}, en erreur ${report.failed}, en attente ${report.pendingLeft}`,
-    );
+    const summary = `planifiés ${report.planned}, envoyés ${report.sent}, ignorés ${report.skippedStale}, en erreur ${report.failed}, en attente ${report.pendingLeft}`;
+    // Bail perdu : rien à libérer (il appartient à une autre instance).
+    if (!report.lostLease) await releaseLease(REMINDER_JOB, holder, "SUCCESS", summary);
     return report;
   } catch (error) {
     await releaseLease(REMINDER_JOB, holder, "ERROR", error instanceof Error ? error.message : "Erreur inconnue.").catch(() => {});
