@@ -24,7 +24,10 @@ export async function register(): Promise<void> {
 
   // Hors production, l'application démarre sans configuration : c'est ce qui
   // permet `npm run dev` sur un clone neuf.
-  if (process.env.NODE_ENV !== "production") return;
+  if (process.env.NODE_ENV !== "production") {
+    await startJobs();
+    return;
+  }
 
   try {
     if (!process.env.DATABASE_URL?.trim()) {
@@ -46,4 +49,17 @@ export async function register(): Promise<void> {
     console.error(`[config] démarrage refusé : ${detail}`);
     process.exit(1);
   }
+
+  await startJobs();
+}
+
+/**
+ * Tâches planifiées (rappels d'échéance), sans dépendre d'aucune requête :
+ * voir `src/lib/tasks/scheduler.ts` et `docs/tasks.md`. Sans base configurée
+ * (clone neuf en développement), il n'y a rien à planifier.
+ */
+async function startJobs(): Promise<void> {
+  if (!process.env.DATABASE_URL?.trim()) return;
+  const { startScheduler } = await import("@/lib/tasks/scheduler");
+  startScheduler();
 }

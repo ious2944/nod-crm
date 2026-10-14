@@ -24,18 +24,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   with quick creation.
 - CSV import/export.
 
+- Trash for tasks (soft delete, restore, permanent deletion for project
+  owners) at `/tasks/trash`.
+- Scheduled due-date reminders (`task_reminders`, `job_leases`): in-process
+  timer, single run at a time across instances, resumable, deduplicated with
+  automation rules, no catch-up of past due dates. `NOD_SCHEDULER`,
+  `TASK_REMINDER_INTERVAL_MINUTES`.
+- `/today`: « Toutes les tâches accessibles » (default) / « Mes tâches » filter;
+  task rows show the assignee when it is someone else.
+- Workload: period selector, per-user weekly capacity, estimates spread over
+  working days, tasks without date or estimate listed separately.
+- Project-owned custom fields; project and « Mes tâches » search match the full
+  description.
+
 ### Changed
 
 - `tasks.due_at` is now optional; legacy task actions run through the new
   service (assignee, followers, history, notifications, rules).
-- The `/today` cockpit applies project visibility and shows the user's own and
-  unassigned tasks.
+- The `/today` cockpit applies project visibility and the trash on the server;
+  by default it keeps the historical behaviour (every task the user can read).
+- Deleting a section never deletes tasks.
+- Reopening a task returns to its last active status; an approval request must
+  be approved before it can be completed, and can be resubmitted after changes
+  are requested.
+- A new *manage* right (reassign, share, move between projects, change parent,
+  duplicate, delete) is required in addition to *edit*; mentions no longer give
+  access; notifications, history, search filters and exports hide what the
+  reader cannot access.
+- Due-date reminders no longer depend on user activity.
+
+### Fixed
+
+- The `e2e/run.mjs` follow-up filter and logout checks used obsolete selectors
+  (`?f=all`, exact `/login` URL) and failed on `main` as well; they now check
+  the active link and the `/login` path. Its tasks section targets the V1.0
+  « Mes tâches » page.
 
 ### Migration
 
 - `20261013120000_work_management` — additive. Backfills `status` from
-  `completed_at`, and `created_by_id` / `assignee_id` from the audit trail (or
-  from the single user of a workspace).
+  `completed_at` only.
+- `20261014090000_work_management_hardening` — additive. Trash, last active
+  status, project-owned fields, capacity, reminders, leases. Legacy tasks: the
+  creator is taken from the `Task / CREATE` audit row when its author still
+  belongs to the workspace; **no assignee is ever inferred**. Every legacy task
+  with unknown assignee or creator is listed in `task_migration_notes`.
 
 **Post-V0.9 bugfixes.**
 

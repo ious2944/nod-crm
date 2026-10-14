@@ -2,7 +2,7 @@ import "server-only";
 
 import { Prisma } from "@/generated/prisma/client";
 import { APP_TIME_ZONE } from "@/lib/config";
-import { addDaysToKey, dayKey, endOfDay, startOfDay } from "@/lib/date";
+import { addDaysToKey, dayKey } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
 
 import {
@@ -99,7 +99,7 @@ async function finishRun(runId: string, ruleId: string, status: "SUCCESS" | "SKI
 async function executeAction(ruleCtx: MutationContext, rule: RuleRow, action: RuleAction, taskId: string, projectId: string | null) {
   const workspaceId = rule.workspaceId;
   const task = await prisma.task.findFirst({
-    where: { id: taskId, workspaceId },
+    where: { id: taskId, workspaceId, deletedAt: null },
     select: { id: true, title: true, assigneeId: true, parentId: true, dueAt: true, followers: { select: { userId: true } } },
   });
   if (!task) return;
@@ -177,9 +177,9 @@ async function executeAction(ruleCtx: MutationContext, rule: RuleRow, action: Ru
       // Sur l'événement « toutes les sous-tâches terminées », `taskId` est la
       // parente ; sur un autre événement, on remonte à la parente.
       const targetId = task.parentId ?? taskId;
-      const target = await prisma.task.findUnique({ where: { id: targetId }, select: { id: true, title: true, assigneeId: true, status: true } });
+      const target = await prisma.task.findFirst({ where: { id: targetId, deletedAt: null }, select: { id: true, title: true, assigneeId: true, status: true } });
       if (!target || target.status === "DONE") return;
-      const open = await prisma.task.count({ where: { parentId: target.id, status: { not: "DONE" } } });
+      const open = await prisma.task.count({ where: { parentId: target.id, status: { not: "DONE" }, deletedAt: null } });
       if (open > 0) return;
       await notify({
         workspaceId,
@@ -271,90 +271,15 @@ export async function processEvents(ctx: MutationContext, events: TaskEvent[]): 
 
 registerEventSink(processEvents);
 
-// ─── Balayage des échéances ───────────────────────────────────────────────────
+// Les rappels d'échéance (intégrés et règles `DUE_DATE_APPROACHING`) sont
+// traités par la tâche planifiée `task-reminders.ts`, pas par l'activité.
 
-const lastSweep = new Map<string, number>();
-const SWEEP_INTERVAL_MS = 5 * 60_000;
-
-/**
- * Rappels d'échéance : (1) la notification intégrée « veille de l'échéance »
- * au responsable, (2) les règles `DUE_DATE_APPROACHING`.
- *
- * Il n'existe pas d'ordonnanceur dans NOD CRM : le balayage est déclenché
- * paresseusement par l'activité de l'espace (chargement du contexte), au plus
- * toutes les 5 minutes par processus. L'idempotence ne dépend pas de ce
- * minuteur : les clés `dedupeKey` / `event_key` incluent la tâche et la date
- * d'échéance, un rappel n'est donc jamais envoyé deux fois, même après un
- * redémarrage ou avec plusieurs instances.
- */
-export async function sweepDueDates(workspaceId: string, force = false): Promise<void> {
-  const now = Date.now();
-  if (!force && now - (lastSweep.get(workspaceId) ?? 0) < SWEEP_INTERVAL_MS) return;
-  lastSweep.set(workspaceId, now);
-
-  const today = dayKey(new Date(), APP_TIME_ZONE);
-  const tomorrow = addDaysToKey(today, 1);
-
-  const dueTomorrow = await prisma.task.findMany({
-    where: {
-      workspaceId,
-      status: { not: "DONE" },
-      assigneeId: { not: null },
-      dueAt: { gte: startOfDay(today, APP_TIME_ZONE), lte: endOfDay(tomorrow, APP_TIME_ZONE) },
-      NOT: { projects: { some: { project: { isTemplate: true } } } },
-    },
-    select: { id: true, title: true, assigneeId: true, dueAt: true },
-    take: 500,
-  });
-  for (const task of dueTomorrow) {
-    const due = dayKey(task.dueAt!, APP_TIME_ZONE);
-    await notify({
-      workspaceId,
-      recipients: [task.assigneeId],
-      actorId: null,
-      includeActor: true,
-      type: "DUE_SOON",
-      title: due === today ? `Échéance aujourd'hui : ${task.title}` : `Échéance demain : ${task.title}`,
-      taskId: task.id,
-      dedupeKey: `due:${task.id}:${due}`,
-    });
-  }
-
-  const rules = await prisma.automationRule.findMany({
-    where: { workspaceId, isEnabled: true, trigger: "DUE_DATE_APPROACHING" },
-  });
-  for (const rule of rules) {
-    const definition = parseRule(rule);
-    if (!definition) continue;
-    const days = definition.triggerConfig.days ?? 1;
-    const tasks = await prisma.task.findMany({
-      where: {
-        workspaceId,
-        status: { not: "DONE" },
-        dueAt: { gte: startOfDay(today, APP_TIME_ZONE), lte: endOfDay(addDaysToKey(today, days), APP_TIME_ZONE) },
-        ...(rule.projectId
-          ? {
-              OR: [
-                { projects: { some: { projectId: rule.projectId } } },
-                { parent: { projects: { some: { projectId: rule.projectId } } } },
-              ],
-            }
-          : { NOT: { projects: { some: { project: { isTemplate: true } } } } }),
-      },
-      select: { id: true, dueAt: true },
-      take: 500,
-    });
-    for (const task of tasks) {
-      const due = dayKey(task.dueAt!, APP_TIME_ZONE);
-      const event: TaskEvent = {
-        id: `due:${task.id}:${due}`,
-        type: "DUE_DATE_APPROACHING",
-        taskId: task.id,
-        projectId: rule.projectId,
-        depth: 0,
-        chain: [],
-      };
-      await runRule(rule, event, event.id);
-    }
-  }
+/** Exécute une règle pour un événement produit hors requête (tâche planifiée). */
+export async function runScheduledRule(ruleId: string, event: TaskEvent, eventKey: string): Promise<"done" | "missing"> {
+  const rule = await prisma.automationRule.findFirst({ where: { id: ruleId, isEnabled: true } });
+  if (!rule) return "missing";
+  await runRule(rule, event, eventKey);
+  return "done";
 }
+
+export { parseRule };

@@ -27,7 +27,7 @@ import { addDaysToKey, dayKey } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
 import { initialCreateTaskState } from "@/lib/tasks/create-state";
 import type { ActionResult, TaskItem } from "@/lib/tasks/types";
-import { sweepDueDates } from "@/lib/tasks/automations";
+import { runTaskReminders } from "@/lib/tasks/task-reminders";
 import {
   getLinkedWork,
   getMyTasks,
@@ -386,8 +386,8 @@ describe("gestion de travail", () => {
       const { id } = await newProject();
       ok(await saveRuleAction(null, id, { name: "Rappel", trigger: "DUE_DATE_APPROACHING", triggerConfig: { days: 2 }, conditions: [], actions: [{ kind: "create_reminder" }], isEnabled: true }));
       ok(await createTaskAction({ title: "Bientôt", projectId: id, assigneeId: bob.userId, dueDate: addDaysToKey(today(), 1) }));
-      await sweepDueDates(alice.workspaceId, true);
-      await sweepDueDates(alice.workspaceId, true);
+      await runTaskReminders();
+      await runTaskReminders();
       // Un rappel intégré (veille) + un rappel de la règle, chacun une seule fois.
       expect(await prisma.notification.count({ where: { userId: bob.userId, type: "DUE_SOON" } })).toBe(2);
     });
@@ -433,7 +433,7 @@ describe("gestion de travail", () => {
 export type { TaskItem };
 
 describe("cockpit et visibilité", () => {
-  it("le cockpit n'expose ni les tâches d'un projet privé, ni celles affectées à un collègue", async () => {
+  it("le cockpit exclut côté serveur les tâches non autorisées ; « Mes tâches » restreint au responsable", async () => {
     await resetDatabase();
     const alice = await createWorkspaceWithUser("cockpit-ws");
     const bob = await addUserToWorkspace(alice.workspaceId, "Bob");
@@ -445,13 +445,19 @@ describe("cockpit et visibilité", () => {
     const { getActionableTasks } = await import("@/lib/tasks/queries");
     const { endOfDay } = await import("@/lib/date");
 
+    const end = endOfDay(today(), APP_TIME_ZONE);
+
     await signIn(bob);
-    const bobTitles = (await getActionableTasks(endOfDay(today(), APP_TIME_ZONE))).map((t) => t.title);
-    expect(bobTitles).toEqual(["Pour Bob"]);
+    // Défaut historique : toutes les tâches accessibles, collègues compris —
+    // jamais celle du projet privé dont Bob n'est pas membre.
+    const bobAll = await getActionableTasks(end);
+    expect(bobAll.map((t) => t.title).sort()).toEqual(["Pour Bob", "Pour moi"]);
+    expect(bobAll.find((t) => t.title === "Pour moi")).toMatchObject({ assigneeName: expect.any(String), assignedToMe: false });
+    expect((await getActionableTasks(end, "mine")).map((t) => t.title)).toEqual(["Pour Bob"]);
 
     await signIn(alice);
-    const aliceTitles = (await getActionableTasks(endOfDay(today(), APP_TIME_ZONE))).map((t) => t.title);
-    // Membre du projet privé : sa tâche non affectée y figure ; celle de Bob non.
-    expect(aliceTitles).toEqual(["Privée d'Alice", "Pour moi"]);
+    // Membre du projet privé : sa tâche y figure ; celle de Bob aussi (tâche libre).
+    expect((await getActionableTasks(end)).map((t) => t.title).sort()).toEqual(["Pour Bob", "Pour moi", "Privée d'Alice"]);
+    expect((await getActionableTasks(end, "mine")).map((t) => t.title)).toEqual(["Pour moi"]);
   });
 });

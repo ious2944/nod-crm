@@ -5,7 +5,6 @@ import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth/dal";
 
 import { TaskAccessError, TaskValidationError, type Actor } from "./access";
-import { sweepDueDates } from "./automations";
 
 /**
  * Lectures du module exposées en Route Handlers (`GET /api/tasks/...`).
@@ -66,11 +65,3 @@ export function isSameOrigin(request: Request): boolean {
   }
 }
 
-/** Balayage paresseux des rappels d'échéance, déclenché par l'activité. */
-export function triggerSweep(workspaceId: string): void {
-  void sweepDueDates(workspaceId).catch((error) => {
-    console.error("[tasks] balayage des échéances en échec", {
-      errorType: error instanceof Error ? error.constructor.name : typeof error,
-    });
-  });
-}

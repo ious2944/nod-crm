@@ -87,7 +87,42 @@ const listText = await (async () => { await page.getByRole("tab", { name: "Liste
 check("modification du panneau visible en liste", listText.includes("Urgente"));
 check("deux tâches en liste", (await page.locator("[data-row-id]").count()) === 2);
 
-for (const path of ["/tasks", "/tasks/notifications", "/tasks/search", "/tasks/portfolio", "/tasks/workload", "/tasks/settings", "/tasks/favorites", "/today"]) {
+// Corbeille : suppression douce depuis la liste, restauration depuis /tasks/trash.
+const row2 = page.locator("[data-row-id]", { has: page.locator('input[aria-label="Nom de la tâche"][value="Tâche E2E 2"]') });
+await row2.focus();
+await page.keyboard.press("Delete");
+await page.getByRole("button", { name: "Mettre à la corbeille" }).click();
+await page.waitForTimeout(1200);
+check("tâche retirée de la liste", (await page.locator("[data-row-id]").count()) === 1);
+await page.goto(`${BASE}/tasks/trash`);
+const trashed = page.locator("li", { hasText: "Tâche E2E 2" });
+await trashed.waitFor({ timeout: 10000 });
+check("tâche présente dans la corbeille", (await trashed.count()) === 1);
+check("suppression définitive proposée au propriétaire", (await trashed.getByRole("button", { name: "Supprimer définitivement" }).count()) === 1);
+await page.screenshot({ path: `${shots}/trash.png` });
+await trashed.getByRole("button", { name: "Restaurer" }).click();
+await page.waitForTimeout(1200);
+await page.goto(projectUrl + "?view=list");
+await page.locator("[data-row-id]").first().waitFor();
+await page.waitForTimeout(600);
+check("tâche restaurée dans son projet", (await page.locator("[data-row-id]").count()) === 2);
+
+// Cockpit : filtre « Mes tâches / Toutes les tâches accessibles ».
+await page.goto(`${BASE}/today`);
+const scope = page.getByRole("navigation", { name: "Portée des tâches" });
+check("filtre par défaut : toutes les tâches accessibles", (await scope.getByRole("link", { name: "Toutes les tâches accessibles" }).getAttribute("aria-current")) === "page");
+await scope.getByRole("link", { name: "Mes tâches" }).click();
+await page.waitForURL(/t=mine/);
+check("filtre « Mes tâches » actif", (await page.getByRole("navigation", { name: "Portée des tâches" }).getByRole("link", { name: "Mes tâches" }).getAttribute("aria-current")) === "page");
+await page.screenshot({ path: `${shots}/today-mine.png` });
+
+// Charge : période, capacité, colonnes séparées.
+await page.goto(`${BASE}/tasks/workload?weeks=4`);
+await page.getByRole("navigation", { name: "Période" }).waitFor();
+check("charge : capacité personnelle modifiable", (await page.getByLabel("Ma capacité hebdomadaire en heures").count()) === 1);
+check("charge : période de 4 semaines", (await page.getByLabel("Nombre de semaines").inputValue()) === "4");
+
+for (const path of ["/tasks", "/tasks/notifications", "/tasks/search", "/tasks/portfolio", "/tasks/workload", "/tasks/settings", "/tasks/favorites", "/tasks/trash", "/today"]) {
   await page.goto(BASE + path);
   await page.waitForTimeout(900);
   await page.screenshot({ path: `${shots}/page${path.replace(/\W+/g, "_")}.png` });

@@ -2,7 +2,6 @@ import { connection } from "next/server";
 
 import { TasksShell } from "@/components/work/tasks-shell";
 import { getPageActor } from "@/lib/tasks/page-actor";
-import { triggerSweep } from "@/lib/tasks/route-helpers";
 import { getWorkContext } from "@/lib/tasks/work-queries";
 
 /**
@@ -13,7 +12,6 @@ import { getWorkContext } from "@/lib/tasks/work-queries";
 export default async function TasksLayout({ children }: LayoutProps<"/tasks">) {
   await connection();
   const actor = await getPageActor();
-  triggerSweep(actor.workspaceId);
   const context = await getWorkContext(actor);
   return <TasksShell context={context}>{children}</TasksShell>;
 }

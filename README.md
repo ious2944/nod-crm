@@ -62,12 +62,13 @@ Tasks and follow-ups keep independent state machines: completing or snoozing one
 
 An Asana-style work-management module built on the **same `tasks` table** as before — there is one task system.
 
-- **Navigation**: Mes tâches (grouped Overdue / Today / Upcoming / No date), Projects, Notifications, Favourites, plus Search, Portfolio, Workload, Forms and Settings.
-- **Projects**: name, description, colour, icon, owner, members and roles, dates, visibility (workspace / private), status updates with comments and history, favourites, templates, duplicate, archive, delete; sections can be created, renamed, reordered and deleted.
+- **Navigation**: Mes tâches (grouped Overdue / Today / Upcoming / No date), Projects, Notifications, Favourites, plus Search, Portfolio, Workload, Forms, Trash and Settings.
+- **Permissions** (server-side): private projects, per-project roles, and a separate *manage* right — an assignee who is not a project member can work on their task but cannot reassign, share, move or delete it, and never sees the rest of the project. See the policy in [docs/tasks.md](docs/tasks.md#permissions-checked-on-the-server).
+- **Projects**: name, description, colour, icon, owner, members and roles, dates, visibility (workspace / private), status updates with comments and history, favourites, templates, duplicate, archive, delete; sections can be created, renamed, reordered and deleted (their tasks move to a chosen section or « Sans section », never deleted). Deleted tasks go to a trash and can be restored; permanent deletion is reserved to project owners.
 - **Views on the same data**: Overview, List (compact, collapsible sections, configurable and resizable columns, inline editing, expandable subtasks, quick add, multi-select bulk actions, context menus, keyboard), Board (by section or status), Calendar (month/week, drag to reschedule), Timeline/Gantt (bars, milestones, dependency arrows, move/resize, conflicts flagged, cascading shift only when explicitly enabled) and Dashboard.
 - **Tasks**: rich description, assignee, collaborators and followers, start/due date and optional time, status (À faire / En cours / En attente / Terminé), priority, tags, custom fields, multi-project membership, subtasks, blocked-by / blocking dependencies (cycles refused), milestones, recurrence, estimate and time tracking, attachments, comments with @mentions and reactions, change history, approval workflow, direct link `/tasks/t/<id>`.
 - **Collaboration**: in-app notifications with read/unread/archive and per-type preferences; real-time refresh of other users' views (PostgreSQL LISTEN/NOTIFY → SSE); concurrent edits are detected per field instead of silently overwritten.
-- **Automation**: trigger → conditions → actions rules, persisted, traced, idempotent per event and protected against loops; task and project templates; internal request forms; CSV import/export; multi-project portfolio; workload per assignee.
+- **Automation**: trigger → conditions → actions rules, persisted, traced, idempotent per event and protected against loops; task and project templates; internal request forms; CSV import/export; multi-project portfolio; workload per assignee over a chosen period against each person's weekly capacity; scheduled due-date reminders.
 - **CRM integration**: tasks and projects link to a contact, organisation or opportunity; their sheets show the linked work and offer quick creation.
 
 See [docs/tasks.md](docs/tasks.md).
@@ -249,7 +250,9 @@ Every variable is documented in [`.env.example`](.env.example). Summary:
 | `DATABASE_URL` | dev only | Direct connection string when running outside Docker. |
 | `APP_NAME` | no | Name shown in the UI. Default `NOD CRM`. |
 | `APP_SOURCE_URL` | no | Target of the Source link. Point it at your fork when required by AGPL §13. |
-| `APP_TIME_ZONE` | no | Time zone for day-level due dates. Default `Europe/Paris`. |
+| `APP_TIME_ZONE` | no | Time zone for day-level due dates and reminders. Default `Europe/Paris`. |
+| `NOD_SCHEDULER` | no | `off` disables the in-process due-date reminder timer on this instance. Default `on`. |
+| `TASK_REMINDER_INTERVAL_MINUTES` | no | Reminder job period, 1–60 minutes. Default `5`. |
 | `APP_HOST_PORT` / `APP_BIND_ADDRESS` | no | Published address. Default `127.0.0.1:3000`. |
 | `POSTGRES_VOLUME_NAME` | no | Docker volume holding PostgreSQL data. |
 | `TEST_DATABASE_URL` | tests only | Separate database for integration tests; the suite truncates it. |
@@ -324,7 +327,8 @@ Known and accepted in V0.9:
 - Contact photos live on a volume rather than in PostgreSQL. Backup includes them, but restore remains a manual step; see [docs/backup-restore.md](docs/backup-restore.md).
 - Follow-ups can be edited, but ball ownership and status remain quick-action-only.
 - E-mail notifications are not sent: NOD CRM has no mail transport yet. Notifications are in-app only.
-- Due-date reminders are evaluated lazily (on activity, at most every 5 minutes per process) — there is no scheduler. They are idempotent.
+- Due-date reminders run on an in-process timer (every 5 minutes by default) guarded by a database lease; they are deduplicated, resumed after interruption and never sent for past due dates. They are in-app only. A process that is down at the reminder time sends it at the next run, as long as the due date has not passed.
+- Workload capacity is set by each user for themselves; there is no administrator role to set it for others.
 - Subtasks are one level deep. Large project lists render incrementally (150 rows per section, “show more”) rather than with full virtualisation.
 - Quick actions require JavaScript. The login screen does not.
 - The interface is French-only.

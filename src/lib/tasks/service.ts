@@ -192,7 +192,7 @@ async function requireProjectContentEdit(ctx: MutationContext, projectId: string
 }
 
 export async function getTaskItem(ctx: MutationContext, taskId: string): Promise<TaskItem> {
-  const [item] = await loadTaskItems(ctx.actor, { id: taskId });
+  const [item] = await loadTaskItems(ctx.actor, { id: taskId, deletedAt: null });
   if (!item) throw new TaskAccessError("NOT_FOUND");
   return item;
 }
@@ -1621,7 +1621,8 @@ async function writeCustomValue(
         : value === null
           ? null
           : String(value);
-    await logActivity(ctx, [{ taskId, kind: "field", field: field.name, newValue: display }]);
+    // Champ propre à un projet : la ligne suit la visibilité de ce projet.
+    await logActivity(ctx, [{ taskId, kind: "field", field: field.name, newValue: display, projectId: field.projectId }]);
   }
 }
 
