@@ -129,7 +129,7 @@ check("tâches du projet absentes de la corbeille des tâches", (await page.loca
 await page.screenshot({ path: `${shots}/trash-project.png` });
 await trashedProject.getByRole("button", { name: "Restaurer le projet" }).click();
 await page.waitForTimeout(1200);
-check("projet restauré : retiré de la corbeille", (await page.getByRole("region", { name: "Projets dans la corbeille" }).count()) === 0);
+check("projet restauré : retiré de la corbeille", (await page.locator("li", { hasText: name }).count()) === 0);
 await page.goto(projectUrl + "?view=list");
 await page.locator("[data-row-id]").first().waitFor({ timeout: 15000 });
 await page.waitForTimeout(600);
@@ -137,6 +137,144 @@ check("projet restauré avec ses deux tâches", (await page.locator("[data-row-i
 await page.getByRole("tab", { name: "Tableau", exact: true }).click();
 await page.locator('section[aria-label="En cours"]').waitFor();
 check("tâche restaurée dans sa section", (await page.locator('section[aria-label="En cours"]').innerText()).includes("Tâche E2E 1"));
+
+// Suppression définitive d'un projet : aperçu, annulation, confirmation explicite,
+// tâche partagée conservée.
+await page.goto(`${BASE}/tasks/projects`);
+await page.getByRole("button", { name: "Nouveau projet" }).first().click();
+const purgeName = `Purge E2E ${Date.now() % 100000}`;
+await page.getByLabel("Nom du projet").fill(purgeName);
+await page.getByRole("button", { name: "Créer le projet" }).click();
+await page.waitForURL(/tasks\/projects\/[0-9a-f-]{36}/);
+const quickPurge = page.getByLabel("Ajouter une tâche…").first();
+await quickPurge.click();
+await quickPurge.fill("Exclusive purge");
+await quickPurge.press("Enter");
+await quickPurge.fill("Partagée purge");
+await quickPurge.press("Enter");
+const sharedRow = page.locator("[data-row-id]", { has: page.locator('input[aria-label="Nom de la tâche"][value="Partagée purge"]') });
+await sharedRow.waitFor();
+await page.waitForTimeout(800);
+await sharedRow.click({ button: "right" });
+await page.getByRole("menuitem", { name: "Ajouter à un autre projet…" }).click();
+await page.getByPlaceholder("Rechercher un projet").fill(name);
+await page.getByRole("button", { name }).click();
+await page.getByRole("button", { name: "Sans section" }).click();
+await page.waitForTimeout(1200);
+await page.getByRole("button", { name: "Actions du projet" }).click();
+await page.getByRole("menuitem", { name: "Mettre le projet à la corbeille" }).click();
+await page.getByRole("button", { name: "Mettre à la corbeille" }).click();
+await page.waitForURL(/\/tasks\/projects$/);
+
+await page.goto(`${BASE}/tasks/trash`);
+const purgeRow = page.getByRole("region", { name: "Projets dans la corbeille" }).locator("li", { hasText: purgeName });
+await purgeRow.waitFor();
+await purgeRow.getByRole("button", { name: "Supprimer définitivement" }).click();
+const purgeDialog = page.getByRole("dialog", { name: "Supprimer définitivement le projet ?" });
+await purgeDialog.getByTestId("purge-preview").waitFor();
+const purgeText = await purgeDialog.innerText();
+check("purge : nom du projet présenté", purgeText.includes(`« ${purgeName} »`));
+check("purge : tâches et sous-tâches effacées comptées", purgeText.includes("1 tâche principale et 0 sous-tâche"));
+check("purge : tâche partagée conservée annoncée", purgeText.includes("1 tâche partagée"));
+check("purge : commentaires, pièces jointes, historique mentionnés", /commentaire.*pièce jointe.*historique/s.test(purgeText));
+check("purge : caractère irréversible affiché", purgeText.includes("irréversible"));
+const confirmPurge = purgeDialog.getByRole("button", { name: "Supprimer définitivement" });
+check("purge : confirmation désactivée sans case cochée", await confirmPurge.isDisabled());
+await page.screenshot({ path: `${shots}/purge-dialog.png` });
+await purgeDialog.getByRole("button", { name: "Annuler" }).click();
+await page.waitForTimeout(500);
+check("purge annulée : dialogue fermé", (await page.getByRole("dialog").count()) === 0);
+check("purge annulée : projet toujours dans la corbeille", (await purgeRow.count()) === 1);
+
+await purgeRow.getByRole("button", { name: "Supprimer définitivement" }).click();
+await purgeDialog.getByTestId("purge-preview").waitFor();
+await purgeDialog.getByRole("checkbox").check();
+check("purge : confirmation activée après la case", await confirmPurge.isEnabled());
+await confirmPurge.click();
+await page.waitForTimeout(1500);
+check("purge confirmée : projet retiré de la corbeille", (await page.locator("li", { hasText: purgeName }).count()) === 0);
+await page.goto(projectUrl + "?view=list");
+await page.locator("[data-row-id]").first().waitFor({ timeout: 15000 });
+await page.waitForTimeout(600);
+check("purge : tâche partagée conservée dans l'autre projet", (await page.locator('input[aria-label="Nom de la tâche"][value="Partagée purge"]').count()) === 1);
+check("purge : tâche exclusive effacée", (await page.locator('input[aria-label="Nom de la tâche"][value="Exclusive purge"]').count()) === 0);
+
+// Périmètre modifié entre l'aperçu et la confirmation (deux onglets) : nouvelle
+// confirmation exigée.
+async function newProjectWithTask(projectName, taskTitle) {
+  await page.goto(`${BASE}/tasks/projects`);
+  await page.getByRole("button", { name: "Nouveau projet" }).first().click();
+  await page.getByLabel("Nom du projet").fill(projectName);
+  await page.getByRole("button", { name: "Créer le projet" }).click();
+  await page.waitForURL(/tasks\/projects\/[0-9a-f-]{36}/);
+  const url = page.url().split("?")[0];
+  if (taskTitle) {
+    const q = page.getByLabel("Ajouter une tâche…").first();
+    await q.click();
+    await q.fill(taskTitle);
+    await q.press("Enter");
+    await page.locator(`input[aria-label="Nom de la tâche"][value="${taskTitle}"]`).waitFor();
+    await page.waitForTimeout(800);
+  }
+  return url;
+}
+async function trashCurrentProject(url) {
+  await page.goto(url + "?view=list");
+  await page.getByRole("button", { name: "Actions du projet" }).click();
+  await page.getByRole("menuitem", { name: "Mettre le projet à la corbeille" }).click();
+  await page.getByRole("button", { name: "Mettre à la corbeille" }).click();
+  await page.waitForURL(/\/tasks\/projects$/);
+}
+const stamp = Date.now() % 100000;
+const qName = `Scope Q ${stamp}`;
+const pName = `Scope P ${stamp}`;
+const qUrl = await newProjectWithTask(qName, null);
+const pUrl = await newProjectWithTask(pName, "Liée P et Q");
+const linked = page.locator("[data-row-id]", { has: page.locator('input[aria-label="Nom de la tâche"][value="Liée P et Q"]') });
+await linked.click({ button: "right" });
+await page.getByRole("menuitem", { name: "Ajouter à un autre projet…" }).click();
+await page.getByPlaceholder("Rechercher un projet").fill(qName);
+await page.getByRole("button", { name: qName }).click();
+await page.getByRole("button", { name: "Sans section" }).click();
+await page.waitForTimeout(1200);
+await trashCurrentProject(qUrl); // la tâche reste active dans P
+await trashCurrentProject(pUrl); // elle part à la corbeille avec P (Q est déjà dans la corbeille)
+
+await page.goto(`${BASE}/tasks/trash`);
+const pRow = page.getByRole("region", { name: "Projets dans la corbeille" }).locator("li", { hasText: pName });
+await pRow.getByRole("button", { name: "Supprimer définitivement" }).click();
+const scopeDialog = page.getByRole("dialog", { name: "Supprimer définitivement le projet ?" });
+await scopeDialog.getByTestId("purge-preview").waitFor();
+check("périmètre initial : la tâche liée à Q (en corbeille) est conservée", (await scopeDialog.innerText()).includes("0 tâche principale") && (await scopeDialog.innerText()).includes("1 tâche partagée"));
+await scopeDialog.getByRole("checkbox").check();
+
+// Second onglet : Q est supprimé définitivement ; la tâche ne dépend plus que de P.
+// Même session, autre onglet (contexte distinct partageant le cookie).
+const ctx2 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+await ctx2.addCookies(await page.context().cookies());
+const tab2 = await ctx2.newPage();
+await tab2.goto(`${BASE}/tasks/trash`);
+const qRow = tab2.getByRole("region", { name: "Projets dans la corbeille" }).locator("li", { hasText: qName });
+await qRow.getByRole("button", { name: "Supprimer définitivement" }).click();
+const qDialog = tab2.getByRole("dialog", { name: "Supprimer définitivement le projet ?" });
+await qDialog.getByTestId("purge-preview").waitFor();
+await qDialog.getByRole("checkbox").check();
+await qDialog.getByRole("button", { name: "Supprimer définitivement" }).click();
+await tab2.waitForTimeout(1500);
+await ctx2.close();
+
+await scopeDialog.getByRole("button", { name: "Supprimer définitivement" }).click();
+await scopeDialog.getByRole("alert").waitFor({ timeout: 10000 });
+const changedText = await scopeDialog.innerText();
+check("périmètre modifié : avertissement affiché", changedText.includes("Le périmètre a changé"));
+check("périmètre modifié : nouveau décompte présenté", changedText.includes("1 tâche principale") && changedText.includes("0 tâche partagée"));
+check("périmètre modifié : nouvelle confirmation exigée", !(await scopeDialog.getByRole("checkbox").isChecked()) && (await scopeDialog.getByRole("button", { name: "Supprimer définitivement" }).isDisabled()));
+check("périmètre modifié : projet toujours dans la corbeille", (await pRow.count()) === 1);
+await page.screenshot({ path: `${shots}/purge-scope-changed.png` });
+await scopeDialog.getByRole("checkbox").check();
+await scopeDialog.getByRole("button", { name: "Supprimer définitivement" }).click();
+await page.waitForTimeout(1500);
+check("nouvelle confirmation : projet supprimé définitivement", (await page.locator("li", { hasText: pName }).count()) === 0);
 
 // Cockpit : filtre « Mes tâches / Toutes les tâches accessibles ».
 await page.goto(`${BASE}/today`);

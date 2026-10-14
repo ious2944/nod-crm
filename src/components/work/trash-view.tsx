@@ -3,13 +3,13 @@
 import { RotateCcw, Trash, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-import { purgeProjectAction, purgeTaskAction, restoreProjectAction, restoreTaskAction } from "@/app/(app)/tasks/work-actions";
-import type { ProjectTrashItem } from "@/lib/tasks/project-service";
+import { previewProjectPurgeAction, purgeProjectAction, purgeTaskAction, restoreProjectAction, restoreTaskAction } from "@/app/(app)/tasks/work-actions";
+import type { ProjectPurgePreview, ProjectTrashItem } from "@/lib/tasks/project-service";
 import { relativeTime } from "@/lib/tasks/format";
 import type { TrashItem } from "@/lib/tasks/service";
 
 import { fetchJson, useWorkApi } from "./store";
-import { BTN_GHOST, ConfirmModal, EmptyBlock, ErrorBlock, LoadingRows, ProjectIcon } from "./ui";
+import { BTN_DANGER, BTN_GHOST, BTN_SECONDARY, ConfirmModal, EmptyBlock, ErrorBlock, LoadingRows, Modal, ProjectIcon } from "./ui";
 
 /**
  * Corbeille : tâches et projets supprimés. Les tâches supprimées restent en base avec leurs commentaires,
@@ -131,23 +131,16 @@ export function TrashView() {
           ))}
         </ul>
       )}
-      <ConfirmModal
-        open={purgingProject !== null}
-        title="Supprimer définitivement le projet ?"
-        description={
-          purgingProject
-            ? `« ${purgingProject.name} » sera effacé avec ses sections et les tâches qui n'appartiennent à aucun autre projet (sous-tâches, commentaires, pièces jointes, historique). Les tâches encore liées à un autre projet sont conservées. Cette action est irréversible.`
-            : null
-        }
-        confirmLabel="Supprimer définitivement"
-        onClose={() => setPurgingProject(null)}
-        onConfirm={async () => {
-          if (!purgingProject) return;
-          const done = await run(() => purgeProjectAction(purgingProject.id), "Projet supprimé définitivement.");
-          if (done) setProjects((list) => list.filter((p) => p.id !== purgingProject.id));
-          setPurgingProject(null);
-        }}
-      />
+      {purgingProject && (
+        <ProjectPurgeDialog
+          project={purgingProject}
+          onClose={() => setPurgingProject(null)}
+          onPurged={() => {
+            setProjects((list) => list.filter((p) => p.id !== purgingProject.id));
+            setPurgingProject(null);
+          }}
+        />
+      )}
       <ConfirmModal
         open={purging !== null}
         title="Supprimer définitivement ?"
@@ -162,5 +155,108 @@ export function TrashView() {
         }}
       />
     </div>
+  );
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n > 1 ? many : one}`;
+
+/**
+ * Confirmation de la suppression définitive d'un projet. Le périmètre vient
+ * du serveur (`previewProjectPurgeAction`) ; à la confirmation, le serveur le
+ * recalcule et refuse s'il a changé : le nouvel aperçu s'affiche alors, à
+ * confirmer de nouveau.
+ */
+function ProjectPurgeDialog({ project, onClose, onPurged }: { project: ProjectTrashItem; onClose: () => void; onPurged: () => void }) {
+  const { run, store } = useWorkApi();
+  const [preview, setPreview] = useState<ProjectPurgePreview | null>(null);
+  const [changed, setChanged] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const data = await run(() => previewProjectPurgeAction(project.id));
+      if (cancelled) return;
+      if (data) setPreview(data);
+      else onClose();
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Chargement unique à l'ouverture ; `run` et `onClose` sont stables pour cet usage.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id]);
+
+  const confirm = async () => {
+    if (!preview) return;
+    setPending(true);
+    try {
+      const result = await run(() => purgeProjectAction(project.id, preview.token));
+      if (!result) return;
+      if (result.status === "scope_changed") {
+        setPreview(result.preview);
+        setChanged(true);
+        setAcknowledged(false);
+        return;
+      }
+      store.toast("success", `Projet « ${project.name} » supprimé définitivement.`);
+      onPurged();
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      title="Supprimer définitivement le projet ?"
+      onClose={onClose}
+      size="sm"
+      footer={
+        <>
+          <button type="button" className={BTN_SECONDARY} onClick={onClose}>
+            Annuler
+          </button>
+          <button type="button" className={BTN_DANGER} disabled={!preview || !acknowledged || pending} onClick={() => void confirm()}>
+            Supprimer définitivement
+          </button>
+        </>
+      }
+    >
+      {!preview ? (
+        <LoadingRows rows={3} />
+      ) : (
+        <div className="space-y-3 text-[13px] text-ink" data-testid="purge-preview">
+          {changed && (
+            <p role="alert" className="rounded-md border border-today-fg/40 bg-today-bg px-3 py-2 text-today-fg">
+              Le périmètre a changé depuis l&apos;aperçu (une tâche a été ajoutée, restaurée ou rattachée ailleurs). Vérifiez le nouveau périmètre et confirmez à nouveau.
+            </p>
+          )}
+          <p>
+            Projet : <strong>« {preview.projectName} »</strong>
+          </p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              Seront <strong>définitivement effacées</strong> : {plural(preview.purgedTasks, "tâche principale", "tâches principales")} et{" "}
+              {plural(preview.purgedSubtasks, "sous-tâche", "sous-tâches")}
+              {preview.deletedEarlier > 0 && <>, dont {preview.deletedEarlier} supprimée(s) individuellement auparavant</>}.
+            </li>
+            <li>
+              Seront <strong>conservées</strong> : {plural(preview.keptTasks, "tâche partagée", "tâches partagées")} avec un autre projet conservé (actif ou dans la corbeille).
+            </li>
+            <li>
+              Seront aussi effacés, pour les tâches effacées : {plural(preview.comments, "commentaire", "commentaires")}, {plural(preview.attachments, "pièce jointe", "pièces jointes")} et{" "}
+              {plural(preview.historyEntries, "entrée d'historique", "entrées d'historique")} ; ainsi que les sections et rattachements du projet.
+            </li>
+          </ul>
+          <p className="font-semibold text-critical-fg">Cette action est irréversible : rien ne pourra être restauré.</p>
+          <label className="flex items-start gap-2">
+            <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} className="mt-0.5 accent-[var(--nod-accent)]" />
+            <span>Je comprends que cette suppression est définitive et irréversible.</span>
+          </label>
+        </div>
+      )}
+    </Modal>
   );
 }

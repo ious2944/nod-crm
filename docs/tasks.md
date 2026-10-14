@@ -37,7 +37,7 @@ authenticated layout.
 | `prisma/migrations/20261014090000_work_management_hardening` | trash, last active status, project fields, capacity, reminders, leases, legacy-task report |
 | `prisma/migrations/20261014091000_work_management_legacy_reconcile` | corrective: undoes the inferred assignees/creators of the first migration |
 | `prisma/migrations/20261014092000_project_trash` | project trash |
-| `scripts/migration-check.mjs` | migration-history diagnosis and guarded checksum reconciliation |
+| `scripts/migration-check.mjs` | migration-history and structural schema check, guarded checksum reconciliation |
 | `src/lib/tasks/types.ts`, `constants.ts` | client-safe types, labels, palettes |
 | `src/lib/tasks/access.ts` | **permissions** (workspace, project visibility, roles) |
 | `src/lib/tasks/service.ts` | task mutations (create/update/move/delete/duplicate, tags, custom fields, dependencies, followers, time, comments) |
@@ -111,6 +111,8 @@ it. Deleted tasks keep their row (`deleted_at`, `deleted_by_id`).
    - wrong `*_UNKNOWN` notes on V1.0 tasks (subtasks copied without history)
      are removed.
 4. `20261014092000_project_trash` — additive (project trash, see below).
+5. `20261014093000_project_trash_constraints` — creates the two project-trash
+   foreign keys where the previous migration's schema-blind guard skipped them.
 
 No step deletes or rewrites business data other than the inferred
 assignee/creator values listed above, each one recorded with its previous
@@ -144,12 +146,41 @@ npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prism
                                                            # 6. must print an empty migration
 ```
 
-`--reconcile` writes **only** if: the recorded checksum is exactly the revised
-one, the migration finished and was not rolled back, no other migration
-diverges, the file on disk is the original, and every schema object the
-migration creates (types, tables, columns, indexes, constraints) exists in the
-database. It updates that single `_prisma_migrations.checksum` in a
-transaction; otherwise it exits with an error and writes nothing.
+**Schema check** (both modes). A correct name does not prove a correct
+definition, so the expected schema is **rebuilt**: the files of every migration
+recorded as applied — including those after `20261013120000` — are replayed, in
+order, into a temporary schema of the same database. The two PostgreSQL
+catalogues are then compared item by item:
+
+| Compared | Source | Covers |
+| --- | --- | --- |
+| enums | `pg_enum` (ordered by `enumsortorder`) | names and values, in order |
+| columns | `format_type`, `attnotnull`, `pg_get_expr(adbin)`, `attidentity`, `attgenerated` | exact type, nullability, default, identity/generated — including changes a migration makes to existing columns (`due_at DROP NOT NULL`) |
+| constraints | `pg_get_constraintdef` | primary keys, unique, foreign keys (tables, columns, `ON DELETE` / `ON UPDATE`), checks |
+| indexes | `pg_get_indexdef` | columns and order, uniqueness, method, predicate |
+
+Each object missing, extra or different is reported with the expected and the
+found value (e.g. `colonne projects.color : type attendu « text », trouvé
+« character varying(64) »`). Everything runs in a transaction that is rolled
+back: the temporary schema is never kept (needs `CREATE` on the database). The
+check found a real defect: the idempotence guard of `20261014092000_project_trash`
+looked constraints up without filtering by schema; `20261014093000_project_trash_constraints`
+creates them where they were skipped (that migration was not modified).
+
+**History check.** Refused: a migration started but neither finished nor
+rolled back, a migration rolled back and not re-applied, a recorded migration
+missing from the repository, a migration applied twice, a gap (a migration
+applied while an earlier one is not), any checksum divergence other than the
+known revised `20261013120000`.
+
+`--reconcile` writes **only** if, within **one transaction** holding Prisma
+Migrate's advisory lock (`pg_advisory_xact_lock(72707369)`, the key used by
+`migrate deploy` in Prisma 7 — so neither can run during the other) and a
+`SHARE ROW EXCLUSIVE` lock on `_prisma_migrations`: the history is consistent,
+the state is exactly C, the file on disk is the original and the schema
+matches the rebuilt one. It then updates that single
+`_prisma_migrations.checksum` and nothing else (no business data); otherwise it
+exits with code 1, the precise diagnostic, and writes nothing.
 
 Report after deployment (read-only):
 
@@ -178,7 +209,13 @@ Verification:
   copied subtasks). It compares rows before/after (volumes, CRM links, dates,
   audit log), checks every assignee/creator decision and note, re-runs the
   corrective migrations (no change, no duplicate) and exercises
-  `migration-check.mjs` (states, refusal on a missing index, reconciliation).
+  `migration-check.mjs`: states, reconciliation, and refusals with an
+  unchanged checksum and unchanged business data for definitions that keep the
+  right name but are wrong — column type, nullability (including a column the
+  migration altered), default, enum values, index columns/order, index
+  predicate, index uniqueness, foreign-key `ON DELETE`, foreign-key definition,
+  primary key — plus a renamed index, an unfinished migration, an unknown
+  migration, a rolled-back one, and waiting on a concurrent Prisma lock.
 - The same three paths were also run with the real Prisma CLI on disposable
   databases (`main` → state → current tree): `migrate deploy`, `migrate status`
   “up to date”, `migrate diff` empty, `migrate dev --create-only` without reset.
@@ -290,6 +327,18 @@ The cockpit reads through the same `visibleTaskWhere` (plus “not in the trash�
     trash), including those deleted individually before. A task still linked to
     another kept project is never erased; if that project is in the trash, the
     task follows it.
+  - **Confirmation**: the dialog shows the scope computed by the server
+    (`previewProjectPurgeAction`): project name; main tasks and subtasks to be
+    erased, and how many of them had been deleted individually before; shared
+    tasks kept; comments, attachments and history entries erased with them;
+    and that the action is irreversible. The button stays disabled until an
+    explicit checkbox is ticked. The preview carries a token (SHA-256 of the
+    exact sets of task ids erased and kept). On confirmation the server locks
+    the project row and the affected tasks (`FOR UPDATE`), **recomputes** the
+    scope and compares tokens: if it changed (a task restored, linked to or
+    unlinked from another project, another project purged…), nothing is erased
+    and the new scope is returned; the dialog shows it with a warning and
+    requires a new confirmation.
 - **Completion**: `DONE` sets `completed_at`; any other status clears it.
   Reopening (cockpit, list checkbox) goes back to `last_active_status`.
 - **Approval**: an approval request cannot be completed before it is approved.

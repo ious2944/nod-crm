@@ -184,8 +184,13 @@ export async function restoreProjectAction(projectId: string) {
   return runAction((actor) => projects.restoreProject(actor, projectId));
 }
 
-export async function purgeProjectAction(projectId: string) {
-  return runAction((actor) => projects.purgeProject(actor, projectId));
+export async function previewProjectPurgeAction(projectId: string) {
+  return runAction((actor) => projects.previewProjectPurge(actor, projectId));
+}
+
+/** `token` : empreinte du périmètre confirmé (voir `previewProjectPurgeAction`). */
+export async function purgeProjectAction(projectId: string, token: string) {
+  return runAction((actor) => projects.purgeProject(actor, projectId, token));
 }
 
 export async function setProjectMemberAction(projectId: string, userId: string, role: ProjectRole | null) {

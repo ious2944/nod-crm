@@ -33,7 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   deleted individually before); permanent deletion is a separate owner action
   that never erases a task still linked to another kept project.
 - `scripts/migration-check.mjs`: diagnosis of the migration history and guarded
-  checksum reconciliation (state C only, after schema verification).
+  checksum reconciliation (state C only). The schema is verified structurally
+  against a schema rebuilt by replaying the applied migrations (enums, column
+  types/nullability/defaults, primary/unique/foreign keys with their actions,
+  indexes with columns, order, uniqueness, method and predicate), under Prisma
+  Migrate's advisory lock and a lock on `_prisma_migrations`.
+- Permanent project deletion asks for an explicit confirmation on a scope
+  computed by the server (tasks and subtasks erased, including those deleted
+  individually before; shared tasks kept; comments, attachments, history), and
+  refuses — asking again — if the scope changed since the preview.
 - Scheduled due-date reminders (`task_reminders`, `job_leases`): in-process
   timer, single run at a time across instances, resumable, deduplicated with
   automation rules, no catch-up of past due dates. `NOD_SCHEDULER`,
@@ -69,6 +77,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `instrumentation.ts` imports its Node.js code only under
   `NEXT_RUNTIME === "nodejs"` (no Node API warnings in the Edge bundle).
 
+### Security
+
+- `sharp` 0.35.4 → 0.35.5 (CVE-2026-96889 in librsvg, GHSA-wq5f-xc86-pv6w) and
+  `source-map-js` 1.2.1 → 1.2.2 (denial of service, GHSA-68fv-2mgg-jv7q), both
+  transitive (Next, PostCSS, Tailwind), within the declared ranges: lockfile
+  only. The production audit is clean. The full-tree audit (informational in
+  CI) still reports `braces` (GHSA-vfj7-8cjw-p6xm) through
+  `eslint-config-next` → `fast-glob` → `micromatch`: no patched `braces`
+  release exists, and npm's only fix is a breaking downgrade of
+  `eslint-config-next` to 14.x; dev-only (lint), not in the production image.
+
 ### Fixed
 
 - The `e2e/run.mjs` follow-up filter and logout checks used obsolete selectors
@@ -89,6 +108,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   assignment made or changed in V1.0; every decision recorded in
   `task_migration_notes` with the previous value.
 - `20261014092000_project_trash` — additive.
+- `20261014093000_project_trash_constraints` — creates the project-trash
+  foreign keys where the previous migration's guard (not filtered by schema)
+  skipped them; found by the structural schema check.
 - Upgrade paths (never applied / first version / revised version) and the
   reconciliation procedure are documented in `docs/tasks.md`; no reset is
   needed in any state.

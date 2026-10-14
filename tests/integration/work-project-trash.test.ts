@@ -7,6 +7,7 @@ import {
   createTaskAction,
   deleteProjectAction,
   deleteTaskAction,
+  previewProjectPurgeAction,
   purgeProjectAction,
   restoreProjectAction,
   restoreTaskAction,
@@ -47,6 +48,11 @@ function ok<T>(result: ActionResult<T>): T {
 }
 const actorOf = (u: TestUser) => ({ id: u.userId, workspaceId: u.workspaceId });
 const today = () => dayKey(new Date(), APP_TIME_ZONE);
+/** Suppression définitive confirmée sur l'aperçu courant. */
+async function purgeConfirmed(projectId: string) {
+  const preview = ok(await previewProjectPurgeAction(projectId));
+  return ok(await purgeProjectAction(projectId, preview.token));
+}
 
 describe("suppression et restauration des projets", () => {
   let alice: TestUser, bob: TestUser, carol: TestUser, eve: TestUser;
@@ -151,11 +157,13 @@ describe("suppression et restauration des projets", () => {
       await signIn(user);
       expect(await listProjectTrash(actorOf(user))).toEqual([]);
       expect(await restoreProjectAction(P)).toMatchObject({ ok: false, code: "NOT_FOUND" });
-      expect(await purgeProjectAction(P)).toMatchObject({ ok: false, code: "NOT_FOUND" });
+      expect(await previewProjectPurgeAction(P)).toMatchObject({ ok: false, code: "NOT_FOUND" });
+      expect(await purgeProjectAction(P, "x")).toMatchObject({ ok: false, code: "NOT_FOUND" });
     }
     await signIn(alice);
     // Une suppression définitive exige que le projet soit d'abord à la corbeille.
-    expect(await purgeProjectAction(W)).toMatchObject({ ok: false, code: "NOT_FOUND" });
+    expect(await previewProjectPurgeAction(W)).toMatchObject({ ok: false, code: "NOT_FOUND" });
+    expect(await purgeProjectAction(W, "x")).toMatchObject({ ok: false, code: "NOT_FOUND" });
   });
 
   it("rappels et automatisations ignorent les tâches inactives", async () => {
@@ -196,8 +204,8 @@ describe("suppression et restauration des projets", () => {
 
   it("suppression définitive : action distincte, n'efface pas une tâche liée à un autre projet conservé", async () => {
     ok(await deleteProjectAction(P));
-    const result = ok(await purgeProjectAction(P));
-    expect(result).toMatchObject({ purgedTasks: 2 }); // l'exclusive et celle supprimée avant
+    const result = await purgeConfirmed(P);
+    expect(result).toMatchObject({ status: "purged", purgedTasks: 2 }); // l'exclusive et celle supprimée avant
     expect(await prisma.project.count({ where: { id: P } })).toBe(0);
     expect(await prisma.task.count({ where: { id: { in: [exclusive, sub, earlier, earlierSub] } } })).toBe(0);
     expect(await prisma.taskAttachment.count()).toBe(0);
@@ -213,7 +221,7 @@ describe("suppression et restauration des projets", () => {
     ok(await deleteProjectAction(P)); // plus aucun projet actif : à la corbeille avec P
     expect((await prisma.task.findUniqueOrThrow({ where: { id: both } })).deletedWithProjectId).toBe(P);
 
-    ok(await purgeProjectAction(P)); // Q est conservé (corbeille) : la tâche n'est pas effacée
+    await purgeConfirmed(P); // Q est conservé (corbeille) : la tâche n'est pas effacée
     expect((await prisma.task.findUniqueOrThrow({ where: { id: both } })).deletedWithProjectId).toBe(Q);
     ok(await restoreProjectAction(Q));
     expect((await getProjectBundle(actorOf(alice), Q)).tasks.map((t) => t.id)).toEqual([both]);
@@ -229,5 +237,62 @@ describe("suppression et restauration des projets", () => {
     const bundle = await getProjectBundle(actorOf(alice), Q);
     expect(bundle.tasks.map((t) => t.id)).toEqual([both]);
     expect(bundle.tasks[0].memberships.map((m) => m.projectId)).toEqual([Q]); // P toujours dans la corbeille
+  });
+
+  it("aperçu de la suppression définitive : périmètre exact, tâches partagées conservées", async () => {
+    ok(await deleteProjectAction(P));
+    const preview = ok(await previewProjectPurgeAction(P));
+    expect(preview).toMatchObject({
+      projectName: "Projet privé",
+      purgedTasks: 2, // l'exclusive + celle supprimée individuellement avant
+      purgedSubtasks: 2, // sa sous-tâche + celle supprimée individuellement avant
+      deletedEarlier: 2,
+      keptTasks: 1, // la tâche partagée avec le projet ouvert
+      comments: 1,
+      attachments: 1,
+    });
+    expect(preview.historyEntries).toBeGreaterThan(0);
+    expect(preview.token).toMatch(/^[0-9a-f]{64}$/);
+    // L'aperçu ne modifie rien.
+    expect(await prisma.task.count({ where: { id: { in: [exclusive, sub, earlier, earlierSub, shared] } } })).toBe(5);
+    expect(await prisma.project.count({ where: { id: P } })).toBe(1);
+  });
+
+  it("si le périmètre a changé depuis l'aperçu, rien n'est effacé et une nouvelle confirmation est demandée", async () => {
+    ok(await deleteProjectAction(P));
+    const first = ok(await previewProjectPurgeAction(P));
+    // Entre l'aperçu et la confirmation, l'autre projet de la tâche partagée
+    // est supprimé définitivement : elle n'est plus liée qu'à P.
+    ok(await deleteProjectAction(W));
+    await purgeConfirmed(W);
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: shared } })).deletedWithProjectId).toBe(P);
+
+    const stale = ok(await purgeProjectAction(P, first.token));
+    expect(stale.status).toBe("scope_changed");
+    if (stale.status !== "scope_changed") throw new Error("inattendu");
+    expect(stale.preview).toMatchObject({ purgedTasks: 3, keptTasks: 0 });
+    expect(stale.preview.token).not.toBe(first.token);
+    // Rien n'a été effacé.
+    expect(await prisma.project.count({ where: { id: P } })).toBe(1);
+    expect(await prisma.task.count({ where: { id: { in: [exclusive, sub, earlier, earlierSub, shared] } } })).toBe(5);
+    // Un jeton quelconque est refusé de la même façon.
+    expect(ok(await purgeProjectAction(P, "0".repeat(64))).status).toBe("scope_changed");
+
+    expect(ok(await purgeProjectAction(P, stale.preview.token))).toMatchObject({ status: "purged", purgedTasks: 3 });
+    expect(await prisma.task.count({ where: { id: { in: [exclusive, sub, earlier, earlierSub, shared] } } })).toBe(0);
+  });
+
+  it("la suppression définitive ne touche jamais une tâche liée à un autre projet conservé (actif ou en corbeille)", async () => {
+    const Q = ok(await createProjectAction({ name: "Q conservé" }));
+    const both = ok(await createTaskAction({ title: "P et Q", projectId: P })).id;
+    ok(await addTaskToProjectAction(both, Q, null));
+    ok(await deleteTaskAction(both)); // supprimée individuellement, mais liée à Q actif
+    ok(await deleteProjectAction(P));
+    const preview = ok(await previewProjectPurgeAction(P));
+    expect(preview.keptTasks).toBe(2); // la partagée active + « P et Q » en corbeille
+    await purgeConfirmed(P);
+    expect(await prisma.task.findUnique({ where: { id: both } })).not.toBeNull();
+    expect(await prisma.task.findUnique({ where: { id: shared } })).not.toBeNull();
+    expect((await listTrash(actorOf(alice))).map((t) => t.id)).toContain(both); // restaurable via Q
   });
 });
