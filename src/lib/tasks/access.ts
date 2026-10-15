@@ -19,7 +19,8 @@ import type { ProjectRole } from "./types";
  *    avoir été restreint au rôle `COMMENTER`. Administrer (renommer, membres,
  *    archiver, supprimer) demande d'être propriétaire.
  *
- * Une tâche est visible si elle n'est pas dans la corbeille et :
+ * Une tâche est visible si elle n'est pas dans la corbeille, si tous ses
+ * projets ne sont pas dans la corbeille, et :
  *   - elle n'appartient à aucun projet (comportement historique de la V0.4 :
  *     les tâches « libres » restent partagées dans l'espace) ;
  *   - ou elle appartient à au moins un projet lisible ;
@@ -65,13 +66,29 @@ function ownTaskConditions(actor: Actor): Prisma.TaskWhereInput[] {
   ];
 }
 
+/**
+ * Une tâche dont **tous** les projets sont dans la corbeille n'est visible de
+ * personne, pas même de son responsable : elle suit ses projets et réapparaît
+ * à leur restauration. (Ce cas ne se produit plus — un retrait ou une
+ * suppression la fait passer à la corbeille avec eux —, mais des données
+ * antérieures peuvent le contenir.)
+ */
+const NOT_ONLY_IN_TRASH: Prisma.TaskWhereInput = {
+  OR: [{ projects: { none: {} } }, { projects: { some: { project: { deletedAt: null } } } }],
+};
+
 function rootVisibleWhere(actor: Actor): Prisma.TaskWhereInput {
   return {
     deletedAt: null,
-    OR: [
-      { projects: { none: {} } },
-      { projects: { some: { project: readableProjectWhere(actor) } } },
-      ...ownTaskConditions(actor),
+    AND: [
+      NOT_ONLY_IN_TRASH,
+      {
+        OR: [
+          { projects: { none: {} } },
+          { projects: { some: { project: readableProjectWhere(actor) } } },
+          ...ownTaskConditions(actor),
+        ],
+      },
     ],
   };
 }
@@ -85,7 +102,7 @@ export function visibleTaskWhere(actor: Actor): Prisma.TaskWhereInput {
       { parentId: null, AND: [rootVisibleWhere(actor)] },
       {
         parentId: { not: null },
-        parent: { deletedAt: null },
+        parent: { deletedAt: null, AND: [NOT_ONLY_IN_TRASH] },
         OR: [...ownTaskConditions(actor), { parent: rootVisibleWhere(actor) }],
       },
     ],
@@ -227,12 +244,13 @@ export function evaluateTaskAccess(task: TaskAccessInfo, actor: Actor): TaskPerm
   // la tâche « libre ».
   const projects = all.filter((p) => !p.deletedAt);
   const free = all.length === 0;
+  const onlyInTrash = all.length > 0 && projects.length === 0;
   const readableProject = projects.some(canReadProject);
   const editableProject = projects.some((p) => canEditProjectContent(p, actor));
 
   const deleted = Boolean(task.deletedAt || task.parent?.deletedAt);
   const canRead =
-    !deleted && (free || readableProject || self.owns || self.follows || top.owns || top.follows);
+    !deleted && !onlyInTrash && (free || readableProject || self.owns || self.follows || top.owns || top.follows);
   const canEdit =
     canRead &&
     (free || editableProject || self.owns || self.collaborates || top.owns || top.collaborates);
@@ -244,8 +262,10 @@ export function evaluateTaskAccess(task: TaskAccessInfo, actor: Actor): TaskPerm
 /**
  * Droits sur une tâche **dans la corbeille** : la voir et la restaurer
  * demandent de pouvoir la gérer (comme pour la supprimer). La suppression
- * définitive demande d'administrer tous ses projets ; pour une tâche libre,
- * d'en être le créateur ou la personne qui l'a supprimée.
+ * définitive demande d'être propriétaire de **tous** ses projets, y compris
+ * ceux qui sont eux-mêmes dans la corbeille : leur propriétaire doit la
+ * retrouver s'il les restaure. Pour une tâche libre, il faut en être le
+ * créateur ou la personne qui l'a supprimée.
  */
 export function evaluateTrashAccess(
   task: TaskAccessInfo & { createdById: string | null; deletedById: string | null; deletedWithProjectId?: string | null },
@@ -265,7 +285,7 @@ export function evaluateTrashAccess(
   }
   return {
     canRestore: projects.some((p) => canEditProjectContent(p, actor)),
-    canPurge: projects.every((p) => canManageProject(p, actor)),
+    canPurge: all.every((p) => (p.deletedAt ? isProjectOwner(p, actor) : canManageProject(p, actor))),
   };
 }
 

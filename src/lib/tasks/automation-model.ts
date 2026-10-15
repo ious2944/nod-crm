@@ -85,7 +85,10 @@ export interface AutomationRuleItem extends RuleInput {
   projectId: string | null;
   runCount: number;
   lastRunAt: string | null;
+  /** Personne avec les droits de laquelle la règle s'exécute (dernière à l'avoir enregistrée). */
   createdById: string | null;
+  /** La personne qui consulte peut modifier ou supprimer la règle. */
+  canManage: boolean;
 }
 
 export interface AutomationRunItem {

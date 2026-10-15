@@ -72,8 +72,9 @@ export async function setTaskParentAction(taskId: string, parentId: string | nul
   return runAction((actor) => service.setTaskParent(ctx(actor), taskId, parentId));
 }
 
-export async function setTaskTagsAction(taskId: string, tagIds: string[]) {
-  return runAction((actor) => service.setTaskTags(ctx(actor), taskId, tagIds));
+/** `baseTagIds` : tags affichés au moment de la modification (seule la différence est appliquée). */
+export async function setTaskTagsAction(taskId: string, tagIds: string[], baseTagIds?: string[]) {
+  return runAction((actor) => service.setTaskTags(ctx(actor), taskId, tagIds, { base: baseTagIds }));
 }
 
 export async function setCustomFieldValueAction(taskId: string, fieldId: string, value: CustomFieldValue) {

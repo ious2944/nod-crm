@@ -90,6 +90,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Review of c580137 — permissions and confidentiality:
+  - workspace automation rules could act with full rights on every task,
+    private projects included; a rule now runs with the **current** rights of
+    the person who saved it last, only on tasks that person can edit, and stops
+    when that person loses access or is deactivated. Only that person can
+    modify or delete a workspace rule (others can take over an inert one);
+  - removing a task from its last active project, then purging the other
+    (trashed) private project, made the task visible to the whole workspace.
+    Removal is now refused when it would leave only trashed projects, or when
+    it would remove the only, private project; purge never makes a task
+    project-less; a task whose projects are all in the trash is visible to
+    nobody;
+  - permanent deletion of a task now requires owning all its projects,
+    including those in the trash;
+  - duplicating a project (or creating one from a template) no longer brings
+    back deleted tasks and subtasks; saving a task as a template skips deleted
+    subtasks; task templates check the rights on their project (use and
+    modification, stored template first); duplicating a shared task skips
+    trashed, read-only and unreadable projects and their fields' values
+    (it failed before when a project was in the trash);
+  - the history of a task no longer shows the title of a private task it
+    depends on or was copied from (`task_activities.ref_task_id`, old lines
+    masked when uncertain);
+  - status-update comments: editing or deleting requires the current project
+    access, even for the author;
+  - the real-time stream only sends each user the ids they may see; rule run
+    logs only list readable tasks; quick actions answer the same for a missing
+    and an inaccessible task.
+- Review of c580137 — concurrency: every write that changes where a task lives
+  (project membership, parent, dependencies, task and project trash, purge,
+  copies, next occurrence) runs under one per-workspace structure lock and
+  re-checks its conditions inside the transaction, with a single lock order.
+  Fixed, and reproduced first with controlled interleavings: two simultaneous
+  project deletions or a creation during a deletion leaving a task active in
+  trashed projects only; a purge erasing the files of a task restored
+  meanwhile; two reverse dependencies forming a cycle; a task becoming a
+  subtask while getting a subtask; two simultaneous purges deadlocking. A late
+  tag save no longer removes a tag added meanwhile (difference applied under a
+  row lock). Completing a recurring task and creating its next occurrence are
+  one transaction (a crash in between left a completed task without its next
+  occurrence). Project copies and restorations write in batches (duplicating
+  2 500 tasks exceeded the 5 s transaction limit).
+- Review of c580137 — migrations: `migration-check.mjs` rebuilds the expected
+  schema in an isolated reference database (automatic with `CREATEDB`, or
+  `SHADOW_DATABASE_URL`): with `20261014092000` applied and `20261014093000`
+  pending, the in-database replay reported two false divergences and blocked
+  the procedure. It lists orphan rows that would make `20261014093000` fail,
+  with a recovery without reset or deletion; its messages and exit codes
+  (0/1/2/3) match what it found; waiting on Prisma's lock is bounded.
 - The `e2e/run.mjs` follow-up filter and logout checks used obsolete selectors
   (`?f=all`, exact `/login` URL) and failed on `main` as well; they now check
   the active link and the `/login` path. Its tasks section targets the V1.0
@@ -111,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `20261014093000_project_trash_constraints` — creates the project-trash
   foreign keys where the previous migration's guard (not filtered by schema)
   skipped them; found by the structural schema check.
+- `20261015090000_legacy_reconcile_unestablished_restore` — corrective,
+  idempotent: without Prisma history, `20261014091000` removed assignees and
+  creators whose origin could not be established (including V1.0 subtasks
+  copied without history); they are put back from the recorded previous value
+  and flagged `*_ORIGIN_UNKNOWN`.
+- `20261015091000_task_activity_reference` — additive:
+  `task_activities.ref_task_id`, backfilled only when certain.
 - Upgrade paths (never applied / first version / revised version) and the
   reconciliation procedure are documented in `docs/tasks.md`; no reset is
   needed in any state.

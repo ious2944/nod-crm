@@ -295,6 +295,8 @@ function toRef(task: { id: string; title: string; status: TaskItem["status"]; du
 const REF_SELECT = { id: true, title: true, status: true, dueAt: true, startAt: true, assigneeId: true } as const;
 
 const PROJECT_ACTIVITY_KINDS = new Set(["project_added", "project_removed", "moved"]);
+/** Lignes qui citent une autre tâche (son titre) : montrées seulement à qui peut la lire. */
+const CITING_ACTIVITY_KINDS = new Set(["dependency_added", "dependency_removed", "duplicated"]);
 
 export async function getTaskDetail(actor: Actor, taskId: string): Promise<TaskDetail> {
   const access = await prisma.task.findFirst({
@@ -374,6 +376,17 @@ export async function getTaskDetail(actor: Actor, taskId: string): Promise<TaskD
       : [],
   );
 
+  // Tâches citées : le titre n'est montré qu'à qui peut les lire. Une ligne
+  // ancienne sans référence certaine garde son libellé, sans le titre.
+  const citedIds = [...new Set(activity.map((a) => a.refTaskId).filter((id): id is string => Boolean(id)))];
+  const readableCited = new Set(
+    citedIds.length
+      ? (await prisma.task.findMany({ where: { AND: [visibleTaskWhere(actor), { id: { in: citedIds } }] }, select: { id: true } })).map((t) => t.id)
+      : [],
+  );
+  const citedVisible = (a: { kind: string; refTaskId: string | null }) =>
+    !CITING_ACTIVITY_KINDS.has(a.kind) || (a.refTaskId !== null && readableCited.has(a.refTaskId));
+
   const projectIds = item.memberships.map((m) => m.projectId);
   const projects = projectIds.length
     ? await prisma.project.findMany({
@@ -417,8 +430,8 @@ export async function getTaskDetail(actor: Actor, taskId: string): Promise<TaskD
         automationRuleId: a.automationRuleId,
         kind: a.kind,
         field: a.field,
-        oldValue: a.oldValue,
-        newValue: a.newValue,
+        oldValue: citedVisible(a) ? a.oldValue : null,
+        newValue: citedVisible(a) ? a.newValue : null,
         createdAt: a.createdAt.toISOString(),
       }),
     ),
@@ -679,7 +692,7 @@ export async function getNotificationPreferences(actor: Actor): Promise<Record<s
 // ─── Personnalisation d'un projet ─────────────────────────────────────────────
 
 export async function getProjectSettings(actor: Actor, projectId: string) {
-  await getProjectDetail(actor, projectId);
+  const detail = await getProjectDetail(actor, projectId);
   const [rules, runs, forms, templates, projectTemplates] = await Promise.all([
     prisma.automationRule.findMany({
       where: { workspaceId: actor.workspaceId, OR: [{ projectId }, { projectId: null }] },
@@ -700,6 +713,24 @@ export async function getProjectSettings(actor: Actor, projectId: string) {
       select: { id: true, name: true },
     }),
   ]);
+  // Journal : uniquement les exécutions sur des tâches que la personne peut
+  // lire (une règle d'espace agit aussi dans des projets privés).
+  const runTaskIds = [...new Set(runs.map((r) => r.taskId).filter((id): id is string => Boolean(id)))];
+  const readableRunTasks = new Set(
+    runTaskIds.length
+      ? (await prisma.task.findMany({ where: { AND: [visibleTaskWhere(actor), { id: { in: runTaskIds } }] }, select: { id: true } })).map((t) => t.id)
+      : [],
+  );
+  // Règles d'espace : modifiables par la personne qui les a enregistrées, ou
+  // par tous si elle n'est plus active (la règle est alors inerte).
+  const authorIds = [...new Set(rules.filter((r) => !r.projectId && r.createdById).map((r) => r.createdById!))];
+  const activeAuthors = new Set(
+    authorIds.length
+      ? (await prisma.user.findMany({ where: { id: { in: authorIds }, workspaceId: actor.workspaceId, isActive: true }, select: { id: true } })).map((u) => u.id)
+      : [],
+  );
+  const canManageRule = (rule: { projectId: string | null; createdById: string | null }) =>
+    rule.projectId ? detail.canEdit : rule.createdById === actor.id || !rule.createdById || !activeAuthors.has(rule.createdById);
   return {
     rules: rules
       .map((rule): AutomationRuleItem | null => {
@@ -719,12 +750,15 @@ export async function getProjectSettings(actor: Actor, projectId: string) {
           runCount: rule.runCount,
           lastRunAt: rule.lastRunAt?.toISOString() ?? null,
           createdById: rule.createdById,
+          canManage: canManageRule(rule),
         };
       })
       .filter((r): r is AutomationRuleItem => r !== null),
-    runs: runs.map(
-      (r): AutomationRunItem => ({ id: r.id, ruleId: r.ruleId, taskId: r.taskId, status: r.status, message: r.message, createdAt: r.createdAt.toISOString() }),
-    ),
+    runs: runs
+      .filter((r) => !r.taskId || readableRunTasks.has(r.taskId))
+      .map(
+        (r): AutomationRunItem => ({ id: r.id, ruleId: r.ruleId, taskId: r.taskId, status: r.status, message: r.message, createdAt: r.createdAt.toISOString() }),
+      ),
     forms: forms.map((f) => ({
       id: f.id,
       name: f.name,

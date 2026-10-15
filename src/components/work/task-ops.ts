@@ -218,7 +218,7 @@ export function useTaskOps() {
   );
 
   const setTags = useCallback(
-    (task: TaskItem, tagIds: string[]) => mutateTask(task.id, { tagIds }, () => setTaskTagsAction(task.id, tagIds)),
+    (task: TaskItem, tagIds: string[]) => mutateTask(task.id, { tagIds }, () => setTaskTagsAction(task.id, tagIds, task.tagIds)),
     [mutateTask],
   );
 

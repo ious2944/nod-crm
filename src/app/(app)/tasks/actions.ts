@@ -9,6 +9,7 @@ import { APP_TIME_ZONE } from "@/lib/config";
 import { dayKey, shiftDueDate } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
 import "@/lib/tasks/action-result";
+import { TaskAccessError, visibleTaskWhere } from "@/lib/tasks/access";
 import * as service from "@/lib/tasks/service";
 import type { CreateTaskState } from "@/lib/tasks/create-state";
 import type { EditTaskState } from "@/lib/tasks/edit-state";
@@ -221,8 +222,10 @@ export async function applyTaskAction(formData: FormData): Promise<void> {
 
   const { id, intent, days } = parsed.data;
 
+  // Bornée aux tâches visibles : une tâche inaccessible répond exactement
+  // comme une tâche inexistante (aucune information sur son état).
   const task = await prisma.task.findFirst({
-    where: { id, workspaceId, deletedAt: null },
+    where: { AND: [visibleTaskWhere({ id: userId, workspaceId }), { id }] },
     select: { id: true, dueAt: true, completedAt: true, status: true, opportunityId: true, lastActiveStatus: true },
   });
 
@@ -267,7 +270,9 @@ export async function applyTaskAction(formData: FormData): Promise<void> {
       : { status: task.status };
   try {
     await service.updateTaskFields(service.userContext({ id: userId, workspaceId }), id, patch, { base: base_ });
-  } catch {
+  } catch (error) {
+    // Droits : même réponse qu'une tâche inexistante, ou le refus explicite.
+    if (error instanceof TaskAccessError) throw new Error(error.code === "NOT_FOUND" ? "Tâche introuvable." : error.message);
     throw new TaskConflictError();
   }
 

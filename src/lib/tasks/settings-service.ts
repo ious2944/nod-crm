@@ -163,6 +163,30 @@ async function assertRuleReferences(actor: Actor, projectId: string | null, inpu
   }
 }
 
+/**
+ * Gestion des règles (politique documentée dans `docs/tasks.md`) :
+ *   - règle de projet : toute personne qui peut modifier le contenu du projet ;
+ *   - règle d'espace : n'importe quel membre de l'espace peut en créer une
+ *     (elle n'agit qu'avec ses propres droits), mais seule la personne qui
+ *     l'a enregistrée peut la modifier ou la supprimer — sauf si celle-ci est
+ *     désactivée ou supprimée : la règle est alors inerte et peut être
+ *     reprise ou supprimée par un autre membre.
+ * Enregistrer une règle (création ou modification) la fait exécuter avec les
+ * droits de la personne qui l'enregistre (`created_by_id`).
+ */
+async function requireRuleManage(actor: Actor, rule: { projectId: string | null; createdById: string | null }) {
+  if (rule.projectId) {
+    await requireProjectEdit(actor, rule.projectId);
+    return;
+  }
+  if (rule.createdById === actor.id || !rule.createdById) return;
+  const author = await prisma.user.findFirst({
+    where: { id: rule.createdById, workspaceId: actor.workspaceId, isActive: true },
+    select: { id: true },
+  });
+  if (author) throw new TaskAccessError("FORBIDDEN", "Seule la personne qui a enregistré cette règle d'espace peut la modifier ou la supprimer.");
+}
+
 export async function saveRule(actor: Actor, ruleId: string | null, projectId: string | null, raw: unknown): Promise<string> {
   const parsed = ruleInputSchema.safeParse(raw);
   if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Règle invalide.");
@@ -173,8 +197,10 @@ export async function saveRule(actor: Actor, ruleId: string | null, projectId: s
     const existing = await prisma.automationRule.findFirst({ where: { id: ruleId, workspaceId: actor.workspaceId } });
     if (!existing) throw new TaskAccessError("NOT_FOUND");
     scope = existing.projectId;
+    await requireRuleManage(actor, existing);
+  } else if (scope) {
+    await requireProjectEdit(actor, scope);
   }
-  if (scope) await requireProjectEdit(actor, scope);
   await assertRuleReferences(actor, scope, input);
 
   const data = {
@@ -187,7 +213,8 @@ export async function saveRule(actor: Actor, ruleId: string | null, projectId: s
   };
   let id = ruleId;
   if (ruleId) {
-    await prisma.automationRule.update({ where: { id: ruleId }, data });
+    // La règle s'exécutera désormais avec les droits de qui l'enregistre.
+    await prisma.automationRule.update({ where: { id: ruleId }, data: { ...data, createdById: actor.id } });
   } else {
     id = (
       await prisma.automationRule.create({
@@ -209,7 +236,7 @@ export async function saveRule(actor: Actor, ruleId: string | null, projectId: s
 export async function deleteRule(actor: Actor, ruleId: string): Promise<void> {
   const rule = await prisma.automationRule.findFirst({ where: { id: ruleId, workspaceId: actor.workspaceId } });
   if (!rule) throw new TaskAccessError("NOT_FOUND");
-  if (rule.projectId) await requireProjectEdit(actor, rule.projectId);
+  await requireRuleManage(actor, rule);
   await prisma.automationRule.delete({ where: { id: ruleId } });
   await recordAudit({ workspaceId: actor.workspaceId, userId: actor.id, action: "DELETE", entityType: AUDIT_ENTITY_TYPES.AUTOMATION_RULE, entityId: ruleId });
 }
@@ -220,6 +247,17 @@ export async function saveTaskTemplate(actor: Actor, templateId: string | null, 
   const parsed = taskTemplateSchema.safeParse(raw);
   if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Modèle invalide.");
   const input = parsed.data;
+  // Modèle existant : d'abord les droits sur son projet actuel (même réponse
+  // qu'un identifiant inconnu si on ne peut pas le lire), puis sur le projet
+  // demandé. Un modèle d'espace reste modifiable par tout l'espace.
+  if (templateId) {
+    const existing = await prisma.taskTemplate.findFirst({
+      where: { id: templateId, workspaceId: actor.workspaceId },
+      select: { projectId: true },
+    });
+    if (!existing) throw new TaskAccessError("NOT_FOUND");
+    if (existing.projectId) await requireProjectEdit(actor, existing.projectId);
+  }
   if (input.projectId) await requireProjectEdit(actor, input.projectId);
   if (input.tagIds?.length) {
     const n = await prisma.tag.count({ where: { id: { in: input.tagIds }, workspaceId: actor.workspaceId } });
@@ -236,7 +274,10 @@ export async function saveTaskTemplate(actor: Actor, templateId: string | null, 
     tagIds: input.tagIds ?? [],
   };
   if (templateId) {
-    const { count } = await prisma.taskTemplate.updateMany({ where: { id: templateId, workspaceId: actor.workspaceId }, data });
+    const { count } = await prisma.taskTemplate.updateMany({
+      where: { id: templateId, workspaceId: actor.workspaceId },
+      data: "projectId" in input ? { ...data, projectId: input.projectId ?? null } : data,
+    });
     if (!count) throw new TaskAccessError("NOT_FOUND");
     return templateId;
   }
@@ -266,7 +307,7 @@ export async function taskToTemplate(actor: Actor, taskId: string, projectId: st
       estimatedMinutes: true,
       isApproval: true,
       tags: { select: { tagId: true } },
-      subtasks: { orderBy: { subtaskPosition: "asc" }, select: { title: true } },
+      subtasks: { where: { deletedAt: null }, orderBy: { subtaskPosition: "asc" }, select: { title: true } },
     },
   });
   return saveTaskTemplate(actor, null, {

@@ -258,7 +258,7 @@ function RulesTab({ project, sections, settings, reload }: { project: ProjectDet
   };
   return (
     <div className="space-y-3">
-      <p className="text-[12px] text-muted">Une règle associe un déclencheur, des conditions facultatives et des actions. Chaque exécution est tracée ; une règle ne s&apos;exécute jamais deux fois pour le même événement et les enchaînements de règles sont bornés pour éviter les boucles.</p>
+      <p className="text-[12px] text-muted">Une règle associe un déclencheur, des conditions facultatives et des actions. Chaque exécution est tracée ; une règle ne s&apos;exécute jamais deux fois pour le même événement et les enchaînements de règles sont bornés pour éviter les boucles. Elle agit avec les droits de la personne qui l&apos;a enregistrée en dernier, et seulement sur les tâches que cette personne peut modifier.</p>
       {project.canEdit && (
         <div className="flex flex-wrap gap-1.5">
           {PRESETS.map((preset) => (
@@ -280,14 +280,14 @@ function RulesTab({ project, sections, settings, reload }: { project: ProjectDet
                 type="checkbox"
                 aria-label={rule.isEnabled ? "Désactiver la règle" : "Activer la règle"}
                 checked={rule.isEnabled}
-                disabled={!project.canEdit}
+                disabled={!rule.canManage}
                 onChange={(e) => void save(rule.id, rule.projectId, { name: rule.name, trigger: rule.trigger, triggerConfig: rule.triggerConfig, conditions: rule.conditions, actions: rule.actions, isEnabled: e.target.checked })}
                 className="accent-[var(--nod-accent)]"
               />
               <span className="flex-1 text-[13px] font-medium text-ink">{rule.name}</span>
               {!rule.projectId && <span className="rounded bg-surface-muted px-1.5 text-[11px] text-muted">Tout l&apos;espace</span>}
               <span className="text-[11px] text-muted">{rule.runCount} exécution(s){rule.lastRunAt && `, dernière ${relativeTime(rule.lastRunAt)}`}</span>
-              {project.canEdit && (
+              {rule.canManage && (
                 <>
                   <button type="button" className={BTN_GHOST} onClick={() => setEditing({ id: rule.id, scope: rule.projectId, input: rule })}>
                     Modifier

@@ -387,7 +387,9 @@ model Task {
   blockedBy      TaskDependency[]       @relation("DependencyBlocked")
   attachments    TaskAttachment[]
   comments       Comment[]
-  activities     TaskActivity[]
+  activities     TaskActivity[]        @relation("TaskActivities")
+  /// Lignes d'historique d'autres tâches qui citent celle-ci (dépendance, copie).
+  citedIn        TaskActivity[]        @relation("ActivityRefTask")
   timeEntries    TaskTimeEntry[]
   notifications  Notification[]
   automationRuns AutomationRun[]
@@ -726,16 +728,21 @@ model TaskActivity {
   /// Projet concerné (ajout, retrait, changement de section) : la ligne n'est
   /// montrée qu'aux personnes qui peuvent lire ce projet.
   projectId        String?  @map("project_id") @db.Uuid
+  /// Autre tâche citée (dépendance, source d'une copie) : la valeur (son titre)
+  /// n'est montrée qu'aux personnes qui peuvent lire cette tâche.
+  refTaskId        String?  @map("ref_task_id") @db.Uuid
   kind             String
   field            String?
   oldValue         String?  @map("old_value")
   newValue         String?  @map("new_value")
   createdAt        DateTime @default(now()) @map("created_at")
 
-  task  Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  task    Task  @relation("TaskActivities", fields: [taskId], references: [id], onDelete: Cascade)
+  refTask Task? @relation("ActivityRefTask", fields: [refTaskId], references: [id], onDelete: SetNull)
+  actor   User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([taskId, createdAt])
+  @@index([refTaskId])
   @@map("task_activities")
 }
 
@@ -1162,7 +1169,8 @@ model TaskMigrationNote {
   taskId      String   @map("task_id") @db.Uuid
   workspaceId String   @map("workspace_id") @db.Uuid
   /// `ASSIGNEE_UNKNOWN` | `CREATOR_UNKNOWN` | `ASSIGNEE_INFERRED_REVERTED` |
-  /// `CREATOR_INFERRED_REVERTED` | `ASSIGNEE_INFERRED_KEPT` | `CREATOR_INFERRED_KEPT`
+  /// `CREATOR_INFERRED_REVERTED` | `ASSIGNEE_INFERRED_KEPT` | `CREATOR_INFERRED_KEPT` |
+  /// `ASSIGNEE_ORIGIN_UNKNOWN` | `CREATOR_ORIGIN_UNKNOWN` (valeur conservée, origine non établie)
   reason      String
   /// Valeur concernée (identifiant de l'utilisateur déduit), pour vérification.
   detail      String?

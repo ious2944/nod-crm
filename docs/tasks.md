@@ -37,16 +37,21 @@ authenticated layout.
 | `prisma/migrations/20261014090000_work_management_hardening` | trash, last active status, project fields, capacity, reminders, leases, legacy-task report |
 | `prisma/migrations/20261014091000_work_management_legacy_reconcile` | corrective: undoes the inferred assignees/creators of the first migration |
 | `prisma/migrations/20261014092000_project_trash` | project trash |
-| `scripts/migration-check.mjs` | migration-history and structural schema check, guarded checksum reconciliation |
+| `prisma/migrations/20261014093000_project_trash_constraints` | project-trash foreign keys the previous guard could skip |
+| `prisma/migrations/20261015090000_legacy_reconcile_unestablished_restore` | corrective: puts back values migration 3 removed without an established origin |
+| `prisma/migrations/20261015091000_task_activity_reference` | history lines reference the task they cite (`ref_task_id`) |
+| `scripts/migration-check.mjs` | migration-history and structural schema check (isolated reference database), pre-checks of pending migrations, guarded checksum reconciliation |
 | `src/lib/tasks/types.ts`, `constants.ts` | client-safe types, labels, palettes |
 | `src/lib/tasks/access.ts` | **permissions** (workspace, project visibility, roles) |
+| `src/lib/tasks/structure.ts` | workspace **structure lock** shared by every write that changes where a task lives |
 | `src/lib/tasks/service.ts` | task mutations (create/update/move/delete/duplicate, tags, custom fields, dependencies, followers, time, comments) |
 | `src/lib/tasks/project-service.ts` | projects, sections, members, favourites, status updates, templates |
 | `src/lib/tasks/settings-service.ts` | tags, custom fields, rules, task templates, forms, saved views, notifications, CSV import, attachments |
 | `src/lib/tasks/automations.ts`, `automation-model.ts` | rule engine / rule model |
 | `src/lib/tasks/task-reminders.ts`, `jobs.ts`, `scheduler.ts` | scheduled due-date reminders, job lease, in-process timer |
 | `src/lib/tasks/{workload,project-stats}.ts` | pure workload and progress computations |
-| `src/lib/tasks/notify.ts`, `realtime.ts` | notifications, LISTEN/NOTIFY |
+| `src/lib/tasks/notify.ts`, `realtime.ts`, `realtime-filter.ts` | notifications, LISTEN/NOTIFY, per-subscriber filtering of real-time events |
+| `src/lib/tasks/test-hooks.ts` | no-op checkpoints used by the interleaving tests |
 | `src/lib/tasks/work-queries.ts`, `serialize.ts` | reads and DTO mapping |
 | `src/lib/tasks/{recurrence,graph,query-engine,rich-text,csv,format}.ts` | pure, unit-tested modules |
 | `src/app/(app)/tasks/work-actions.ts` | Server Actions (mutations) |
@@ -75,7 +80,8 @@ block the user's own edits.
   `saved_views`, `automation_rules`, `automation_runs`, `task_templates`,
   `task_forms`; V1.0 hardening adds `task_reminders`, `job_leases`,
   `task_migration_notes`, `custom_fields.project_id`,
-  `task_activities.project_id`, `users.weekly_capacity_minutes`.
+  `task_activities.project_id`, `users.weekly_capacity_minutes`;
+  `task_activities.ref_task_id` (task cited by a history line).
 
 `status = DONE` ⇔ `completed_at IS NOT NULL` is maintained by the service.
 `last_active_status` keeps the status before completion: reopening returns to
@@ -113,10 +119,31 @@ it. Deleted tasks keep their row (`deleted_at`, `deleted_by_id`).
 4. `20261014092000_project_trash` — additive (project trash, see below).
 5. `20261014093000_project_trash_constraints` — creates the two project-trash
    foreign keys where the previous migration's schema-blind guard skipped them.
+   It fails if rows point to a project or user that no longer exists: run
+   `migration-check.mjs` first, it lists them (see *Orphan rows* below).
+6. `20261015090000_legacy_reconcile_unestablished_restore` — corrective,
+   idempotent. Without a `_prisma_migrations` row for migration 1 (manual
+   application), migration 3 cannot date V1.0 and treated every task without
+   history as legacy — including V1.0 subtasks copied by a duplication or a
+   recurrence — and removed their assignee/creator. When the origin of a value
+   cannot be established it must not be removed: this migration puts back the
+   values migration 3 removed **without an established origin** (all of them
+   without Prisma history; with it, only those on tasks created after migration
+   1), from the previous value kept in `task_migration_notes.detail`, only if
+   the field is still empty and the user still belongs to the workspace. The
+   note becomes `ASSIGNEE_ORIGIN_UNKNOWN` / `CREATOR_ORIGIN_UNKNOWN` (value
+   kept, to check) and the now-wrong `*_UNKNOWN` note is removed. Migration 3
+   itself is unchanged (databases have applied it).
+7. `20261015091000_task_activity_reference` — additive: `task_activities.ref_task_id`
+   (see *Permissions*, history). Old lines get a reference only when it is
+   certain (the blocked task's current dependencies, then a unique exact title
+   in the workspace); otherwise it stays empty and the cited title is masked.
+   No line is deleted.
 
-No step deletes or rewrites business data other than the inferred
-assignee/creator values listed above, each one recorded with its previous
-value.
+No step deletes business data. The only values rewritten are the inferred
+assignee/creator values of migration 3 (each recorded with its previous value
+and, without an established origin, put back by migration 6) and, on
+explicit human action, the orphan references of *Orphan rows*.
 
 #### Upgrade path by initial state
 
@@ -127,21 +154,23 @@ which state a database is in by comparing `_prisma_migrations` with the files:
 | State | Recorded checksum of `20261013120000` | Procedure |
 | --- | --- | --- |
 | **A** — module never applied (e.g. `main`) | none | `npm run db:deploy` |
-| **B** — first version applied (`81c4b0c`) | `7a410c8d…` (= file) | `npm run db:deploy` |
+| **B** — first version applied (`81c4b0c`), or state C already reconciled | `7a410c8d…` (= file) | `npm run db:deploy` |
 | **C** — revised version applied (`c199fdd` … `cc1240c`) | `b7fae256…` | reconcile, then `npm run db:deploy` |
 
 Why state C needs a reconciliation: `migrate deploy` silently accepts a modified
 migration, but `migrate dev` then demands a **reset** (verified). The revised
 file differed from the first one only by comments and two data-backfill
 statements — the DDL is byte-for-byte identical (asserted by the test below) —
-and the data outcome is made identical by migration 3. Procedure, never a reset:
+and migration 3 aligns the data — with one difference: on a legacy task used
+since V1.0, an inferred assignee/creator is **kept** in B (`*_INFERRED_KEPT`,
+listed for review) while in C it was never set. Procedure, never a reset:
 
 ```sh
 pg_dump -Fc "$DATABASE_URL" -f before-v1-reconcile.dump   # 1. backup
-node scripts/migration-check.mjs                           # 2. must say « État C »
+node scripts/migration-check.mjs                           # 2. must say « État C » (exit code 3)
 node scripts/migration-check.mjs --reconcile               # 3. guarded rewrite of the checksum
-npm run db:deploy                                          # 4. applies migrations 3 and 4
-node scripts/migration-check.mjs                           # 5. no « ≠ » line left
+npm run db:deploy                                          # 4. applies every pending migration (from 3 on)
+node scripts/migration-check.mjs                           # 5. no « ≠ » line left, exit code 0
 npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script
                                                            # 6. must print an empty migration
 ```
@@ -149,8 +178,13 @@ npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prism
 **Schema check** (both modes). A correct name does not prove a correct
 definition, so the expected schema is **rebuilt**: the files of every migration
 recorded as applied — including those after `20261013120000` — are replayed, in
-order, into a temporary schema of the same database. The two PostgreSQL
-catalogues are then compared item by item:
+order, into an **isolated reference database**, then the two PostgreSQL
+catalogues are compared item by item. A separate database is required: a
+migration that looks the catalogue up without filtering by schema (the guard of
+`20261014092000`) would, inside the same database, see the real schema's
+objects and rebuild a different schema — false divergences that blocked the
+procedure on databases with `20261014092000` applied and `20261014093000`
+pending.
 
 | Compared | Source | Covers |
 | --- | --- | --- |
@@ -159,13 +193,45 @@ catalogues are then compared item by item:
 | constraints | `pg_get_constraintdef` | primary keys, unique, foreign keys (tables, columns, `ON DELETE` / `ON UPDATE`), checks |
 | indexes | `pg_get_indexdef` | columns and order, uniqueness, method, predicate |
 
+Not compared: collations, views, triggers, functions, sequence properties,
+extensions, comments, grants and owners.
+
 Each object missing, extra or different is reported with the expected and the
 found value (e.g. `colonne projects.color : type attendu « text », trouvé
-« character varying(64) »`). Everything runs in a transaction that is rolled
-back: the temporary schema is never kept (needs `CREATE` on the database). The
-check found a real defect: the idempotence guard of `20261014092000_project_trash`
-looked constraints up without filtering by schema; `20261014093000_project_trash_constraints`
-creates them where they were skipped (that migration was not modified).
+« character varying(64) »`). Nothing is written to the checked database. The
+two foreign keys that the guard of `20261014092000` may have skipped are
+reported as « créée par 20261014093000 (en attente) » and do not block while
+that migration is pending.
+
+Reference database — configuration and permissions:
+
+| Mode | Configuration | Permissions | Clean-up |
+| --- | --- | --- | --- |
+| automatic (default) | none: `nod_check_<random>` is created on the same server (`TEMPLATE template0`, same encoding and locale as the checked database) | **`CREATEDB`** for the role of `DATABASE_URL` | dropped at the end, also on error; a database left by a killed run (marked by a comment naming the checked database and schema) is dropped by the next check of the same database |
+| dedicated | `SHADOW_DATABASE_URL=postgresql://…/nod_shadow` — an **empty** database (no table, no type), refused otherwise | `CONNECT`, and `CREATE`/`USAGE` on its `public` schema | the replay runs in a transaction that is rolled back: it stays empty |
+
+Exit codes:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | compliant: nothing blocks `npm run db:deploy` (pending migrations are listed), or reconciliation done |
+| 1 | do not deploy: inconsistent history, schema divergence, unrecognised checksum, or reconciliation refused |
+| 2 | check impossible: no `DATABASE_URL`, database unreachable, Prisma lock held longer than `MIGRATION_CHECK_LOCK_TIMEOUT` (60 s by default), reference database impossible to create or not empty |
+| 3 | action required before `db:deploy`: state C to reconcile (`--reconcile`), or orphan rows blocking `20261014093000` |
+
+**Orphan rows.** Where the guard of `20261014092000` skipped its foreign keys,
+a hard delete could leave `tasks.deleted_with_project_id` or
+`projects.deleted_by_id` pointing to nothing; `20261014093000` then fails.
+Before deploying, the check lists them (ids and dangling values, exit code 3)
+and prints the recovery; it never changes them itself. Recovery, without reset
+or deletion:
+
+1. check the listed rows — the value points to a project/user that no longer
+   exists;
+2. set it to `NULL` with the printed `UPDATE` (what the `ON DELETE SET NULL`
+   key would have done);
+3. if `20261014093000` already failed: `npx prisma migrate resolve --rolled-back 20261014093000_project_trash_constraints`;
+4. `npm run db:deploy`, then the check again (exit code 0).
 
 **History check.** Refused: a migration started but neither finished nor
 rolled back, a migration rolled back and not re-applied, a recorded migration
@@ -215,7 +281,15 @@ Verification:
   migration altered), default, enum values, index columns/order, index
   predicate, index uniqueness, foreign-key `ON DELETE`, foreign-key definition,
   primary key — plus a renamed index, an unfinished migration, an unknown
-  migration, a rolled-back one, and waiting on a concurrent Prisma lock.
+  migration, a rolled-back one, and waiting on a concurrent Prisma lock. It
+  also covers: no false divergence with `20261014092000` applied and
+  `20261014093000` pending (the c580137 script reported two), keys skipped by
+  the guard reported as pending, `SHADOW_DATABASE_URL` used and left empty (a
+  non-empty one refused), the orphan-row diagnostic and the full recovery
+  (failed deployment, printed fixes, `resolve --rolled-back`, deployment,
+  rows kept), an application without Prisma history (migration 3 alone removes
+  the values of a copied subtask; migration 6 puts them back and flags them),
+  and the reference backfill of migration 7.
 - The same three paths were also run with the real Prisma CLI on disposable
   databases (`main` → state → current tree): `migrate deploy`, `migrate status`
   “up to date”, `migrate diff` empty, `migrate dev --create-only` without reset.
@@ -244,7 +318,11 @@ if it is visible itself on those grounds or its parent is.
 | edit fields (title, dates, status, description, tags, time, files…) | an editor of one of its projects; its assignee, creator or collaborator; anyone for a task without project |
 | **manage**: reassign, add collaborators/followers other than oneself, add to / remove from a project, change parent, duplicate, delete | an editor of one of its projects; anyone for a task without project |
 | restore from trash | same as manage |
-| delete permanently | owner of **all** its projects; for a task without project, its creator or the person who deleted it |
+| delete permanently | owner of **all** its projects, **including those in the trash** (their owner must find the task if they restore them); for a task without project, its creator or the person who deleted it |
+
+A task whose projects are **all** in the trash is visible to nobody, not even
+its assignee: it follows its projects and comes back with them. (No operation
+produces this state any more — see *Task lifecycle* — but older data may.)
 
 What this means for each role (covered by `tests/integration/work-permissions.test.ts`):
 
@@ -287,7 +365,55 @@ Side doors are closed the same way:
 - **Project trash** (see *Task lifecycle*): a deleted project and the tasks
   deleted with it are readable by nobody; only the project owner sees it in the
   trash. A task never becomes “project-less” (workspace-visible) because its
-  projects were deleted: its memberships are kept.
+  projects were deleted, removed or purged.
+- **History lines citing another task** (dependency added/removed, source of a
+  copy) reference it (`ref_task_id`): its title is shown only to people who can
+  read it; others see « (tâche non accessible) ». Old lines without a certain
+  reference keep their label without the title.
+- **Status-update comments**: editing or deleting one requires reading the
+  project *now*, even for its author.
+- **Real-time stream** (`/api/tasks/stream`): each subscriber receives only the
+  ids of tasks it can read (or that belong to a project it can see — a deleted
+  or moved task must leave its views) and of projects open to the workspace or
+  where it is a member; an event about invisible items only is not sent.
+- **Quick actions** (`/today`, CRM sheets) answer « Tâche introuvable. » for a
+  task that does not exist and for one the user cannot read, whatever its
+  state.
+
+**Rules.** A rule runs with the **current** rights of the person who saved it
+last (created or modified, `automation_rules.created_by_id`), never more:
+
+- it runs only on tasks that person can edit; every action is then checked as
+  if that person did it by hand (reassigning needs the manage right, moving to
+  a section needs edit rights on that project, etc.);
+- a project rule acts only on that project's tasks, and only while that person
+  can edit the project's content;
+- if that person is deactivated or deleted, the rule does nothing;
+- a task that person cannot edit is skipped **without a run row**; the run log
+  of a project's settings is in addition filtered to tasks the viewer can read.
+
+Managing rules (there is no administrator role in NOD CRM): a project rule is
+created, modified or deleted by anyone who can edit the project's content —
+saving it makes it run with their rights. Anyone in the workspace can create a
+workspace rule (it acts only with their own rights), but only the person who
+saved it can modify or delete it; when that person is deactivated or deleted,
+the rule is inert and any member can take it over (saving it) or delete it.
+
+**Templates.** Using a task template that belongs to a project requires
+reading that project; modifying it requires editing it — checked on the
+**stored** template first, then on the project it is moved to; an unknown or
+unreadable template answers « Modèle introuvable » / not found. Workspace
+templates stay editable by the workspace. Saving a task as a template skips
+its deleted subtasks.
+
+**Copies.** Duplicating a task requires managing it; the copy joins only the
+active projects the person can edit (deleted, read-only and unreadable projects
+are skipped, with the values of their own custom fields) and never becomes
+project-less. Duplicating a project does not modify the source, so reading it
+is enough — a **commenter may duplicate** a project they can read, and becomes
+owner of the copy, which contains only what they can read: never a task or
+subtask from the trash, nor values of fields owned by another project. Copied
+rules run with the duplicator's rights.
 
 ### Cockpit `/today`
 
@@ -326,19 +452,32 @@ The cockpit reads through the same `visibleTaskWhere` (plus “not in the trash�
     project and the tasks belonging to no other kept project (active or in the
     trash), including those deleted individually before. A task still linked to
     another kept project is never erased; if that project is in the trash, the
-    task follows it.
+    task follows it. An active task whose other projects are all in the trash
+    follows them to the trash; an active task with no other project (older
+    data) is erased with the project — it never becomes project-less.
+  - **Removing a task from a project** is refused when it would leave the task
+    only in projects of the trash (delete it instead, or restore the other
+    project first), and when the project is its only one and is private
+    (without a project it would be visible to the whole workspace).
+  - **Changing parent**: a task becomes a subtask only if it does not belong
+    to a project of the trash and if this does not open it to new people (a
+    task of a private project, in no workspace project, can go only under a
+    parent in the same projects). A subtask converted into a task joins its
+    former parent's active projects, so its visibility is unchanged.
   - **Confirmation**: the dialog shows the scope computed by the server
     (`previewProjectPurgeAction`): project name; main tasks and subtasks to be
     erased, and how many of them had been deleted individually before; shared
     tasks kept; comments, attachments and history entries erased with them;
     and that the action is irreversible. The button stays disabled until an
     explicit checkbox is ticked. The preview carries a token (SHA-256 of the
-    exact sets of task ids erased and kept). On confirmation the server locks
-    the project row and the affected tasks (`FOR UPDATE`), **recomputes** the
-    scope and compares tokens: if it changed (a task restored, linked to or
-    unlinked from another project, another project purged…), nothing is erased
-    and the new scope is returned; the dialog shows it with a warning and
-    requires a new confirmation.
+    exact set of task ids erased, of the tasks kept **with their destination**
+    — restored, following another trashed project, unchanged — and of the
+    announced volumes). On confirmation the server takes the structure lock,
+    locks the project row and the affected tasks (`FOR UPDATE`, ordered by id),
+    **recomputes** the scope and compares tokens: if it changed (a task
+    restored, linked to or unlinked from another project, another project
+    purged…), nothing is erased and the new scope is returned; the dialog shows
+    it with a warning and requires a new confirmation.
 - **Completion**: `DONE` sets `completed_at`; any other status clears it.
   Reopening (cockpit, list checkbox) goes back to `last_active_status`.
 - **Approval**: an approval request cannot be completed before it is approved.
@@ -346,9 +485,11 @@ The cockpit reads through the same `visibleTaskWhere` (plus “not in the trash�
   requests changes. Approving completes it; requesting changes on a completed
   request reopens it; setting it back to “pending” resubmits it and notifies the
   approver.
-- **Recurrence**: completing a recurring task creates the next occurrence once
-  (`recurrence_origin_id` is unique — double clicks or reopen/complete cycles
-  never duplicate it), dated by the rule on calendar day keys in
+- **Recurrence**: completing a recurring task creates the next occurrence once,
+  **in the same transaction** as the completion — a crash or an error never
+  leaves a completed task without its next occurrence (`recurrence_origin_id`
+  is unique — double clicks or reopen/complete cycles never duplicate it),
+  dated by the rule on calendar day keys in
   `APP_TIME_ZONE`, with status `TODO`, no time spent and fresh history; the
   completed occurrence keeps its time entries and history (`recurrence_spawned`).
 - **Progress** counts top-level tasks outside the trash (subtasks have no
@@ -372,11 +513,33 @@ The cockpit reads through the same `visibleTaskWhere` (plus “not in the trash�
   sends the value it saw for each changed field. If *that field* changed in the
   meantime the server answers `CONFLICT` with the current task instead of
   overwriting; edits to other fields go through.
+- **Structure lock** (`src/lib/tasks/structure.ts`): every write that changes
+  where a task lives — creation in a project or under a parent, adding to /
+  removing from a project, moving, changing parent, dependencies, deleting,
+  restoring and purging tasks or projects, duplicating, creating from a
+  template, next occurrence — runs in a transaction that first takes a
+  per-workspace advisory lock (`pg_advisory_xact_lock`), then **re-reads and
+  re-checks** what it depends on, then writes. Lock order is the same
+  everywhere: this lock, then rows (project, then tasks by id). Two such writes
+  of a workspace never interleave and cannot deadlock each other (two
+  simultaneous purges deadlocked in c580137). These transactions may last up
+  to 20 s (lock wait included). Interleavings are tested with checkpoints
+  (`tests/integration/interleave.ts`): one operation is paused between its
+  check and its write while the other starts — concurrent deletion of two
+  projects sharing a task, removal or creation during a project deletion,
+  purge during a restore, reverse dependencies, parent change during a subtask
+  creation.
 - **Real time**: mutations `pg_notify('nod_work', ids)`; each Node process keeps
   one LISTEN connection and fans out to SSE streams (`/api/tasks/stream`),
-  filtered by workspace. The message carries ids only; clients re-read through
-  the permission-checked routes. Views also refresh when the tab regains focus.
-- **Dependencies**: cycles and self-dependencies are refused. The timeline
+  filtered by workspace **and by what each subscriber can see**
+  (`realtime-filter.ts`, see *Permissions*). The message carries ids only;
+  clients re-read through the permission-checked routes. Views also refresh
+  when the tab regains focus.
+- **Tags**: the client sends the tags it saw; the server applies only the
+  difference to the current set, under a row lock — a late save never removes
+  a tag added meanwhile (by someone else or a rule).
+- **Dependencies**: cycles and self-dependencies are refused, the check and the
+  write being atomic under the structure lock. The timeline
   flags blocked tasks and date conflicts; dependants are shifted only when
   “Décaler les tâches dépendantes” is ticked.
 - **Recurrence**: computed on calendar day keys in `APP_TIME_ZONE` (DST-safe);
@@ -387,7 +550,13 @@ The cockpit reads through the same `visibleTaskWhere` (plus “not in the trash�
   recorded in `automation_runs` (success / skipped / error); `(rule_id,
   event_key)` is unique so one event never runs a rule twice; chains carry the
   rules already applied and a depth limit (3), so rules cannot loop. Changes made
-  by a rule appear in the task history with the rule id.
+  by a rule appear in the task history with the rule id. Rules act with the
+  rights of the person who saved them (see *Permissions*).
+- **Volume**: copying a project and restoring one write in batches (a few
+  queries whatever the number of tasks). Measured on the test database (1 000
+  → 8 000 tasks, 30 % with a subtask): duplication 1.5 s at 2 500 tasks and
+  4.4 s at 8 000; restoration 0.4 s / 1.7 s; purge 0.9 s / 8.0 s — c580137
+  failed the duplication of 2 500 tasks on Prisma's default 5 s limit.
 - **Due reminders**: see below.
 
 ## Scheduled due-date reminders
@@ -486,3 +655,11 @@ opportunities.
 - Notifications are in-app only (no e-mail transport).
 - The trash (tasks and projects) has no automatic purge.
 - A rule run interrupted by a crash is reported, not replayed.
+- Structure writes of a workspace are serialised: a very large purge (8 000
+  tasks: 8 s) delays other structural edits of the same workspace meanwhile; a
+  transaction longer than 20 s fails without writing anything.
+- A task made project-less by c580137 (removal then purge) cannot be detected
+  afterwards: its memberships are gone. Tasks left active in projects of the
+  trash only are protected (invisible) and handled by the purge.
+- A history line written before `20261015091000` whose cited task cannot be
+  identified with certainty keeps its label without the title.

@@ -1134,6 +1134,8 @@ const KIND_LABELS: Record<string, string> = {
   made_task: "a converti en tâche indépendante",
 };
 
+const CITING_KINDS = new Set(["dependency_added", "dependency_removed", "duplicated"]);
+
 function ActivityBlock({ items }: { items: ActivityItem[] }) {
   const users = useWork((s) => s.context?.users ?? []);
   if (items.length === 0) return <p className="text-[12px] text-muted">Aucun historique.</p>;
@@ -1148,7 +1150,9 @@ function ActivityBlock({ items }: { items: ActivityItem[] }) {
         } else {
           const label = KIND_LABELS[item.kind] ?? item.kind;
           const value = item.newValue ?? item.oldValue;
-          what = item.kind === "moved" ? `${label} : ${item.oldValue} → ${item.newValue}` : value ? `${label} « ${value} »` : label;
+          // Tâche citée que la personne ne peut pas lire : le serveur a retiré son titre.
+          const hidden = !value && CITING_KINDS.has(item.kind) ? `${label} (tâche non accessible)` : label;
+          what = item.kind === "moved" ? `${label} : ${item.oldValue} → ${item.newValue}` : value ? `${label} « ${value} »` : hidden;
         }
         return (
           <li key={item.id} className="flex gap-2 text-[12px]">

@@ -28,6 +28,8 @@ const HARDENING = "20261014090000_work_management_hardening";
 const RECONCILE = "20261014091000_work_management_legacy_reconcile";
 const PROJECT_TRASH = "20261014092000_project_trash";
 const PROJECT_TRASH_FK = "20261014093000_project_trash_constraints";
+const UNESTABLISHED_RESTORE = "20261015090000_legacy_reconcile_unestablished_restore";
+const ACTIVITY_REFERENCE = "20261015091000_task_activity_reference";
 const REVISED_V1 = readFileSync(path.join(process.cwd(), "tests/fixtures/migrations/20261013120000_work_management.revised-c199fdd.sql"), "utf8");
 const sql = (dir: string) => readFileSync(path.join(MIGRATIONS, dir, "migration.sql"), "utf8");
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -209,6 +211,8 @@ describe.each(["A", "B", "C"] as const)("mise à niveau depuis l'état %s", (sta
     await db.apply(RECONCILE);
     await db.apply(PROJECT_TRASH);
     await db.apply(PROJECT_TRASH_FK);
+    await db.apply(UNESTABLISHED_RESTORE);
+    await db.apply(ACTIVITY_REFERENCE);
   });
 
   it("conserve toutes les lignes et leurs valeurs (volumes, liens CRM, dates, journal)", async () => {
@@ -281,6 +285,8 @@ describe.each(["A", "B", "C"] as const)("mise à niveau depuis l'état %s", (sta
     await db.client.query(sql(RECONCILE));
     await db.client.query(sql(PROJECT_TRASH));
     await db.client.query(sql(PROJECT_TRASH_FK));
+    await db.client.query(sql(UNESTABLISHED_RESTORE));
+    await db.client.query(sql(ACTIVITY_REFERENCE));
     expect(await fullState(db.client)).toEqual(first);
   });
 
@@ -364,8 +370,10 @@ describe.each(["A", "B", "C"] as const)("mise à niveau depuis l'état %s", (sta
 
     it("le schéma réel est conforme au schéma reconstruit (aucune divergence)", () => {
       const diagnostic = check(db.name);
-      expect(diagnostic.code, diagnostic.out).toBe(0);
+      // Conforme, mais réconciliation à faire avant `db:deploy` : code 3.
+      expect(diagnostic.code, diagnostic.out).toBe(3);
       expect(diagnostic.out).toContain("Schéma : conforme aux");
+      expect(diagnostic.out).toContain("--reconcile");
     });
 
     it.each(ALTERATIONS)("refuse un nom correct mais une définition fausse : $what", async ({ breakSql, fixSql, expect: message }) => {
@@ -380,9 +388,11 @@ describe.each(["A", "B", "C"] as const)("mise à niveau depuis l'état %s", (sta
       expect(await recorded()).toBe(sha(REVISED_V1)); // empreinte inchangée
       expect(await business()).toBe(dataBefore); // aucune donnée métier modifiée
       const temp = await db.client.query(`SELECT count(*)::int AS n FROM pg_namespace WHERE nspname LIKE '\_nod\_check\_%'`);
-      expect(temp.rows[0].n).toBe(0); // schéma temporaire jamais conservé
+      expect(temp.rows[0].n).toBe(0); // rien n'est créé dans la base contrôlée
+      const shadows = await db.client.query(`SELECT count(*)::int AS n FROM pg_database WHERE datname LIKE 'nod\_check\_%'`);
+      expect(shadows.rows[0].n).toBe(0); // base de référence supprimée
       await db.client.query(fixSql);
-      expect(check(db.name).code).toBe(0);
+      expect(check(db.name).code).toBe(3);
     });
 
     it("refuse une migration inachevée ou une incohérence d'historique", async () => {
@@ -424,7 +434,7 @@ describe.each(["A", "B", "C"] as const)("mise à niveau depuis l'état %s", (sta
       await other.query("SELECT pg_advisory_unlock(72707369)");
       await other.end();
       const result = await pending;
-      expect(result.code, result.out).toBe(0);
+      expect(result.code, result.out).toBe(3); // état C : réconciliation à faire
       expect(result.finishedAt).toBeGreaterThanOrEqual(unlockedAt);
     });
   }
@@ -464,5 +474,191 @@ describe("contrôle d'une base jamais migrée", () => {
     const out = check(db.name);
     expect(out.out).toContain("État A");
     expect(out.out).toContain(`·  ${V1} — à appliquer`);
+  });
+});
+
+// ─── Revue c580137 : I6, m5, I7, I2 ─────────────────────────────────────────
+
+describe("contrôle de schéma : base de référence isolée (I6)", () => {
+  it("092000 appliquée, 093000 en attente : aucune fausse divergence", async () => {
+    const db = await openSchema(`mig_i6_${stamp}`);
+    opened.push(db);
+    for (const dir of dirs.filter((d) => d <= PROJECT_TRASH)) await db.apply(dir);
+    // Dans une base seule, 092000 crée ses deux clés. Ici, d'autres schémas de
+    // la base de test portent déjà ces noms (la garde historique les aurait
+    // sautées) : on les crée dans ce schéma comme 092000 l'aurait fait.
+    await db.client.query(sql(PROJECT_TRASH_FK));
+    const out = check(db.name);
+    expect(out.code, out.out).toBe(0);
+    expect(out.out).toContain("Schéma : conforme aux");
+    expect(out.out).not.toContain("en trop");
+    expect(out.out).toContain(`·  ${PROJECT_TRASH_FK} — à appliquer`);
+    expect(out.out).toContain("Migrations en attente : 3");
+  });
+
+  it("clés omises par la garde de 092000 : signalées comme créées par 093000 en attente, sans bloquer", async () => {
+    const db = await openSchema(`mig_i6b_${stamp}`);
+    opened.push(db);
+    for (const dir of dirs.filter((d) => d <= PROJECT_TRASH)) await db.apply(dir);
+    await db.client.query(`ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_deleted_with_project_id_fkey; ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_deleted_by_id_fkey`);
+    const out = check(db.name);
+    expect(out.code, out.out).toBe(0);
+    expect(out.out).toContain(`contrainte tasks.tasks_deleted_with_project_id_fkey : absent(e)`);
+    expect(out.out).toContain(`créée par ${PROJECT_TRASH_FK} (en attente)`);
+    // Après 093000 : conforme, plus rien à signaler.
+    await db.apply(PROJECT_TRASH_FK);
+    const after = check(db.name);
+    expect(after.code, after.out).toBe(0);
+    expect(after.out).not.toContain("absent");
+  });
+
+  it("SHADOW_DATABASE_URL : une base vide dédiée est utilisée et laissée vide ; une base non vide est refusée", async () => {
+    const db = await openSchema(`mig_i6c_${stamp}`);
+    opened.push(db);
+    for (const dir of dirs) await db.apply(dir);
+    const shadowName = `nod_shadow_${stamp}`;
+    await db.client.query(`CREATE DATABASE "${shadowName}"`);
+    const shadowUrl = url.replace(/\/[^/]+$/, `/${shadowName}`);
+    try {
+      const run = () => {
+        try {
+          return { code: 0, out: execFileSync("node", ["scripts/migration-check.mjs"], { env: { ...process.env, DATABASE_URL: `${url}?schema=${db.name}`, SHADOW_DATABASE_URL: shadowUrl }, encoding: "utf8", stdio: "pipe" }) };
+        } catch (error) {
+          const e = error as { status: number; stdout: string; stderr: string };
+          return { code: e.status, out: `${e.stdout}${e.stderr}` };
+        }
+      };
+      const ok = run();
+      expect(ok.code, ok.out).toBe(0);
+      expect(ok.out).toContain("Schéma : conforme aux");
+      const shadow = new Client({ connectionString: shadowUrl });
+      await shadow.connect();
+      expect((await shadow.query(`SELECT count(*)::int AS n FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public'`)).rows[0].n).toBe(0);
+      await shadow.query(`CREATE TABLE intrus (id int)`);
+      await shadow.end();
+      const refused = run();
+      expect(refused.code).toBe(2);
+      expect(refused.out).toContain("SHADOW_DATABASE_URL doit désigner une base vide");
+    } finally {
+      await db.client.query(`DROP DATABASE IF EXISTS "${shadowName}" WITH (FORCE)`);
+    }
+  });
+});
+
+describe("093000 et lignes orphelines : diagnostic préalable et reprise sans reset (m5)", () => {
+  it("liste les lignes, refuse de deviner, et la reprise documentée aboutit sans perte", async () => {
+    const db = await openSchema(`mig_m5_${stamp}`);
+    opened.push(db);
+    for (const dir of dirs.filter((d) => d <= PROJECT_TRASH)) await db.apply(dir);
+    // Base où la garde de 092000 a sauté les clés : des suppressions ont pu
+    // laisser des références vers des éléments disparus.
+    await db.client.query(`ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_deleted_with_project_id_fkey; ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_deleted_by_id_fkey`);
+    const ws = randomUUID();
+    const orphanTask = randomUUID();
+    const orphanProject = randomUUID();
+    const goneProject = randomUUID();
+    const goneUser = randomUUID();
+    await db.client.query(`
+      INSERT INTO workspaces (id, slug, name, updated_at) VALUES ('${ws}', 'm5', 'M5', now());
+      INSERT INTO projects (id, workspace_id, name, deleted_at, deleted_by_id, updated_at) VALUES ('${orphanProject}', '${ws}', 'Supprimé', now(), '${goneUser}', now());
+      INSERT INTO tasks (id, workspace_id, title, deleted_at, deleted_with_project_id, updated_at) VALUES ('${orphanTask}', '${ws}', 'Orpheline', now(), '${goneProject}', now());
+    `);
+
+    const before = check(db.name);
+    expect(before.code, before.out).toBe(3);
+    expect(before.out).toContain("tasks.deleted_with_project_id → projet inexistant : 1 ligne(s)");
+    expect(before.out).toContain(`${orphanTask} → ${goneProject}`);
+    expect(before.out).toContain("projects.deleted_by_id → utilisateur inexistant : 1 ligne(s)");
+
+    // Déploiement malgré tout : 093000 échoue, Prisma l'enregistre comme commencée.
+    await expect(db.client.query(sql(PROJECT_TRASH_FK))).rejects.toThrow(/foreign key/);
+    await db.client.query(`INSERT INTO "_prisma_migrations" (id, checksum, migration_name, started_at, logs) VALUES ($1, $2, $3, now(), 'échec')`, [randomUUID(), sha(sql(PROJECT_TRASH_FK)), PROJECT_TRASH_FK]);
+    const failed = check(db.name);
+    expect(failed.code, failed.out).toBe(1);
+    expect(failed.out).toContain(`${PROJECT_TRASH_FK} a échoué`);
+    expect(failed.out).toContain(`npx prisma migrate resolve --rolled-back ${PROJECT_TRASH_FK}`);
+    // Rien n'a été modifié par le contrôle.
+    expect((await db.client.query(`SELECT deleted_with_project_id FROM tasks WHERE id = $1`, [orphanTask])).rows[0].deleted_with_project_id).toBe(goneProject);
+
+    // Reprise documentée : les requêtes affichées, puis `migrate resolve --rolled-back`, puis le déploiement.
+    const fixes = failed.out.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("UPDATE "));
+    expect(fixes).toHaveLength(2);
+    for (const fix of fixes) await db.client.query(fix);
+    await db.client.query(`UPDATE "_prisma_migrations" SET rolled_back_at = now() WHERE migration_name = $1 AND finished_at IS NULL`, [PROJECT_TRASH_FK]);
+    for (const dir of dirs.filter((d) => d >= PROJECT_TRASH_FK)) await db.apply(dir);
+    const after = check(db.name);
+    expect(after.code, after.out).toBe(0);
+    expect(after.out).toContain("Schéma : conforme aux");
+    // Les lignes sont conservées ; seule la référence disparue est vide.
+    expect((await db.client.query(`SELECT title, deleted_with_project_id FROM tasks WHERE id = $1`, [orphanTask])).rows[0]).toEqual({ title: "Orpheline", deleted_with_project_id: null });
+    expect((await db.client.query(`SELECT name, deleted_by_id FROM projects WHERE id = $1`, [orphanProject])).rows[0]).toEqual({ name: "Supprimé", deleted_by_id: null });
+  });
+});
+
+describe("application sans historique Prisma : aucune affectation retirée sans origine établie (I7)", () => {
+  it("091000 retirait les valeurs d'une sous-tâche copiée ; 20261015090000 les remet et les signale", async () => {
+    const db = await openSchema(`mig_i7_${stamp}`);
+    opened.push(db);
+    // Application manuelle : aucune ligne `_prisma_migrations`.
+    await db.client.query(`DROP TABLE "_prisma_migrations"`);
+    for (const dir of dirs.filter((d) => d < V1)) await db.client.query(sql(dir));
+    await seedLegacy(db.client);
+    await db.client.query(sql(V1));
+    await useV1(db.client);
+    // Sous-tâche copiée par la V1.0 (duplication de T7) : valeurs légitimes, sans historique.
+    const copied = "50000000-0000-4000-8000-0000000000ff";
+    await db.client.query(`INSERT INTO tasks (id, workspace_id, title, parent_id, assignee_id, created_by_id, updated_at) VALUES ('${copied}', '${ids.w1}', 'Copie', '${ids.t7}', '${ids.bob}', '${ids.alice}', now())`);
+    await db.client.query(sql(HARDENING));
+    await db.client.query(sql(RECONCILE));
+    // Comportement de 091000 seule (constat I7) : valeurs retirées.
+    expect((await people(db.client))[copied]).toEqual({ assignee: null, creator: null });
+
+    for (const dir of [PROJECT_TRASH, PROJECT_TRASH_FK, UNESTABLISHED_RESTORE, ACTIVITY_REFERENCE]) await db.client.query(sql(dir));
+    const p = await people(db.client);
+    expect(p[copied]).toEqual({ assignee: ids.bob, creator: ids.alice });
+    expect(await notes(db.client, copied)).toEqual([`ASSIGNEE_ORIGIN_UNKNOWN:${ids.bob}`, `CREATOR_ORIGIN_UNKNOWN:${ids.alice}`]);
+    // Tâche historique au responsable déduit : sans date de référence, l'origine
+    // n'est pas établie — valeur conservée et signalée, jamais retirée.
+    expect(p[ids.t1].assignee).toBe(ids.alice);
+    expect(await notes(db.client, ids.t1)).toContain(`ASSIGNEE_ORIGIN_UNKNOWN:${ids.alice}`);
+    expect(await notes(db.client, ids.t1)).not.toContain("ASSIGNEE_UNKNOWN");
+    // Les affectations faites en V1.0 restent.
+    expect(p[ids.t9].assignee).toBe(ids.bob);
+
+    // Idempotente.
+    const first = await fullState(db.client);
+    await db.client.query(sql(UNESTABLISHED_RESTORE));
+    expect(await fullState(db.client)).toEqual(first);
+  });
+});
+
+describe("références d'historique (20261015091000, I2)", () => {
+  it("retrouve la tâche citée quand elle est certaine, sinon laisse la référence vide", async () => {
+    const db = await openSchema(`mig_i2_${stamp}`);
+    opened.push(db);
+    for (const dir of dirs.filter((d) => d < ACTIVITY_REFERENCE)) await db.apply(dir);
+    const ws = randomUUID();
+    const [a, b, c, d, e] = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+    await db.client.query(`
+      INSERT INTO workspaces (id, slug, name, updated_at) VALUES ('${ws}', 'i2', 'I2', now());
+      INSERT INTO tasks (id, workspace_id, title, updated_at) VALUES
+        ('${a}', '${ws}', 'A', now()), ('${b}', '${ws}', 'Unique', now()),
+        ('${c}', '${ws}', 'Doublon', now()), ('${d}', '${ws}', 'Doublon', now()), ('${e}', '${ws}', 'Liée', now());
+      INSERT INTO task_dependencies (blocking_id, blocked_id, workspace_id) VALUES ('${c}', '${a}', '${ws}');
+      INSERT INTO task_activities (id, workspace_id, task_id, kind, field, new_value, old_value) VALUES
+        ('${randomUUID()}', '${ws}', '${a}', 'dependency_added', 'Bloquée par', 'Unique', NULL),
+        ('${randomUUID()}', '${ws}', '${a}', 'dependency_added', 'Bloquée par', 'Doublon', NULL),
+        ('${randomUUID()}', '${ws}', '${a}', 'dependency_removed', 'Bloquée par', NULL, 'Introuvable'),
+        ('${randomUUID()}', '${ws}', '${e}', 'duplicated', NULL, 'Doublon', NULL);
+    `);
+    await db.apply(ACTIVITY_REFERENCE);
+    const refs = Object.fromEntries(
+      (await db.client.query(`SELECT task_id, kind, coalesce(new_value, old_value) AS v, ref_task_id FROM task_activities`)).rows.map((r) => [`${r.kind}:${r.v}`, r.ref_task_id]),
+    );
+    expect(refs["dependency_added:Unique"]).toBe(b); // seule tâche de ce titre
+    expect(refs["dependency_added:Doublon"]).toBe(c); // ambigu dans l'espace, certain parmi les dépendances
+    expect(refs["dependency_removed:Introuvable"]).toBeNull();
+    expect(refs["duplicated:Doublon"]).toBeNull(); // ambigu : laissé vide, masqué à la lecture
+    expect(await db.client.query(`SELECT count(*)::int AS n FROM task_activities`).then((r) => r.rows[0].n)).toBe(4); // rien supprimé
   });
 });

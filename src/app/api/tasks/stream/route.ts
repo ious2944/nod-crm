@@ -1,13 +1,14 @@
 import { getCurrentUser } from "@/lib/auth/dal";
 import { subscribe, type ChangeMessage } from "@/lib/tasks/realtime";
+import { changeFor } from "@/lib/tasks/realtime-filter";
 
 /**
  * Flux temps réel (Server-Sent Events) des changements de l'espace.
  *
- * Le message ne contient que des identifiants : le client relit ce qui le
- * concerne via les routes GET, qui appliquent les permissions. Les
- * identifiants de notifications sont filtrés pour ne viser que l'utilisateur
- * connecté.
+ * Le message ne contient que des identifiants, **filtrés pour la personne
+ * connectée** (`changeFor`) : jamais l'identifiant d'une tâche ou d'un projet
+ * qu'elle ne peut pas voir. Le client relit ensuite ce qui le concerne via les
+ * routes GET, qui appliquent les permissions.
  */
 export async function GET(request: Request): Promise<Response> {
   const user = await getCurrentUser();
@@ -27,14 +28,16 @@ export async function GET(request: Request): Promise<Response> {
       };
       send("ready", { ok: true });
 
+      const actor = { id: user.id, workspaceId: user.workspaceId };
       const listener = (message: ChangeMessage) => {
-        send("change", {
-          kind: message.k,
-          actorId: message.a,
-          taskIds: message.t ?? [],
-          projectIds: message.p ?? [],
-          forMe: (message.u ?? []).includes(user.id),
-        });
+        void changeFor(actor, message)
+          .then((event) => {
+            if (event) send("change", event);
+          })
+          .catch(() => {
+            // Filtrage impossible (base indisponible) : rien n'est transmis ;
+            // le client se resynchronise au retour du focus.
+          });
       };
       let unsubscribe: () => void = () => {};
       try {

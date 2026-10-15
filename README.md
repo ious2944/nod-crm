@@ -68,7 +68,7 @@ An Asana-style work-management module built on the **same `tasks` table** as bef
 - **Views on the same data**: Overview, List (compact, collapsible sections, configurable and resizable columns, inline editing, expandable subtasks, quick add, multi-select bulk actions, context menus, keyboard), Board (by section or status), Calendar (month/week, drag to reschedule), Timeline/Gantt (bars, milestones, dependency arrows, move/resize, conflicts flagged, cascading shift only when explicitly enabled) and Dashboard.
 - **Tasks**: rich description, assignee, collaborators and followers, start/due date and optional time, status (À faire / En cours / En attente / Terminé), priority, tags, custom fields, multi-project membership, subtasks, blocked-by / blocking dependencies (cycles refused), milestones, recurrence, estimate and time tracking, attachments, comments with @mentions and reactions, change history, approval workflow, direct link `/tasks/t/<id>`.
 - **Collaboration**: in-app notifications with read/unread/archive and per-type preferences; real-time refresh of other users' views (PostgreSQL LISTEN/NOTIFY → SSE); concurrent edits are detected per field instead of silently overwritten.
-- **Automation**: trigger → conditions → actions rules, persisted, traced, idempotent per event and protected against loops; task and project templates; internal request forms; CSV import/export; multi-project portfolio; workload per assignee over a chosen period against each person's weekly capacity; scheduled due-date reminders.
+- **Automation**: trigger → conditions → actions rules, persisted, traced, idempotent per event and protected against loops, acting only with the current rights of the person who saved them; task and project templates; internal request forms; CSV import/export; multi-project portfolio; workload per assignee over a chosen period against each person's weekly capacity; scheduled due-date reminders.
 - **CRM integration**: tasks and projects link to a contact, organisation or opportunity; their sheets show the linked work and offer quick creation.
 
 See [docs/tasks.md](docs/tasks.md).
@@ -223,7 +223,7 @@ The seed refuses to run when `NODE_ENV=production` unless `ALLOW_DEMO_SEED=1` is
 
 The `migrate` service runs `prisma migrate deploy` before the application starts on every `docker compose up`. There is nothing to run by hand.
 
-Upgrading a database that ran a pre-release build of the V1.0 work-management branch: run `node scripts/migration-check.mjs` first (read-only). It tells which of three states the database is in, verifies the schema structurally against the applied migrations, and, for the only state that needs it, reconciles the migration history **without a reset and without data loss**. See [docs/tasks.md](docs/tasks.md#upgrade-path-by-initial-state).
+Upgrading a database that ran a pre-release build of the V1.0 work-management branch: run `node scripts/migration-check.mjs` first (read-only). It tells which of three states the database is in, verifies the schema structurally against the applied migrations (rebuilt in an isolated reference database: the role needs `CREATEDB`, or set `SHADOW_DATABASE_URL` to an empty database), lists rows that would make a pending migration fail, and, for the only state that needs it, reconciles the migration history **without a reset and without data loss**. Exit code 0: deploy; 3: an action is required first; 1: do not deploy; 2: the check could not run. See [docs/tasks.md](docs/tasks.md#upgrade-path-by-initial-state).
 
 ---
 

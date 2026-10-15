@@ -14,6 +14,14 @@ import {
   type RuleAction,
   type TaskEvent,
 } from "./automation-model";
+import {
+  canEditProjectContent,
+  canReadProject,
+  evaluateTaskAccess,
+  projectAccessSelect,
+  taskAccessSelect,
+  type Actor,
+} from "./access";
 import { notify } from "./notify";
 import {
   addComment,
@@ -42,12 +50,19 @@ import {
  *   fois dans la même chaîne, et la profondeur est bornée
  *   (`MAX_AUTOMATION_DEPTH`).
  *
- * Les règles agissent avec les droits du projet auquel elles appartiennent :
- * une règle de projet ne touche que les tâches de ce projet ; une règle
- * d'espace (sans projet) que les tâches de l'espace.
+ * Droits : une règle agit avec les droits **actuels** de la personne qui l'a
+ * enregistrée en dernier (création ou modification, `created_by_id`), jamais
+ * avec plus :
+ *   - elle ne s'exécute que sur les tâches que cette personne peut modifier ;
+ *     chaque action est ensuite contrôlée comme une action manuelle de cette
+ *     personne (réaffecter demande de pouvoir gérer la tâche, etc.) ;
+ *   - une règle de projet ne touche que les tâches de ce projet, et seulement
+ *     tant que cette personne peut modifier le contenu du projet ;
+ *   - si cette personne est désactivée ou supprimée, la règle ne fait rien.
+ * Une tâche que la personne ne peut pas modifier est ignorée sans laisser de
+ * trace d'exécution (le journal des règles ne cite donc que des tâches qu'elle
+ * pouvait modifier ; il est en plus filtré à la lecture).
  */
-
-const SYSTEM_ACTOR_ID = "00000000-0000-0000-0000-000000000000";
 
 interface RuleRow {
   id: string;
@@ -129,11 +144,11 @@ async function executeAction(ruleCtx: MutationContext, rule: RuleRow, action: Ru
       await moveTask(ruleCtx, { taskId, projectId: section.projectId, sectionId: action.sectionId });
       return;
     }
-    case "add_tag": {
-      const item = await getTaskItem(ruleCtx, taskId);
-      if (!item.tagIds.includes(action.tagId)) await setTaskTags(ruleCtx, taskId, [...item.tagIds, action.tagId]);
+    case "add_tag":
+      // Ajout seul (différence appliquée à l'état courant, sous verrou) : ne
+      // retire jamais un tag posé entre-temps.
+      await setTaskTags(ruleCtx, taskId, [action.tagId], { base: [] });
       return;
-    }
     case "add_comment":
       await addComment(ruleCtx, taskId, `🤖 ${action.body}`);
       return;
@@ -198,10 +213,41 @@ async function executeAction(ruleCtx: MutationContext, rule: RuleRow, action: Ru
   }
 }
 
+/**
+ * La personne au nom de qui la règle s'exécute, si elle peut encore agir :
+ * active, dans l'espace, et (règle de projet) capable de modifier le projet.
+ */
+async function ruleActor(rule: RuleRow): Promise<Actor | null> {
+  if (!rule.createdById) return null;
+  const user = await prisma.user.findFirst({
+    where: { id: rule.createdById, workspaceId: rule.workspaceId, isActive: true },
+    select: { id: true },
+  });
+  if (!user) return null;
+  const actor = { id: user.id, workspaceId: rule.workspaceId };
+  if (rule.projectId) {
+    const project = await prisma.project.findFirst({
+      where: { id: rule.projectId, workspaceId: rule.workspaceId },
+      select: projectAccessSelect(actor),
+    });
+    if (!project || !canReadProject(project) || !canEditProjectContent(project, actor)) return null;
+  }
+  return actor;
+}
+
 async function runRule(rule: RuleRow, event: TaskEvent, eventKey: string) {
   const definition = parseRule(rule);
   if (!definition) return;
   if (!triggerMatches({ trigger: definition.trigger, triggerConfig: definition.triggerConfig }, event)) return;
+
+  const actor = await ruleActor(rule);
+  if (!actor) return;
+  // Seulement sur une tâche que cette personne peut modifier.
+  const access = await prisma.task.findFirst({
+    where: { id: event.taskId, workspaceId: rule.workspaceId, deletedAt: null },
+    select: taskAccessSelect(actor),
+  });
+  if (!access || !evaluateTaskAccess(access, actor).canEdit) return;
 
   // Une règle de projet ne s'applique qu'aux tâches de ce projet.
   if (rule.projectId) {
@@ -228,7 +274,7 @@ async function runRule(rule: RuleRow, event: TaskEvent, eventKey: string) {
   }
 
   const ruleCtx: MutationContext = {
-    actor: { id: rule.createdById ?? SYSTEM_ACTOR_ID, workspaceId: rule.workspaceId },
+    actor,
     automation: { ruleId: rule.id, depth: event.depth, chain: event.chain },
   };
 
