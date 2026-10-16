@@ -151,4 +151,27 @@ describe("duplications et modèles", () => {
     const row = await prisma.task.findUniqueOrThrow({ where: { id: copy.id }, include: { projects: true } });
     expect(row.projects.map((m) => m.projectId)).toEqual([W]);
   });
+
+  it("N3 : dupliquer une sous-tâche garde les champs des projets de sa parente lisibles, jamais ceux d'un projet privé inaccessible", async () => {
+    // La parente est dans W (ouvert) et dans P (privé, Bob n'en est pas membre).
+    const wField = ok(await saveCustomFieldAction(null, { name: "Note W", type: "TEXT" }, W));
+    const pField = ok(await saveCustomFieldAction(null, { name: "Budget privé", type: "TEXT" }, P));
+    const parent = ok(await createTaskAction({ title: "Parente", projectId: W }));
+    ok(await addTaskToProjectAction(parent.id, P, null));
+    const sub = ok(await createTaskAction({ title: "Sous-tâche", parentId: parent.id }));
+    ok(await setCustomFieldValueAction(sub.id, wField, "visible"));
+    ok(await setCustomFieldValueAction(sub.id, pField, "100 k€"));
+
+    // Alice (membre de P) : les deux valeurs sont copiées.
+    const copyAlice = ok(await duplicateTaskAction(sub.id, true));
+    const aliceValues = await prisma.taskCustomFieldValue.findMany({ where: { taskId: copyAlice.id }, select: { fieldId: true, textValue: true } });
+    expect(aliceValues.map((v) => v.fieldId).sort()).toEqual([wField, pField].sort());
+
+    // Bob (éditeur de W par l'espace, sans accès à P) : seulement le champ de W.
+    await signIn(bob);
+    const copyBob = ok(await duplicateTaskAction(sub.id, true));
+    const bobValues = await prisma.taskCustomFieldValue.findMany({ where: { taskId: copyBob.id }, select: { fieldId: true, textValue: true } });
+    expect(bobValues).toEqual([{ fieldId: wField, textValue: "visible" }]);
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: copyBob.id } })).parentId).toBe(parent.id);
+  });
 });

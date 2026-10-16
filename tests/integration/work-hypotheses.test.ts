@@ -11,6 +11,7 @@ import {
   updateTaskAction,
 } from "@/app/(app)/tasks/work-actions";
 import { prisma } from "@/lib/prisma";
+import { STRUCTURE_BUSY_MESSAGE } from "@/lib/tasks/structure";
 import { setTestHook } from "@/lib/tasks/test-hooks";
 import type { ActionResult } from "@/lib/tasks/types";
 
@@ -83,7 +84,9 @@ describe("hypothèses : récurrence, purges simultanées, projet volumineux", ()
       ok(await deleteProjectAction(Q));
       const [pp, pq] = [ok(await previewProjectPurgeAction(P)), ok(await previewProjectPurgeAction(Q))];
       const results = await Promise.all([purgeProjectAction(P, pp.token), purgeProjectAction(Q, pq.token)]);
-      for (const r of results) outcomes.push(r.ok ? r.data.status : `erreur:${r.error}`);
+      // Le verrou de structure est pris sans attendre : une purge qui le trouve
+      // tenu est refusée (« opération en cours »), sans rien écrire.
+      for (const r of results) outcomes.push(r.ok ? r.data.status : r.error === STRUCTURE_BUSY_MESSAGE ? "occupé" : `erreur:${r.error}`);
       // Cohérence : plus aucune des tâches ne reste liée à un projet effacé, aucune n'est libre.
       const remaining = await prisma.task.findMany({ where: { id: { in: ids } }, include: { projects: true } });
       for (const t of remaining) expect(t.deletedAt === null && t.projects.length === 0).toBe(false);

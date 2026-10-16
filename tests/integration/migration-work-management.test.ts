@@ -30,6 +30,7 @@ const PROJECT_TRASH = "20261014092000_project_trash";
 const PROJECT_TRASH_FK = "20261014093000_project_trash_constraints";
 const UNESTABLISHED_RESTORE = "20261015090000_legacy_reconcile_unestablished_restore";
 const ACTIVITY_REFERENCE = "20261015091000_task_activity_reference";
+const RESTORE_EXPLICIT = "20261016090000_legacy_restore_explicit_changes";
 const REVISED_V1 = readFileSync(path.join(process.cwd(), "tests/fixtures/migrations/20261013120000_work_management.revised-c199fdd.sql"), "utf8");
 const sql = (dir: string) => readFileSync(path.join(MIGRATIONS, dir, "migration.sql"), "utf8");
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -213,6 +214,7 @@ describe.each(["A", "B", "C"] as const)("mise à niveau depuis l'état %s", (sta
     await db.apply(PROJECT_TRASH_FK);
     await db.apply(UNESTABLISHED_RESTORE);
     await db.apply(ACTIVITY_REFERENCE);
+    await db.apply(RESTORE_EXPLICIT);
   });
 
   it("conserve toutes les lignes et leurs valeurs (volumes, liens CRM, dates, journal)", async () => {
@@ -287,6 +289,7 @@ describe.each(["A", "B", "C"] as const)("mise à niveau depuis l'état %s", (sta
     await db.client.query(sql(PROJECT_TRASH_FK));
     await db.client.query(sql(UNESTABLISHED_RESTORE));
     await db.client.query(sql(ACTIVITY_REFERENCE));
+    await db.client.query(sql(RESTORE_EXPLICIT));
     expect(await fullState(db.client)).toEqual(first);
   });
 
@@ -493,7 +496,7 @@ describe("contrôle de schéma : base de référence isolée (I6)", () => {
     expect(out.out).toContain("Schéma : conforme aux");
     expect(out.out).not.toContain("en trop");
     expect(out.out).toContain(`·  ${PROJECT_TRASH_FK} — à appliquer`);
-    expect(out.out).toContain("Migrations en attente : 3");
+    expect(out.out).toContain("Migrations en attente : 4");
   });
 
   it("clés omises par la garde de 092000 : signalées comme créées par 093000 en attente, sans bloquer", async () => {
@@ -613,7 +616,7 @@ describe("application sans historique Prisma : aucune affectation retirée sans 
     // Comportement de 091000 seule (constat I7) : valeurs retirées.
     expect((await people(db.client))[copied]).toEqual({ assignee: null, creator: null });
 
-    for (const dir of [PROJECT_TRASH, PROJECT_TRASH_FK, UNESTABLISHED_RESTORE, ACTIVITY_REFERENCE]) await db.client.query(sql(dir));
+    for (const dir of [PROJECT_TRASH, PROJECT_TRASH_FK, UNESTABLISHED_RESTORE, ACTIVITY_REFERENCE, RESTORE_EXPLICIT]) await db.client.query(sql(dir));
     const p = await people(db.client);
     expect(p[copied]).toEqual({ assignee: ids.bob, creator: ids.alice });
     expect(await notes(db.client, copied)).toEqual([`ASSIGNEE_ORIGIN_UNKNOWN:${ids.bob}`, `CREATOR_ORIGIN_UNKNOWN:${ids.alice}`]);
@@ -628,7 +631,76 @@ describe("application sans historique Prisma : aucune affectation retirée sans 
     // Idempotente.
     const first = await fullState(db.client);
     await db.client.query(sql(UNESTABLISHED_RESTORE));
+    await db.client.query(sql(RESTORE_EXPLICIT));
     expect(await fullState(db.client)).toEqual(first);
+  });
+
+  /**
+   * N1 : retirée par 091000 → affectée à Bob → retrait volontaire → réparation.
+   * Les deux ordres d'application sont couverts : 20261015090000 déjà passée
+   * (elle a restauré à tort, 20261016090000 revient dessus), ou appliquée dans
+   * le même déploiement que 20261016090000.
+   */
+  it.each([
+    ["réparation et correctif dans le même déploiement", false],
+    ["20261015090000 déjà appliquée, correctif ensuite", true],
+  ] as const)("N1 : retirée par 091000 → affectée à Bob → retrait volontaire → réparation : reste non affectée (%s)", async (_label, separately) => {
+    const db = await openSchema(`mig_n1_${separately ? "b" : "a"}_${stamp}`);
+    opened.push(db);
+    // Application manuelle (sans historique Prisma) : 091000 ne peut pas dater la V1.0.
+    await db.client.query(`DROP TABLE "_prisma_migrations"`);
+    for (const dir of dirs.filter((d) => d < V1)) await db.client.query(sql(dir));
+    await seedLegacy(db.client);
+    for (const dir of [V1, HARDENING, RECONCILE, PROJECT_TRASH, PROJECT_TRASH_FK]) await db.client.query(sql(dir));
+    // 091000 a retiré les valeurs déduites : T1 (alice, d'après l'audit) et T8 (frank).
+    const p0 = await people(db.client);
+    expect(p0[ids.t1].assignee).toBeNull();
+    expect(p0[ids.t8]).toEqual({ assignee: null, creator: null });
+    expect(await notes(db.client, ids.t1)).toContain(`ASSIGNEE_INFERRED_REVERTED:${ids.alice}`);
+    // V1.0 utilisée : T1 affectée à Bob, puis affectation retirée volontairement.
+    await db.client.query(`
+      INSERT INTO task_activities (id, workspace_id, task_id, actor_id, kind, field, old_value, new_value, created_at) VALUES
+        (gen_random_uuid(), '${ids.w1}', '${ids.t1}', '${ids.alice}', 'field', 'Responsable', NULL, 'bob', now() - interval '2 minutes'),
+        (gen_random_uuid(), '${ids.w1}', '${ids.t1}', '${ids.alice}', 'field', 'Responsable', 'bob', NULL, now() - interval '1 minute');`);
+    if (separately) {
+      await db.client.query(sql(UNESTABLISHED_RESTORE));
+      // Comportement de 20261015090000 seule (constat N1) : alice rétablie à tort.
+      expect((await people(db.client))[ids.t1].assignee).toBe(ids.alice);
+      await db.client.query(sql(ACTIVITY_REFERENCE));
+      await db.client.query(sql(RESTORE_EXPLICIT));
+    } else {
+      for (const dir of [UNESTABLISHED_RESTORE, ACTIVITY_REFERENCE, RESTORE_EXPLICIT]) await db.client.query(sql(dir));
+    }
+    const p = await people(db.client);
+    expect(p[ids.t1].assignee).toBeNull(); // le retrait volontaire est respecté
+    expect(await notes(db.client, ids.t1)).toContain(`ASSIGNEE_RESTORE_UNDONE:${ids.alice}`);
+    expect(await notes(db.client, ids.t1)).not.toContain(`ASSIGNEE_ORIGIN_UNKNOWN:${ids.alice}`);
+    // Restauration simple (aucune modification explicite depuis) : conservée et signalée.
+    expect(p[ids.t8]).toEqual({ assignee: ids.frank, creator: ids.frank });
+    expect(await notes(db.client, ids.t8)).toEqual(expect.arrayContaining([`ASSIGNEE_ORIGIN_UNKNOWN:${ids.frank}`, `CREATOR_ORIGIN_UNKNOWN:${ids.frank}`]));
+    // Idempotente.
+    const first = await fullState(db.client);
+    await db.client.query(sql(UNESTABLISHED_RESTORE));
+    await db.client.query(sql(RESTORE_EXPLICIT));
+    expect(await fullState(db.client)).toEqual(first);
+  });
+
+  it("une affectation choisie à nouveau après la restauration est conservée", async () => {
+    const db = await openSchema(`mig_n1_c_${stamp}`);
+    opened.push(db);
+    await db.client.query(`DROP TABLE "_prisma_migrations"`);
+    for (const dir of dirs.filter((d) => d < V1)) await db.client.query(sql(dir));
+    await seedLegacy(db.client);
+    for (const dir of [V1, HARDENING, RECONCILE, PROJECT_TRASH, PROJECT_TRASH_FK]) await db.client.query(sql(dir));
+    const t1 = ids.t1;
+    await db.client.query(`INSERT INTO task_activities (id, workspace_id, task_id, actor_id, kind, field, old_value, new_value, created_at) VALUES (gen_random_uuid(), '${ids.w1}', '${t1}', '${ids.alice}', 'field', 'Responsable', NULL, 'bob', now() - interval '1 hour'), (gen_random_uuid(), '${ids.w1}', '${t1}', '${ids.alice}', 'field', 'Responsable', 'bob', NULL, now() - interval '30 minutes')`);
+    await db.client.query(sql(UNESTABLISHED_RESTORE));
+    // Après la restauration, quelqu'un choisit explicitement la même personne.
+    await db.client.query(`INSERT INTO task_activities (id, workspace_id, task_id, actor_id, kind, field, old_value, new_value, created_at) VALUES (gen_random_uuid(), '${ids.w1}', '${t1}', '${ids.alice}', 'field', 'Responsable', NULL, 'alice', now() + interval '1 second')`);
+    await db.client.query(sql(ACTIVITY_REFERENCE));
+    await db.client.query(sql(RESTORE_EXPLICIT));
+    expect((await people(db.client))[t1].assignee).toBe(ids.alice);
+    expect(await notes(db.client, t1)).not.toContain(`ASSIGNEE_RESTORE_UNDONE:${ids.alice}`);
   });
 });
 

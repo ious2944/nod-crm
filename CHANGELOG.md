@@ -139,6 +139,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the procedure. It lists orphan rows that would make `20261014093000` fail,
   with a recovery without reset or deletion; its messages and exit codes
   (0/1/2/3) match what it found; waiting on Prisma's lock is bounded.
+- Counter-review of c9cefbf:
+  - `20261015090000` could put back an assignment that had been removed on
+    purpose after `20261014091000`; the new migration `20261016090000` undoes
+    such restorations (explicit change before, none after) and flags them
+    `*_RESTORE_UNDONE`; `20261015090000` is unchanged;
+  - the workspace structure lock is taken without waiting
+    (`pg_try_advisory_xact_lock`, two short retries in new transactions,
+    then « Une opération est déjà en cours. Réessayez dans quelques
+    instants. »): waiting operations no longer hold pool connections nor
+    stall other workspaces; documented delays corrected;
+  - duplicating a subtask keeps the values of fields owned by its parent's
+    readable active projects (it dropped them).
 - The `e2e/run.mjs` follow-up filter and logout checks used obsolete selectors
   (`?f=all`, exact `/login` URL) and failed on `main` as well; they now check
   the active link and the `/login` path. Its tasks section targets the V1.0
@@ -167,6 +179,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and flagged `*_ORIGIN_UNKNOWN`.
 - `20261015091000_task_activity_reference` — additive:
   `task_activities.ref_task_id`, backfilled only when certain.
+- `20261016090000_legacy_restore_explicit_changes` — corrective, idempotent:
+  undoes restorations of `20261015090000` contradicted by an earlier explicit
+  change (an assignment removed on purpose stays empty).
 - Upgrade paths (never applied / first version / revised version) and the
   reconciliation procedure are documented in `docs/tasks.md`; no reset is
   needed in any state.

@@ -139,10 +139,23 @@ it. Deleted tasks keep their row (`deleted_at`, `deleted_by_id`).
    certain (the blocked task's current dependencies, then a unique exact title
    in the workspace); otherwise it stays empty and the cited title is masked.
    No line is deleted.
+8. `20261016090000_legacy_restore_explicit_changes` — corrective, idempotent.
+   Migration 6 put a value back whenever the field was empty, but an empty
+   field can be a **choice**: someone may have assigned the task and then
+   removed the assignment between migrations 3 and 6 (`Responsable` history
+   lines). This migration undoes a restoration of migration 6 only when the
+   current value is still exactly the restored one, an explicit change of the
+   field precedes the restoration and none follows it (otherwise the current
+   value is a recent choice and is kept). The field becomes empty again, as the
+   person left it, noted `ASSIGNEE_RESTORE_UNDONE` (the discarded value in
+   `detail`). Creators cannot be edited in V1.0; the same rule applies to any
+   `Créateur` history line. When in doubt nothing is changed. Migration 6
+   itself is unchanged.
 
 No step deletes business data. The only values rewritten are the inferred
 assignee/creator values of migration 3 (each recorded with its previous value
-and, without an established origin, put back by migration 6) and, on
+and, without an established origin, put back by migration 6 unless an
+explicit change contradicts it — migration 8) and, on
 explicit human action, the orphan references of *Orphan rows*.
 
 #### Upgrade path by initial state
@@ -409,7 +422,9 @@ its deleted subtasks.
 **Copies.** Duplicating a task requires managing it; the copy joins only the
 active projects the person can edit (deleted, read-only and unreadable projects
 are skipped, with the values of their own custom fields) and never becomes
-project-less. Duplicating a project does not modify the source, so reading it
+project-less. A duplicated subtask keeps its parent, so it keeps the values of
+fields owned by the parent's active projects that the person can read — never
+those of a private project they cannot read. Duplicating a project does not modify the source, so reading it
 is enough — a **commenter may duplicate** a project they can read, and becomes
 owner of the copy, which contains only what they can read: never a task or
 subtask from the trash, nor values of fields owned by another project. Copied
@@ -522,13 +537,24 @@ The cockpit reads through the same `visibleTaskWhere` (plus “not in the trash�
   re-checks** what it depends on, then writes. Lock order is the same
   everywhere: this lock, then rows (project, then tasks by id). Two such writes
   of a workspace never interleave and cannot deadlock each other (two
-  simultaneous purges deadlocked in c580137). These transactions may last up
-  to 20 s (lock wait included). Interleavings are tested with checkpoints
+  simultaneous purges deadlocked in c580137).
+  The lock is taken **without waiting** (`pg_try_advisory_xact_lock`): if
+  another operation of the workspace holds it, the transaction ends at once,
+  so no pool connection is kept while waiting; two short retries, each in a
+  new transaction (50 ms, then 150 ms — about 0.2 s in all), absorb ordinary
+  overlaps; then the operation is refused with « Une opération est déjà en
+  cours. Réessayez dans quelques instants. », having written nothing. Nothing
+  retries further automatically. The holder keeps the lock for the time of its
+  own work (a purge of 8 000 tasks: about 8 s); its transaction is cancelled
+  if it exceeds 20 s between two queries, but a query in progress is not
+  interrupted. Other workspaces are never affected (measured: a burst of 25
+  refused operations, a read in another workspace under 500 ms). Interleavings are tested with checkpoints
   (`tests/integration/interleave.ts`): one operation is paused between its
   check and its write while the other starts — concurrent deletion of two
-  projects sharing a task, removal or creation during a project deletion,
-  purge during a restore, reverse dependencies, parent change during a subtask
-  creation.
+  projects sharing a task, removal, creation or attachment during a project
+  deletion, purge during a restore and the reverse, reverse dependencies,
+  parent change during a subtask creation: the second operation is refused
+  without writing, then replayed and decided on the real state.
 - **Real time**: mutations `pg_notify('nod_work', ids)`; each Node process keeps
   one LISTEN connection and fans out to SSE streams (`/api/tasks/stream`),
   filtered by workspace **and by what each subscriber can see**
@@ -655,11 +681,20 @@ opportunities.
 - Notifications are in-app only (no e-mail transport).
 - The trash (tasks and projects) has no automatic purge.
 - A rule run interrupted by a crash is reported, not replayed.
-- Structure writes of a workspace are serialised: a very large purge (8 000
-  tasks: 8 s) delays other structural edits of the same workspace meanwhile; a
-  transaction longer than 20 s fails without writing anything.
+- Structure writes of a workspace are serialised: while a very large purge
+  (8 000 tasks: about 8 s) runs, other structural edits of the same workspace
+  (moving a card, completing a task, adding a subtask…) are refused with
+  « Une opération est déjà en cours » and must be retried by the user. Rules
+  and scheduled reminders that hit this refusal record an error run.
 - A task made project-less by c580137 (removal then purge) cannot be detected
   afterwards: its memberships are gone. Tasks left active in projects of the
   trash only are protected (invisible) and handled by the purge.
 - A history line written before `20261015091000` whose cited task cannot be
   identified with certainty keeps its label without the title.
+- Follow-up, not addressed yet: when the Prisma row of `20261013120000` was
+  recorded late (manual application, then `migrate resolve --applied`), V1.0
+  subtasks copied before that date lose their assignee/creator in migration 3
+  and are not put back (the values stay in `task_migration_notes.detail`);
+  the renumbering of `moveSubtask` locks sibling rows outside the structure
+  lock and could, rarely, deadlock with a purge (an error, no corruption — not
+  reproduced).

@@ -1293,8 +1293,19 @@ export async function duplicateTask(
     if (source.projects.length > 0 && kept.length === 0) {
       throw new TaskAccessError("FORBIDDEN", MANAGE_REFUSED);
     }
-    const keptIds = new Set(kept.map((m) => m.projectId));
-    const values = source.customValues.filter((v) => !v.field.projectId || keptIds.has(v.field.projectId));
+    // Champs propres à un projet : copiables seulement si la copie vit dans ce
+    // projet. Une sous-tâche n'a pas de projet : elle suit ceux de sa parente
+    // (la copie garde la même parente) — on retient ses projets actifs que la
+    // personne peut lire, jamais un projet privé qui lui est inaccessible.
+    let fieldProjects = new Set(kept.map((m) => m.projectId));
+    if (source.parentId) {
+      const parentProjects = await tx.taskProject.findMany({
+        where: { taskId: source.parentId, project: { deletedAt: null } },
+        select: { projectId: true, project: { select: projectAccessSelect(ctx.actor) } },
+      });
+      fieldProjects = new Set(parentProjects.filter((m) => canReadProject(m.project)).map((m) => m.projectId));
+    }
+    const values = source.customValues.filter((v) => !v.field.projectId || fieldProjects.has(v.field.projectId));
 
     const copies: { projectId: string; sectionId: string | null; position: number }[] = [];
     for (const membership of kept) {

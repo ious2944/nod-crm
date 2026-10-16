@@ -19,7 +19,8 @@ import { POST as attachmentPost } from "@/app/api/tasks/items/[id]/attachments/r
 import { prisma } from "@/lib/prisma";
 import { objectStore } from "@/lib/storage";
 import { deleteProject } from "@/lib/tasks/project-service";
-import { createTask, purgeTask, removeTaskFromProject, restoreTask, userContext } from "@/lib/tasks/service";
+import { createTask, moveTask, purgeTask, removeTaskFromProject, restoreTask, userContext } from "@/lib/tasks/service";
+import { StructureBusyError } from "@/lib/tasks/structure";
 import { setTestHook } from "@/lib/tasks/test-hooks";
 import type { ActionResult } from "@/lib/tasks/types";
 import { getTaskDetail } from "@/lib/tasks/work-queries";
@@ -38,6 +39,8 @@ function ok<T>(result: ActionResult<T>): T {
   return result.data;
 }
 const actorOf = (u: TestUser) => ({ id: u.userId, workspaceId: u.workspaceId });
+/** Refus « opération en cours » : le verrou de structure était déjà tenu. */
+const busy = (r: { ok: boolean; error?: unknown }) => !r.ok && r.error instanceof StructureBusyError;
 const readable = (u: TestUser, id: string) => getTaskDetail(actorOf(u), id).then(() => true, () => false);
 
 /** Aucune tâche active dont tous les projets sont dans la corbeille ; aucune tâche devenue libre. */
@@ -188,6 +191,10 @@ describe("retraits, suppressions et purges sans élargissement de visibilité", 
   });
 
   // ─── Entrelacements contrôlés ───────────────────────────────────────────────
+  //
+  // Le verrou de structure est pris sans attendre : pendant que la première
+  // opération le détient, la seconde est refusée (« opération en cours »)
+  // sans rien écrire. On la rejoue ensuite : elle décide alors sur l'état réel.
 
   it("suppressions simultanées de deux projets partageant une tâche : elle part à la corbeille", async () => {
     const t = ok(await createTaskAction({ title: "Partagée", projectId: P }));
@@ -199,12 +206,16 @@ describe("retraits, suppressions et purges sans élargissement de visibilité", 
       first: () => deleteProject(ctx, P),
       second: () => deleteProject(ctx, Q),
     });
-    expect(first.ok && second.ok).toBe(true);
+    expect(first.ok).toBe(true);
+    expect(busy(second)).toBe(true);
+    expect(secondReachedProbe).toBe(false);
+    // Rien n'a été écrit par la tentative refusée.
+    expect((await prisma.project.findUniqueOrThrow({ where: { id: Q } })).deletedAt).toBeNull();
+    await deleteProject(ctx, Q);
     const row = await prisma.task.findUniqueOrThrow({ where: { id: t.id } });
     expect(row.deletedAt).not.toBeNull();
     expect(row.deletedWithProjectId).toBe(Q);
     await assertNoExposedTask([t.id], carol);
-    expect(secondReachedProbe).toBe(false);
   });
 
   it("retrait concurrent d'une suppression de projet : la tâche ne reste pas exposée", async () => {
@@ -218,13 +229,13 @@ describe("retraits, suppressions et purges sans élargissement de visibilité", 
       second: () => removeTaskFromProject(userContext(ctx), t.id, Q),
     });
     expect(first.ok).toBe(true);
-    // Le retrait attend la fin de la suppression, constate que Q serait le
-    // dernier projet actif, et refuse.
-    expect(second.ok).toBe(false);
+    expect(busy(second)).toBe(true);
+    expect(secondReachedProbe).toBe(false);
+    // Rejoué après la suppression : Q serait le dernier projet actif, refusé.
+    await expect(removeTaskFromProject(userContext(ctx), t.id, Q)).rejects.toThrow(/corbeille/);
     const row = await prisma.task.findUniqueOrThrow({ where: { id: t.id }, include: { projects: true } });
     expect(row.projects.map((m) => m.projectId).sort()).toEqual([P, Q].sort());
     await assertNoExposedTask([t.id], carol);
-    expect(secondReachedProbe).toBe(false);
     const preview = ok(await previewProjectPurgeAction(P));
     ok(await purgeProjectAction(P, preview.token));
     await assertNoExposedTask([t.id], carol);
@@ -238,10 +249,26 @@ describe("retraits, suppressions et purges sans élargissement de visibilité", 
       first: () => deleteProject(ctx, P),
       second: () => createTask(userContext(ctx), { title: "Tardive", projectId: P }),
     });
-    const late = await prisma.task.findMany({ where: { title: "Tardive" }, select: { id: true } });
-    await assertNoExposedTask(late.map((r) => r.id), carol);
     expect(first.ok).toBe(true);
-    expect(second.ok).toBe(false);
+    expect(busy(second)).toBe(true);
+    await expect(createTask(userContext(ctx), { title: "Tardive", projectId: P })).rejects.toThrow("Projet introuvable.");
+    const late = await prisma.task.findMany({ where: { title: "Tardive" }, select: { id: true } });
+    expect(late).toEqual([]);
+  });
+
+  it("rattachement à un projet en cours de suppression : refusé", async () => {
+    const t = ok(await createTaskAction({ title: "À rattacher", projectId: Q }));
+    const ctx = actorOf(alice);
+    const { first, second } = await interleave({
+      pauseAt: "deleteProject:scanned",
+      probe: "never",
+      first: () => deleteProject(ctx, P),
+      second: () => moveTask(userContext(ctx), { taskId: t.id, projectId: P, sectionId: null }),
+    });
+    expect(first.ok).toBe(true);
+    expect(busy(second)).toBe(true);
+    await expect(moveTask(userContext(ctx), { taskId: t.id, projectId: P, sectionId: null })).rejects.toThrow("Projet introuvable.");
+    expect((await prisma.taskProject.findMany({ where: { taskId: t.id } })).map((m) => m.projectId)).toEqual([Q]);
   });
 
   it("purge et restauration simultanées d'une tâche : jamais de tâche restaurée sans ses fichiers", async () => {
@@ -256,14 +283,27 @@ describe("retraits, suppressions et purges sans élargissement de visibilité", 
       first: () => purgeTask(ctx, t.id),
       second: () => restoreTask(ctx, t.id),
     });
-    const row = await prisma.task.findUnique({ where: { id: t.id } });
-    if (row) {
-      // La restauration l'a emporté : le fichier doit être intact.
-      expect(row.deletedAt).toBeNull();
-      expect(await objectStore.read(storageKey)).not.toBeNull();
-    } else {
-      expect(first.ok).toBe(true);
-      expect(second.ok).toBe(false);
-    }
+    expect(first.ok).toBe(true);
+    expect(busy(second)).toBe(true);
+    // Rejouée après la purge : la tâche n'existe plus.
+    await expect(restoreTask(ctx, t.id)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(await prisma.task.findUnique({ where: { id: t.id } })).toBeNull();
+    // L'inverse : restauration d'abord, la purge refusée puis rejouée ne trouve plus rien à purger.
+    const u = ok(await createTaskAction({ title: "Avec fichier 2", projectId: Q }));
+    await upload(u.id);
+    const { storageKey: key2 } = await prisma.taskAttachment.findFirstOrThrow({ where: { taskId: u.id } });
+    ok(await deleteTaskAction(u.id));
+    const reverse = await interleave({
+      pauseAt: "restoreTask:checked",
+      probe: "purgeTask:scanned",
+      first: () => restoreTask(ctx, u.id),
+      second: () => purgeTask(ctx, u.id),
+    });
+    expect(reverse.first.ok).toBe(true);
+    expect(busy(reverse.second)).toBe(true);
+    await expect(purgeTask(ctx, u.id)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: u.id } })).deletedAt).toBeNull();
+    expect(await objectStore.read(key2)).not.toBeNull();
+    void storageKey;
   });
 });

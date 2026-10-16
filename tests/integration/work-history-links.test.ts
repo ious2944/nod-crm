@@ -19,6 +19,7 @@ import {
 import { GET as streamGet } from "@/app/api/tasks/stream/route";
 import { prisma } from "@/lib/prisma";
 import { addDependency, createTask, setTaskParent, userContext } from "@/lib/tasks/service";
+import { StructureBusyError } from "@/lib/tasks/structure";
 import { setTestHook } from "@/lib/tasks/test-hooks";
 import type { ActionResult } from "@/lib/tasks/types";
 import { getTaskDetail } from "@/lib/tasks/work-queries";
@@ -163,9 +164,12 @@ describe("historique, commentaires, temps réel et liens", () => {
       first: () => addDependency(ctx, x.id, y.id),
       second: () => addDependency(ctx, y.id, x.id),
     });
-    expect(await prisma.taskDependency.count()).toBe(1);
-    expect([first.ok, second.ok].sort()).toEqual([false, true]);
+    expect(first.ok).toBe(true);
+    expect(!second.ok && second.error instanceof StructureBusyError).toBe(true);
     expect(secondReachedProbe).toBe(false);
+    // Rejouée : la boucle est détectée.
+    await expect(addDependency(ctx, y.id, x.id)).rejects.toThrow(/boucle/);
+    expect(await prisma.taskDependency.count()).toBe(1);
   });
 
   it("m4 : une tâche qui devient sous-tâche pendant qu'on lui ajoute une sous-tâche : jamais deux niveaux", async () => {
@@ -178,8 +182,10 @@ describe("historique, commentaires, temps réel et liens", () => {
       first: () => setTaskParent(ctx, task.id, parent.id),
       second: () => createTask(ctx, { title: "Petite-fille", parentId: task.id }),
     });
+    expect(first.ok).toBe(true);
+    expect(!second.ok && second.error instanceof StructureBusyError).toBe(true);
+    await expect(createTask(ctx, { title: "Petite-fille", parentId: task.id })).rejects.toThrow(/sous-tâche/);
     const nested = await prisma.task.count({ where: { parent: { parentId: { not: null } } } });
     expect(nested).toBe(0);
-    expect([first.ok, second.ok].sort()).toEqual([false, true]);
   });
 });
