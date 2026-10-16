@@ -77,7 +77,7 @@ export interface OpportunityTask {
   title: string;
   contactId: string | null;
   contactName: string | null;
-  dueAt: string;
+  dueAt: string | null;
 }
 
 /** Un suivi vu depuis la fiche opportunité (résumé). */
@@ -126,7 +126,7 @@ export interface OpportunityDetailRecord extends OpportunityRecord {
   tasks: Array<{
     id: string;
     title: string;
-    dueAt: Date;
+    dueAt: Date | null;
     completedAt: Date | null;
     contact: { id: string; firstName: string; lastName: string } | null;
   }>;
@@ -153,7 +153,7 @@ export function toOpportunityDetail(
       title: t.title,
       contactId: t.contact?.id ?? null,
       contactName: t.contact ? contactFullName(t.contact) : null,
-      dueAt: dayKey(t.dueAt, timeZone),
+      dueAt: t.dueAt ? dayKey(t.dueAt, timeZone) : null,
     }));
 
   const openFollowUps: OpportunityFollowUp[] = record.followUps

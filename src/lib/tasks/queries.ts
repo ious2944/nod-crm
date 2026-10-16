@@ -2,7 +2,13 @@ import "server-only";
 
 import { APP_TIME_ZONE } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
+import { requireUser } from "@/lib/auth/dal";
 import { getWorkspaceIdForPage } from "@/lib/workspace";
+
+import type { Prisma } from "@/generated/prisma/client";
+import type { TaskScope } from "@/lib/cockpit/filters";
+
+import { NOT_TEMPLATE_TASK, visibleTaskWhere } from "./access";
 import type { TaskBucket } from "./domain";
 import type { TaskFilter } from "./filters";
 import { toTaskView, type TaskView } from "./view";
@@ -29,6 +35,7 @@ const TASK_INCLUDE = {
       contact: { select: { firstName: true, lastName: true } },
     },
   },
+  assignee: { select: { id: true, displayName: true, email: true } },
 } as const;
 
 /** Une section de la page Tâches : en retard, aujourd'hui, à venir. */
@@ -57,20 +64,41 @@ const SECTION_LABELS: Record<Exclude<TaskBucket, "completed">, string> = {
 /** Les 100 dernières tâches terminées : de quoi les retrouver, pas une GED. */
 const COMPLETED_LIMIT = 100;
 
+/**
+ * V1.0 : les lectures historiques appliquent la même visibilité que le module
+ * de gestion de travail (`visibleTaskWhere` : projets privés, corbeille) et
+ * ignorent les modèles. C'est un filtre **serveur** : une tâche non autorisée
+ * n'est jamais lue.
+ *
+ * Portée (`TaskScope`) :
+ * - `all` (par défaut, comportement historique) : toutes les tâches que
+ *   l'utilisateur peut lire, celles des collègues comprises ;
+ * - `mine` : seulement celles dont il est responsable.
+ */
+export function cockpitTaskWhere(actor: { id: string; workspaceId: string }, scope: TaskScope = "all"): Prisma.TaskWhereInput[] {
+  return [visibleTaskWhere(actor), NOT_TEMPLATE_TASK, ...(scope === "mine" ? [{ assigneeId: actor.id }] : [])];
+}
+
+async function scopeWhere(scope: TaskScope = "all") {
+  const user = await requireUser();
+  const actor = { id: user.id, workspaceId: user.workspaceId };
+  return { workspaceId: user.workspaceId, userId: user.id, AND: cockpitTaskWhere(actor, scope) };
+}
+
 export async function getTaskList(filter: TaskFilter): Promise<TaskList> {
-  const workspaceId = await getWorkspaceIdForPage();
+  const { workspaceId, userId, AND } = await scopeWhere();
   const now = new Date();
 
   const [todoRecords, completedCount] = await Promise.all([
     prisma.task.findMany({
-      where: { workspaceId, completedAt: null },
+      where: { workspaceId, AND, completedAt: null },
       orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
       include: TASK_INCLUDE,
     }),
-    prisma.task.count({ where: { workspaceId, completedAt: { not: null } } }),
+    prisma.task.count({ where: { workspaceId, AND, completedAt: { not: null } } }),
   ]);
 
-  const todo = todoRecords.map((record) => toTaskView(record, now, APP_TIME_ZONE));
+  const todo = todoRecords.map((record) => toTaskView(record, now, APP_TIME_ZONE, userId));
 
   const sections: TaskSection[] = (["overdue", "today", "upcoming"] as const)
     .map((bucket) => ({
@@ -85,7 +113,7 @@ export async function getTaskList(filter: TaskFilter): Promise<TaskList> {
   }
 
   const completedRecords = await prisma.task.findMany({
-    where: { workspaceId, completedAt: { not: null } },
+    where: { workspaceId, AND, completedAt: { not: null } },
     orderBy: [{ completedAt: "desc" }],
     take: COMPLETED_LIMIT,
     include: TASK_INCLUDE,
@@ -95,7 +123,7 @@ export async function getTaskList(filter: TaskFilter): Promise<TaskList> {
     todoCount: todo.length,
     completedCount,
     sections: [],
-    completed: completedRecords.map((record) => toTaskView(record, now, APP_TIME_ZONE)),
+    completed: completedRecords.map((record) => toTaskView(record, now, APP_TIME_ZONE, userId)),
   };
 }
 
@@ -108,17 +136,17 @@ export async function getTaskList(filter: TaskFilter): Promise<TaskList> {
  * une tâche due aujourd'hui à minuit local disparaîtrait du feed dès 00 h 01
  * pour un serveur en UTC.
  */
-export async function getActionableTasks(endOfToday: Date): Promise<TaskView[]> {
-  const workspaceId = await getWorkspaceIdForPage();
+export async function getActionableTasks(endOfToday: Date, scope: TaskScope = "all"): Promise<TaskView[]> {
+  const { workspaceId, userId, AND } = await scopeWhere(scope);
   const now = new Date();
 
   const records = await prisma.task.findMany({
-    where: { workspaceId, completedAt: null, dueAt: { lte: endOfToday } },
+    where: { workspaceId, AND, completedAt: null, dueAt: { lte: endOfToday } },
     orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
     include: TASK_INCLUDE,
   });
 
-  return records.map((record) => toTaskView(record, now, APP_TIME_ZONE));
+  return records.map((record) => toTaskView(record, now, APP_TIME_ZONE, userId));
 }
 
 /**
@@ -132,17 +160,17 @@ export async function getActionableTasks(endOfToday: Date): Promise<TaskView[]> 
  * `endOfDay(today + UPCOMING_WINDOW_DAYS)`), pas seulement aujourd'hui, pour
  * que le KPI « À venir » intègre bien les tâches futures proches.
  */
-export async function getTasksForKpi(endOfWindow: Date): Promise<TaskView[]> {
-  const workspaceId = await getWorkspaceIdForPage();
+export async function getTasksForKpi(endOfWindow: Date, scope: TaskScope = "all"): Promise<TaskView[]> {
+  const { workspaceId, userId, AND } = await scopeWhere(scope);
   const now = new Date();
 
   const records = await prisma.task.findMany({
-    where: { workspaceId, completedAt: null, dueAt: { lte: endOfWindow } },
+    where: { workspaceId, AND, completedAt: null, dueAt: { lte: endOfWindow } },
     orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
     include: TASK_INCLUDE,
   });
 
-  return records.map((record) => toTaskView(record, now, APP_TIME_ZONE));
+  return records.map((record) => toTaskView(record, now, APP_TIME_ZONE, userId));
 }
 
 export interface FollowUpPickerOption {

@@ -102,6 +102,9 @@ services:
       APP_NAME: ${APP_NAME:-NOD CRM}
       APP_SOURCE_URL: ${APP_SOURCE_URL:-https://github.com/ious2944/nod-crm}
       APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Paris}
+      # Rappels d'échéance planifiés, dans ce processus (voir docs/tasks.md).
+      NOD_SCHEDULER: ${NOD_SCHEDULER:-on}
+      TASK_REMINDER_INTERVAL_MINUTES: ${TASK_REMINDER_INTERVAL_MINUTES:-5}
       NOD_UPLOAD_DIR: /app/var/uploads
     volumes:
       # Contact photos. They live on a named volume, not inside the image: a

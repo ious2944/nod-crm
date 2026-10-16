@@ -77,10 +77,17 @@ export function TaskRow({ item }: { item: TaskView }) {
 }
 
 function TaskMeta({ item }: { item: TaskView }) {
-  if (!item.contactName && !item.followUpLabel && !item.notes) return null;
+  const showAssignee = Boolean(item.assigneeName) && !item.assignedToMe;
+  if (!item.contactName && !item.followUpLabel && !item.notes && !showAssignee) return null;
 
   return (
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted">
+      {showAssignee && (
+        <span className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-2 py-0.5 text-[12px] font-medium text-ink">
+          Responsable : {item.assigneeName}
+        </span>
+      )}
+
       {item.contactName && item.contactId && (
         <Link
           href={`/contacts/${item.contactId}`}

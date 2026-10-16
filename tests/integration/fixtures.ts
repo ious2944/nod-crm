@@ -16,7 +16,7 @@ export interface TestUser {
 export async function resetDatabase(): Promise<void> {
   // Un seul TRUNCATE en cascade : plus rapide et insensible à l'ordre des FK.
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "audit_logs", "privacy_treatment_processors", "privacy_incidents", "privacy_requests", "privacy_processors", "privacy_treatments", "login_attempts", "sessions", "users", "tasks", "follow_ups", "opportunities", "contacts", "organizations", "workspaces" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "audit_logs", "privacy_treatment_processors", "privacy_incidents", "privacy_requests", "privacy_processors", "privacy_treatments", "login_attempts", "sessions", "users", "tasks", "follow_ups", "opportunities", "contacts", "organizations", "workspaces", "job_leases" RESTART IDENTITY CASCADE',
   );
   cookieJar.reset();
 }
@@ -100,6 +100,8 @@ export async function createTaskRecord(
       workspaceId,
       title: "Tâche de test",
       dueAt: new Date(Date.now() + dueInDays * 86_400_000),
+      // V1.0 : statut et date d'achèvement sont toujours tenus ensemble.
+      status: rest.completedAt ? "DONE" : "TODO",
       ...rest,
     },
     select: { id: true },
@@ -194,4 +196,19 @@ export function formData(fields: Record<string, string | number>): FormData {
     data.set(key, String(value));
   }
   return data;
+}
+
+/** Ajoute un second utilisateur actif à un espace existant (collaboration, permissions). */
+export async function addUserToWorkspace(
+  workspaceId: string,
+  label: string,
+  password = "Mot-De-Passe-Test-2026!",
+): Promise<TestUser> {
+  counter += 1;
+  const email = `${label}${counter}@member.test`;
+  const user = await prisma.user.create({
+    data: { workspaceId, email, displayName: label, passwordHash: await hashPassword(password) },
+    select: { id: true },
+  });
+  return { userId: user.id, workspaceId, email, password };
 }

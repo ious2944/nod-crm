@@ -7,6 +7,185 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — V1.0 work management (tasks & projects)
+
+- Projects, sections, multi-project task membership (`task_projects`), subtasks,
+  dependencies, tags, custom fields, followers/collaborators, comments with
+  mentions and reactions, attachments, change history, time entries, approvals,
+  recurrence, notifications and preferences, saved views, automation rules and
+  runs, task templates, project templates, internal forms.
+- Views: Overview, List, Board, Calendar, Timeline, Dashboard; My tasks, Search,
+  Portfolio, Workload, Notifications, Favourites, Forms, Settings.
+- Right-hand task detail panel available from every page (`?task=<id>`), direct
+  link `/tasks/t/<id>`.
+- Real-time refresh between users (PostgreSQL `LISTEN/NOTIFY` → SSE
+  `/api/tasks/stream`) and per-field conflict detection.
+- CRM sheets (contact, organisation, opportunity) show linked tasks and projects
+  with quick creation.
+- CSV import/export.
+
+- Trash for tasks (soft delete, restore, permanent deletion for project
+  owners) at `/tasks/trash`.
+- Project trash: deleting a project is a restorable soft delete. Its exclusive
+  tasks go to the trash with it (nothing erased, never workspace-visible),
+  shared tasks stay in their other projects, rules and reminders ignore it;
+  restoring brings back sections, memberships and those tasks (not tasks
+  deleted individually before); permanent deletion is a separate owner action
+  that never erases a task still linked to another kept project.
+- `scripts/migration-check.mjs`: diagnosis of the migration history and guarded
+  checksum reconciliation (state C only). The schema is verified structurally
+  against a schema rebuilt by replaying the applied migrations (enums, column
+  types/nullability/defaults, primary/unique/foreign keys with their actions,
+  indexes with columns, order, uniqueness, method and predicate), under Prisma
+  Migrate's advisory lock and a lock on `_prisma_migrations`.
+- Permanent project deletion asks for an explicit confirmation on a scope
+  computed by the server (tasks and subtasks erased, including those deleted
+  individually before; shared tasks kept; comments, attachments, history), and
+  refuses — asking again — if the scope changed since the preview.
+- Scheduled due-date reminders (`task_reminders`, `job_leases`): in-process
+  timer, single run at a time across instances, resumable, deduplicated with
+  automation rules, no catch-up of past due dates. `NOD_SCHEDULER`,
+  `TASK_REMINDER_INTERVAL_MINUTES`.
+- `/today`: « Toutes les tâches accessibles » (default) / « Mes tâches » filter;
+  task rows show the assignee when it is someone else.
+- Workload: period selector, per-user weekly capacity, estimates spread over
+  working days, tasks without date or estimate listed separately.
+- Project-owned custom fields; project and « Mes tâches » search match the full
+  description.
+
+### Changed
+
+- `tasks.due_at` is now optional; legacy task actions run through the new
+  service (assignee, followers, history, notifications, rules).
+- The `/today` cockpit applies project visibility and the trash on the server;
+  by default it keeps the historical behaviour (every task the user can read).
+- Deleting a section never deletes tasks.
+- Reopening a task returns to its last active status; an approval request must
+  be approved before it can be completed, and can be resubmitted after changes
+  are requested.
+- A new *manage* right (reassign, share, move between projects, change parent,
+  duplicate, delete) is required in addition to *edit*; mentions no longer give
+  access; notifications, history, search filters and exports hide what the
+  reader cannot access.
+- Due-date reminders no longer depend on user activity.
+- Scheduler hardening: the lease is extended before every delivery (a holder
+  that lost it stops immediately and never releases another's lease); rows
+  are validated only while still pending; interrupted rule runs are reported;
+  `TASK_REMINDER_LEASE_SECONDS`. Database sessions idle inside a transaction
+  are evicted after 30 s (`idle_in_transaction_session_timeout`), so a frozen
+  process cannot block the others.
+- `instrumentation.ts` imports its Node.js code only under
+  `NEXT_RUNTIME === "nodejs"` (no Node API warnings in the Edge bundle).
+
+### Security
+
+- `sharp` 0.35.4 → 0.35.5 (CVE-2026-96889 in librsvg, GHSA-wq5f-xc86-pv6w) and
+  `source-map-js` 1.2.1 → 1.2.2 (denial of service, GHSA-68fv-2mgg-jv7q), both
+  transitive (Next, PostCSS, Tailwind), within the declared ranges: lockfile
+  only. The production audit is clean. The full-tree audit (informational in
+  CI) still reports `braces` (GHSA-vfj7-8cjw-p6xm) through
+  `eslint-config-next` → `fast-glob` → `micromatch`: no patched `braces`
+  release exists, and npm's only fix is a breaking downgrade of
+  `eslint-config-next` to 14.x; dev-only (lint), not in the production image.
+
+### Fixed
+
+- Review of c580137 — permissions and confidentiality:
+  - workspace automation rules could act with full rights on every task,
+    private projects included; a rule now runs with the **current** rights of
+    the person who saved it last, only on tasks that person can edit, and stops
+    when that person loses access or is deactivated. Only that person can
+    modify or delete a workspace rule (others can take over an inert one);
+  - removing a task from its last active project, then purging the other
+    (trashed) private project, made the task visible to the whole workspace.
+    Removal is now refused when it would leave only trashed projects, or when
+    it would remove the only, private project; purge never makes a task
+    project-less; a task whose projects are all in the trash is visible to
+    nobody;
+  - permanent deletion of a task now requires owning all its projects,
+    including those in the trash;
+  - duplicating a project (or creating one from a template) no longer brings
+    back deleted tasks and subtasks; saving a task as a template skips deleted
+    subtasks; task templates check the rights on their project (use and
+    modification, stored template first); duplicating a shared task skips
+    trashed, read-only and unreadable projects and their fields' values
+    (it failed before when a project was in the trash);
+  - the history of a task no longer shows the title of a private task it
+    depends on or was copied from (`task_activities.ref_task_id`, old lines
+    masked when uncertain);
+  - status-update comments: editing or deleting requires the current project
+    access, even for the author;
+  - the real-time stream only sends each user the ids they may see; rule run
+    logs only list readable tasks; quick actions answer the same for a missing
+    and an inaccessible task.
+- Review of c580137 — concurrency: every write that changes where a task lives
+  (project membership, parent, dependencies, task and project trash, purge,
+  copies, next occurrence) runs under one per-workspace structure lock and
+  re-checks its conditions inside the transaction, with a single lock order.
+  Fixed, and reproduced first with controlled interleavings: two simultaneous
+  project deletions or a creation during a deletion leaving a task active in
+  trashed projects only; a purge erasing the files of a task restored
+  meanwhile; two reverse dependencies forming a cycle; a task becoming a
+  subtask while getting a subtask; two simultaneous purges deadlocking. A late
+  tag save no longer removes a tag added meanwhile (difference applied under a
+  row lock). Completing a recurring task and creating its next occurrence are
+  one transaction (a crash in between left a completed task without its next
+  occurrence). Project copies and restorations write in batches (duplicating
+  2 500 tasks exceeded the 5 s transaction limit).
+- Review of c580137 — migrations: `migration-check.mjs` rebuilds the expected
+  schema in an isolated reference database (automatic with `CREATEDB`, or
+  `SHADOW_DATABASE_URL`): with `20261014092000` applied and `20261014093000`
+  pending, the in-database replay reported two false divergences and blocked
+  the procedure. It lists orphan rows that would make `20261014093000` fail,
+  with a recovery without reset or deletion; its messages and exit codes
+  (0/1/2/3) match what it found; waiting on Prisma's lock is bounded.
+- Counter-review of c9cefbf:
+  - `20261015090000` could put back an assignment that had been removed on
+    purpose after `20261014091000`; the new migration `20261016090000` undoes
+    such restorations (explicit change before, none after) and flags them
+    `*_RESTORE_UNDONE`; `20261015090000` is unchanged;
+  - the workspace structure lock is taken without waiting
+    (`pg_try_advisory_xact_lock`, two short retries in new transactions,
+    then « Une opération est déjà en cours. Réessayez dans quelques
+    instants. »): waiting operations no longer hold pool connections nor
+    stall other workspaces; documented delays corrected;
+  - duplicating a subtask keeps the values of fields owned by its parent's
+    readable active projects (it dropped them).
+- The `e2e/run.mjs` follow-up filter and logout checks used obsolete selectors
+  (`?f=all`, exact `/login` URL) and failed on `main` as well; they now check
+  the active link and the `/login` path. Its tasks section targets the V1.0
+  « Mes tâches » page.
+
+### Migration
+
+- `20261013120000_work_management` — restored byte-for-byte to its first
+  published version (`81c4b0c`), which databases may have applied; a later
+  revision (`c199fdd`) had changed it in place.
+- `20261014090000_work_management_hardening` — additive. Trash, last active
+  status, project-owned fields, capacity, reminders, leases, legacy-task notes.
+- `20261014091000_work_management_legacy_reconcile` — corrective, idempotent:
+  removes assignees/creators inferred by the first migration on legacy tasks
+  never used since, keeps and flags the ambiguous ones, never touches an
+  assignment made or changed in V1.0; every decision recorded in
+  `task_migration_notes` with the previous value.
+- `20261014092000_project_trash` — additive.
+- `20261014093000_project_trash_constraints` — creates the project-trash
+  foreign keys where the previous migration's guard (not filtered by schema)
+  skipped them; found by the structural schema check.
+- `20261015090000_legacy_reconcile_unestablished_restore` — corrective,
+  idempotent: without Prisma history, `20261014091000` removed assignees and
+  creators whose origin could not be established (including V1.0 subtasks
+  copied without history); they are put back from the recorded previous value
+  and flagged `*_ORIGIN_UNKNOWN`.
+- `20261015091000_task_activity_reference` — additive:
+  `task_activities.ref_task_id`, backfilled only when certain.
+- `20261016090000_legacy_restore_explicit_changes` — corrective, idempotent:
+  undoes restorations of `20261015090000` contradicted by an earlier explicit
+  change (an assignment removed on purpose stays empty).
+- Upgrade paths (never applied / first version / revised version) and the
+  reconciliation procedure are documented in `docs/tasks.md`; no reset is
+  needed in any state.
+
 **Post-V0.9 bugfixes.**
 
 ### Fixed

@@ -5,11 +5,12 @@
 
 import { revalidatePath } from "next/cache";
 
-import { recordAudit } from "@/lib/audit/log";
-import { AUDIT_ENTITY_TYPES } from "@/lib/audit/types";
 import { APP_TIME_ZONE } from "@/lib/config";
-import { shiftDueDate, startOfDay } from "@/lib/date";
+import { dayKey, shiftDueDate } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
+import "@/lib/tasks/action-result";
+import { TaskAccessError, visibleTaskWhere } from "@/lib/tasks/access";
+import * as service from "@/lib/tasks/service";
 import type { CreateTaskState } from "@/lib/tasks/create-state";
 import type { EditTaskState } from "@/lib/tasks/edit-state";
 import { TaskConflictError } from "@/lib/tasks/errors";
@@ -128,25 +129,16 @@ export async function createTask(
     opportunityId = opportunity.id;
   }
 
-  const task = await prisma.task.create({
-    data: {
-      workspaceId,
-      contactId,
-      followUpId,
-      opportunityId,
-      title: input.title,
-      notes: input.notes,
-      dueAt: startOfDay(input.dueDate, APP_TIME_ZONE),
-    },
-    select: { id: true },
-  });
-
-  await recordAudit({
-    workspaceId,
-    userId,
-    action: "CREATE",
-    entityType: AUDIT_ENTITY_TYPES.TASK,
-    entityId: task.id,
+  // Même service que le module de gestion de travail : responsable, abonnés,
+  // historique, audit et temps réel sont gérés au même endroit.
+  await service.createTask(service.userContext({ id: userId, workspaceId }), {
+    title: input.title,
+    description: input.notes,
+    dueDate: input.dueDate,
+    contactId,
+    followUpId,
+    opportunityId,
+    assigneeId: userId,
   });
 
   revalidateTaskPages();
@@ -198,27 +190,16 @@ export async function updateTask(
     contactId = contact.id;
   }
 
-  const { count } = await prisma.task.updateMany({
-    where: { id, workspaceId },
-    data: {
+  try {
+    await service.updateTaskFields(service.userContext({ id: userId, workspaceId }), id, {
       title,
-      notes,
-      dueAt: startOfDay(dueDate, APP_TIME_ZONE),
+      description: notes,
+      dueDate,
       contactId,
-    },
-  });
-
-  if (count !== 1) {
+    });
+  } catch {
     return { status: "error", message: "Tâche introuvable." };
   }
-
-  await recordAudit({
-    workspaceId,
-    userId,
-    action: "UPDATE",
-    entityType: AUDIT_ENTITY_TYPES.TASK,
-    entityId: id,
-  });
 
   revalidateTaskPages();
   return { status: "success", message: "Tâche mise à jour." };
@@ -241,9 +222,11 @@ export async function applyTaskAction(formData: FormData): Promise<void> {
 
   const { id, intent, days } = parsed.data;
 
+  // Bornée aux tâches visibles : une tâche inaccessible répond exactement
+  // comme une tâche inexistante (aucune information sur son état).
   const task = await prisma.task.findFirst({
-    where: { id, workspaceId },
-    select: { id: true, dueAt: true, completedAt: true, opportunityId: true },
+    where: { AND: [visibleTaskWhere({ id: userId, workspaceId }), { id }] },
+    select: { id: true, dueAt: true, completedAt: true, status: true, opportunityId: true, lastActiveStatus: true },
   });
 
   if (!task) {
@@ -267,35 +250,31 @@ export async function applyTaskAction(formData: FormData): Promise<void> {
 
   // Un report part de la date la plus tardive entre aujourd'hui et l'échéance :
   // reporter une tâche en retard de 10 jours doit donner « demain », pas
-  // « il y a 9 jours ».
-  const base = task.dueAt > now ? task.dueAt : now;
+  // « il y a 9 jours ». Sans échéance, on part d'aujourd'hui.
+  const base = task.dueAt && task.dueAt > now ? task.dueAt : now;
 
-  const data =
+  const patch =
     intent === "complete"
-      ? { completedAt: now }
+      ? { status: "DONE" as const }
       : intent === "reopen"
-        ? { completedAt: null }
-        : { dueAt: shiftDueDate(base, days ?? 1, APP_TIME_ZONE) };
+        ? // Rouvrir revient au dernier statut actif (« En cours », « En attente »…).
+          { status: task.lastActiveStatus ?? ("TODO" as const) }
+        : { dueDate: dayKey(shiftDueDate(base, days ?? 1, APP_TIME_ZONE), APP_TIME_ZONE) };
 
-  // Écriture conditionnelle : le `where` reprend l'état exact lu juste avant.
-  // Deux clics simultanés lisent le même état, mais un seul `UPDATE` trouve
-  // encore la ligne — l'autre repart à zéro ligne modifiée.
-  const { count } = await prisma.task.updateMany({
-    where: { id, workspaceId, completedAt: task.completedAt, dueAt: task.dueAt },
-    data,
-  });
-
-  if (count !== 1) {
+  // Écriture conditionnelle : la valeur lue juste avant sert de base. Deux
+  // clics simultanés lisent le même état ; le second voit la valeur changée
+  // et échoue en conflit au lieu de s'appliquer deux fois.
+  const base_ =
+    intent === "snooze"
+      ? { dueDate: task.dueAt ? dayKey(task.dueAt, APP_TIME_ZONE) : null }
+      : { status: task.status };
+  try {
+    await service.updateTaskFields(service.userContext({ id: userId, workspaceId }), id, patch, { base: base_ });
+  } catch (error) {
+    // Droits : même réponse qu'une tâche inexistante, ou le refus explicite.
+    if (error instanceof TaskAccessError) throw new Error(error.code === "NOT_FOUND" ? "Tâche introuvable." : error.message);
     throw new TaskConflictError();
   }
-
-  await recordAudit({
-    workspaceId,
-    userId,
-    action: "UPDATE",
-    entityType: AUDIT_ENTITY_TYPES.TASK,
-    entityId: id,
-  });
 
   revalidateTaskPages();
   revalidateCommerceIfLinked(task.opportunityId);

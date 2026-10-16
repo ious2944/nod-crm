@@ -252,7 +252,7 @@ describe("module Tâches", () => {
       await applyTaskAction(formData({ id, intent: "snooze", days: 1 }));
 
       const task = await prisma.task.findUniqueOrThrow({ where: { id } });
-      expect(dayKey(task.dueAt, APP_TIME_ZONE)).toBe(inDays(1));
+      expect(dayKey(task.dueAt!, APP_TIME_ZONE)).toBe(inDays(1));
     });
 
     it("refuse une intention inconnue", async () => {
@@ -408,7 +408,7 @@ describe("module Tâches", () => {
       );
 
       const task = await prisma.task.findUniqueOrThrow({ where: { id } });
-      expect(dayKey(task.dueAt, APP_TIME_ZONE)).toBe(inDays(5));
+      expect(dayKey(task.dueAt!, APP_TIME_ZONE)).toBe(inDays(5));
     });
 
     it("modifie la note d'une tâche", async () => {

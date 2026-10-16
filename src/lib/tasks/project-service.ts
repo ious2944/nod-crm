@@ -1,0 +1,1085 @@
+import "server-only";
+
+import { createHash, randomUUID } from "node:crypto";
+
+import { Prisma } from "@/generated/prisma/client";
+import { recordAudit } from "@/lib/audit/log";
+import { AUDIT_ENTITY_TYPES } from "@/lib/audit/types";
+import { APP_TIME_ZONE } from "@/lib/config";
+import { dayKey, startOfDay } from "@/lib/date";
+import { prisma } from "@/lib/prisma";
+import { objectStore } from "@/lib/storage";
+
+import {
+  canEditProjectContent,
+  canManageProject,
+  evaluateProjectTrashAccess,
+  canReadProject,
+  projectAccessSelect,
+  TaskAccessError,
+  TaskValidationError,
+  type Actor,
+} from "./access";
+import { DEFAULT_SECTIONS, PROJECT_STATUS_LABELS } from "./constants";
+import { evenPositions, keyDiff, positionBetween, POSITION_STEP } from "./graph";
+import {
+  commentBodySchema,
+  projectInputSchema,
+  projectPatchSchema,
+  sectionNameSchema,
+  statusUpdateSchema,
+} from "./inputs";
+import { notify } from "./notify";
+import { publishChange } from "./realtime";
+import { assertCrmLinks } from "./service";
+import { lockTasks, structureTransaction } from "./structure";
+import { checkpoint } from "./test-hooks";
+import type { ProjectRole } from "./types";
+
+/**
+ * Projets, sections, membres, favoris, points d'avancement, modèles.
+ *
+ * Règle d'or : un projet `PRIVATE` est **introuvable** pour un non-membre —
+ * même message qu'un identifiant inexistant, pour ne rien révéler.
+ */
+
+type Db = Prisma.TransactionClient | typeof prisma;
+
+async function loadProject(actor: Actor, projectId: string) {
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, workspaceId: actor.workspaceId },
+    select: { ...projectAccessSelect(actor), name: true, version: true },
+  });
+  if (!project || !canReadProject(project)) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+  return project;
+}
+
+export async function requireProjectRead(actor: Actor, projectId: string) {
+  return loadProject(actor, projectId);
+}
+
+export async function requireProjectEdit(actor: Actor, projectId: string) {
+  const project = await loadProject(actor, projectId);
+  if (!canEditProjectContent(project, actor)) {
+    throw new TaskAccessError("FORBIDDEN", project.archivedAt ? "Ce projet est archivé." : "Vous ne pouvez pas modifier ce projet.");
+  }
+  return project;
+}
+
+export async function requireProjectManage(actor: Actor, projectId: string) {
+  const project = await loadProject(actor, projectId);
+  if (!canManageProject(project, actor)) {
+    throw new TaskAccessError("FORBIDDEN", "Seul le propriétaire du projet peut faire cela.");
+  }
+  return project;
+}
+
+const toDate = (key: string | null | undefined) => (key ? startOfDay(key, APP_TIME_ZONE) : null);
+
+function changed(actor: Actor, projectIds: string[], kind = "project") {
+  return publishChange({ w: actor.workspaceId, a: actor.id, p: projectIds, k: kind });
+}
+
+async function auditProject(actor: Actor, action: "CREATE" | "UPDATE" | "ARCHIVE" | "RESTORE" | "DELETE", id: string) {
+  await recordAudit({ workspaceId: actor.workspaceId, userId: actor.id, action, entityType: AUDIT_ENTITY_TYPES.PROJECT, entityId: id });
+}
+
+async function validMemberIds(actor: Actor, ids: string[]) {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return [];
+  const users = await prisma.user.findMany({
+    where: { id: { in: unique }, workspaceId: actor.workspaceId, isActive: true },
+    select: { id: true },
+  });
+  if (users.length !== unique.length) throw new TaskValidationError("Un des membres n'existe pas dans votre espace.");
+  return unique;
+}
+
+// ─── Création, copie depuis un modèle ─────────────────────────────────────────
+
+/**
+ * Copie le contenu d'un projet (sections, tâches, sous-tâches, tags, champs,
+ * règles, modèles de tâches) dans un autre. Les échéances sont décalées pour
+ * conserver les écarts relatifs à la date de début des deux projets.
+ */
+async function copyProjectContent(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  sourceId: string,
+  targetId: string,
+  options: { shiftDays: number; keepAssignees: boolean; includeCompleted: boolean },
+) {
+  const shift = (date: Date | null) => {
+    if (!date) return null;
+    if (!options.shiftDays) return date;
+    const key = dayKey(date, APP_TIME_ZONE);
+    const moved = new Date(Date.parse(`${key}T00:00:00Z`) + options.shiftDays * 86_400_000).toISOString().slice(0, 10);
+    return startOfDay(moved, APP_TIME_ZONE);
+  };
+
+  const sections = await tx.projectSection.findMany({ where: { projectId: sourceId }, orderBy: { position: "asc" } });
+  const sectionMap = new Map<string, string>();
+  for (const section of sections) {
+    const created = await tx.projectSection.create({
+      data: { projectId: targetId, workspaceId: actor.workspaceId, name: section.name, position: section.position },
+      select: { id: true },
+    });
+    sectionMap.set(section.id, created.id);
+  }
+
+  // Jamais de tâche ni de sous-tâche de la corbeille : la copie ne doit pas
+  // réactiver ce qui a été supprimé. Les valeurs de champs propres à un autre
+  // projet que la source ne sont pas copiées.
+  const memberships = await tx.taskProject.findMany({
+    where: {
+      projectId: sourceId,
+      task: { deletedAt: null, parentId: null, ...(options.includeCompleted ? {} : { status: { not: "DONE" } }) },
+    },
+    include: {
+      task: {
+        include: {
+          tags: true,
+          customValues: { where: { field: { OR: [{ projectId: null }, { projectId: sourceId }] } } },
+          subtasks: { where: { deletedAt: null }, orderBy: { subtaskPosition: "asc" } },
+        },
+      },
+    },
+    orderBy: { position: "asc" },
+  });
+
+  // Écritures groupées (quelques requêtes quel que soit le volume) : un projet
+  // de plusieurs milliers de tâches tient dans la durée de la transaction.
+  const taskMap = new Map<string, string>(memberships.map((m) => [m.task.id, randomUUID()]));
+  const rows = memberships.map((membership) => {
+    const source = membership.task;
+    return {
+      id: taskMap.get(source.id)!,
+      workspaceId: actor.workspaceId,
+      title: source.title,
+      notes: source.notes,
+      priority: source.priority,
+      status: options.includeCompleted ? source.status : ("TODO" as const),
+      completedAt: options.includeCompleted ? source.completedAt : null,
+      assigneeId: options.keepAssignees ? source.assigneeId : null,
+      createdById: actor.id,
+      dueAt: shift(source.dueAt),
+      dueTime: source.dueTime,
+      startAt: shift(source.startAt),
+      isMilestone: source.isMilestone,
+      isApproval: source.isApproval,
+      approvalStatus: source.isApproval ? ("PENDING" as const) : null,
+      recurrence: source.recurrence ?? Prisma.DbNull,
+      estimatedMinutes: source.estimatedMinutes,
+    };
+  });
+  for (let i = 0; i < rows.length; i += 1000) await tx.task.createMany({ data: rows.slice(i, i + 1000) });
+  await tx.taskProject.createMany({
+    data: memberships.map((membership) => ({
+      taskId: taskMap.get(membership.task.id)!,
+      projectId: targetId,
+      workspaceId: actor.workspaceId,
+      sectionId: membership.sectionId ? (sectionMap.get(membership.sectionId) ?? null) : null,
+      position: membership.position,
+    })),
+  });
+  const tagRows = memberships.flatMap((m) => m.task.tags.map((t) => ({ taskId: taskMap.get(m.task.id)!, tagId: t.tagId })));
+  if (tagRows.length) await tx.taskTag.createMany({ data: tagRows, skipDuplicates: true });
+  const valueRows = memberships.flatMap((m) =>
+    m.task.customValues.map((v) => ({
+      taskId: taskMap.get(m.task.id)!,
+      fieldId: v.fieldId,
+      workspaceId: v.workspaceId,
+      textValue: v.textValue,
+      numberValue: v.numberValue,
+      dateValue: v.dateValue,
+      boolValue: v.boolValue,
+      optionIds: v.optionIds,
+    })),
+  );
+  if (valueRows.length) await tx.taskCustomFieldValue.createMany({ data: valueRows });
+  const subtaskRows = memberships.flatMap((m) =>
+    m.task.subtasks.map((sub) => ({
+      workspaceId: actor.workspaceId,
+      title: sub.title,
+      notes: sub.notes,
+      priority: sub.priority,
+      assigneeId: options.keepAssignees ? sub.assigneeId : null,
+      createdById: actor.id,
+      parentId: taskMap.get(m.task.id)!,
+      subtaskPosition: sub.subtaskPosition,
+      dueAt: shift(sub.dueAt),
+      startAt: shift(sub.startAt),
+      estimatedMinutes: sub.estimatedMinutes,
+    })),
+  );
+  for (let i = 0; i < subtaskRows.length; i += 1000) await tx.task.createMany({ data: subtaskRows.slice(i, i + 1000) });
+
+  // Dépendances internes au projet copié.
+  const deps = await tx.taskDependency.findMany({
+    where: { blockingId: { in: [...taskMap.keys()] }, blockedId: { in: [...taskMap.keys()] } },
+  });
+  if (deps.length) {
+    await tx.taskDependency.createMany({
+      data: deps.map((d) => ({
+        blockingId: taskMap.get(d.blockingId)!,
+        blockedId: taskMap.get(d.blockedId)!,
+        workspaceId: actor.workspaceId,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  const fields = await tx.projectCustomField.findMany({ where: { projectId: sourceId } });
+  if (fields.length) {
+    await tx.projectCustomField.createMany({
+      data: fields.map((f) => ({ projectId: targetId, fieldId: f.fieldId, position: f.position })),
+    });
+  }
+
+  const remapIds = (value: Prisma.JsonValue): Prisma.InputJsonValue => {
+    const text = JSON.stringify(value ?? null);
+    let out = text;
+    for (const [from, to] of sectionMap) out = out.split(from).join(to);
+    return JSON.parse(out) as Prisma.InputJsonValue;
+  };
+  const rules = await tx.automationRule.findMany({ where: { projectId: sourceId } });
+  for (const rule of rules) {
+    await tx.automationRule.create({
+      data: {
+        workspaceId: actor.workspaceId,
+        projectId: targetId,
+        name: rule.name,
+        isEnabled: rule.isEnabled,
+        trigger: rule.trigger,
+        triggerConfig: remapIds(rule.triggerConfig),
+        conditions: remapIds(rule.conditions),
+        actions: remapIds(rule.actions),
+        createdById: actor.id,
+      },
+    });
+  }
+
+  const templates = await tx.taskTemplate.findMany({ where: { projectId: sourceId } });
+  for (const template of templates) {
+    await tx.taskTemplate.create({
+      data: {
+        workspaceId: actor.workspaceId,
+        projectId: targetId,
+        name: template.name,
+        title: template.title,
+        description: template.description,
+        priority: template.priority,
+        estimatedMinutes: template.estimatedMinutes,
+        isApproval: template.isApproval,
+        subtasks: template.subtasks ?? [],
+        tagIds: template.tagIds,
+        createdById: actor.id,
+      },
+    });
+  }
+}
+
+export async function createProject(actor: Actor, raw: unknown): Promise<string> {
+  const parsed = projectInputSchema.safeParse(raw);
+  if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Projet invalide.");
+  const input = parsed.data;
+  if (input.startDate && input.dueDate && input.startDate > input.dueDate) {
+    throw new TaskValidationError("La date de début doit précéder l'échéance.");
+  }
+  const ownerId = input.ownerId ?? actor.id;
+  const members = await validMemberIds(actor, [ownerId, actor.id, ...(input.memberIds ?? [])]);
+  await assertCrmLinks(actor, input);
+
+  let template: { id: string; startAt: Date | null; color: string; icon: string; description: string | null } | null = null;
+  if (input.templateId) {
+    const source = await prisma.project.findFirst({
+      where: { id: input.templateId, workspaceId: actor.workspaceId },
+      select: { ...projectAccessSelect(actor), startAt: true, color: true, icon: true, description: true },
+    });
+    if (!source || !canReadProject(source)) throw new TaskValidationError("Modèle introuvable.");
+    template = source;
+  }
+
+  const write = <T>(fn: (tx: Prisma.TransactionClient) => Promise<T>) =>
+    template ? structureTransaction(actor.workspaceId, fn) : prisma.$transaction(fn);
+  const project = await write(async (tx) => {
+    if (template) {
+      // Revérifié sous verrou : le modèle a pu être supprimé entre-temps.
+      const source = await tx.project.findFirst({ where: { id: template.id, workspaceId: actor.workspaceId }, select: projectAccessSelect(actor) });
+      if (!source || !canReadProject(source)) throw new TaskValidationError("Modèle introuvable.");
+    }
+    const created = await tx.project.create({
+      data: {
+        workspaceId: actor.workspaceId,
+        name: input.name,
+        description: input.description ?? template?.description ?? null,
+        color: input.color ?? template?.color ?? "indigo",
+        icon: input.icon ?? template?.icon ?? "folder",
+        ownerId,
+        createdById: actor.id,
+        startAt: toDate(input.startDate),
+        dueAt: toDate(input.dueDate),
+        visibility: input.visibility ?? "WORKSPACE",
+        status: input.status ?? "ON_TRACK",
+        contactId: input.contactId ?? null,
+        organizationId: input.organizationId ?? null,
+        opportunityId: input.opportunityId ?? null,
+        members: {
+          create: members.map((userId) => ({
+            userId,
+            workspaceId: actor.workspaceId,
+            role: (userId === ownerId ? "OWNER" : "EDITOR") as ProjectRole,
+          })),
+        },
+      },
+      select: { id: true },
+    });
+
+    if (template) {
+      const today = dayKey(new Date(), APP_TIME_ZONE);
+      const targetStart = input.startDate ?? today;
+      const sourceStart = template.startAt ? dayKey(template.startAt, APP_TIME_ZONE) : null;
+      await copyProjectContent(tx, actor, template.id, created.id, {
+        shiftDays: sourceStart ? keyDiff(sourceStart, targetStart) : 0,
+        keepAssignees: false,
+        includeCompleted: false,
+      });
+    } else {
+      const positions = evenPositions(DEFAULT_SECTIONS.length);
+      await tx.projectSection.createMany({
+        data: DEFAULT_SECTIONS.map((name, i) => ({
+          projectId: created.id,
+          workspaceId: actor.workspaceId,
+          name,
+          position: positions[i],
+        })),
+      });
+    }
+    return created;
+  });
+
+  await auditProject(actor, "CREATE", project.id);
+  await notify({
+    workspaceId: actor.workspaceId,
+    recipients: members,
+    actorId: actor.id,
+    type: "PROJECT_MEMBER",
+    title: `Vous avez été ajouté au projet « ${input.name} »`,
+    projectId: project.id,
+  });
+  await changed(actor, [project.id]);
+  return project.id;
+}
+
+export async function updateProject(actor: Actor, projectId: string, raw: unknown, baseVersion?: number): Promise<void> {
+  const project = await requireProjectManage(actor, projectId);
+  const parsed = projectPatchSchema.safeParse(raw);
+  if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Modification invalide.");
+  const input = parsed.data;
+  if (input.ownerId) await validMemberIds(actor, [input.ownerId]);
+  await assertCrmLinks(actor, input);
+  if (baseVersion !== undefined && baseVersion !== project.version) {
+    throw new TaskValidationError("Ce projet a été modifié entre-temps. Rechargez la page.");
+  }
+
+  const data: Prisma.ProjectUpdateManyMutationInput & { ownerId?: string | null } = { version: { increment: 1 } };
+  if (input.name !== undefined) data.name = input.name;
+  if (input.description !== undefined) data.description = input.description;
+  if (input.color !== undefined) data.color = input.color;
+  if (input.icon !== undefined) data.icon = input.icon;
+  if (input.visibility !== undefined) data.visibility = input.visibility;
+  if (input.status !== undefined) data.status = input.status;
+  if (input.startDate !== undefined) data.startAt = toDate(input.startDate);
+  if (input.dueDate !== undefined) data.dueAt = toDate(input.dueDate);
+
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.project.updateMany({
+      where: { id: projectId, workspaceId: actor.workspaceId, version: project.version },
+      data,
+    });
+    if (count !== 1) throw new TaskValidationError("Ce projet a été modifié entre-temps. Rechargez la page.");
+    const links: Prisma.ProjectUncheckedUpdateInput = {};
+    if (input.ownerId !== undefined) links.ownerId = input.ownerId;
+    if (input.contactId !== undefined) links.contactId = input.contactId;
+    if (input.organizationId !== undefined) links.organizationId = input.organizationId;
+    if (input.opportunityId !== undefined) links.opportunityId = input.opportunityId;
+    if (Object.keys(links).length) await tx.project.update({ where: { id: projectId }, data: links });
+    if (input.ownerId) {
+      await tx.projectMember.upsert({
+        where: { projectId_userId: { projectId, userId: input.ownerId } },
+        create: { projectId, userId: input.ownerId, workspaceId: actor.workspaceId, role: "OWNER" },
+        update: { role: "OWNER" },
+      });
+    }
+  });
+  await auditProject(actor, "UPDATE", projectId);
+  await changed(actor, [projectId]);
+}
+
+export async function duplicateProject(
+  actor: Actor,
+  projectId: string,
+  options: { name?: string; asTemplate?: boolean; includeTasks?: boolean } = {},
+): Promise<string> {
+  // Dupliquer ne modifie pas la source : la lire suffit (un commentateur
+  // peut donc dupliquer), et la copie ne contient que ce qu'on peut y lire.
+  const source = await requireProjectRead(actor, projectId);
+  const name = (options.name?.trim() || `${source.name} (copie)`).slice(0, 120);
+
+  const id = await structureTransaction(actor.workspaceId, async (tx) => {
+    const current = await tx.project.findFirst({ where: { id: projectId, workspaceId: actor.workspaceId }, select: projectAccessSelect(actor) });
+    if (!current || !canReadProject(current)) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+    const full = await tx.project.findUniqueOrThrow({ where: { id: projectId } });
+    const created = await tx.project.create({
+      data: {
+        workspaceId: actor.workspaceId,
+        name,
+        description: full.description,
+        color: full.color,
+        icon: full.icon,
+        ownerId: actor.id,
+        createdById: actor.id,
+        startAt: full.startAt,
+        dueAt: full.dueAt,
+        visibility: full.visibility,
+        isTemplate: options.asTemplate ?? false,
+        contactId: full.contactId,
+        organizationId: full.organizationId,
+        opportunityId: full.opportunityId,
+        members: { create: [{ userId: actor.id, workspaceId: actor.workspaceId, role: "OWNER" }] },
+      },
+      select: { id: true },
+    });
+    if (options.includeTasks !== false) {
+      await copyProjectContent(tx, actor, projectId, created.id, {
+        shiftDays: 0,
+        keepAssignees: !options.asTemplate,
+        includeCompleted: false,
+      });
+    } else {
+      const sections = await tx.projectSection.findMany({ where: { projectId } });
+      await tx.projectSection.createMany({
+        data: sections.map((s) => ({ projectId: created.id, workspaceId: actor.workspaceId, name: s.name, position: s.position })),
+      });
+    }
+    return created.id;
+  });
+
+  await auditProject(actor, "CREATE", id);
+  await changed(actor, [id]);
+  return id;
+}
+
+export async function setProjectArchived(actor: Actor, projectId: string, archived: boolean): Promise<void> {
+  await requireProjectManage(actor, projectId);
+  await prisma.project.updateMany({
+    where: { id: projectId, workspaceId: actor.workspaceId },
+    data: { archivedAt: archived ? new Date() : null, version: { increment: 1 } },
+  });
+  await auditProject(actor, archived ? "ARCHIVE" : "RESTORE", projectId);
+  await changed(actor, [projectId]);
+}
+
+/**
+ * Supprime un projet. Les tâches qui n'appartiennent qu'à lui sont supprimées
+ * avec lui ; celles qui appartiennent aussi à d'autres projets sont conservées
+ * (elles perdent seulement cette appartenance).
+ */
+/**
+ * Supprime un projet en le **mettant à la corbeille** : rien n'est effacé.
+ *
+ * - le projet disparaît des vues ; sections, membres, champs, règles,
+ *   formulaires et rattachements `task_projects` sont conservés ;
+ * - ses tâches **exclusives** (aucun autre projet actif) et leurs sous-tâches
+ *   encore actives passent à la corbeille avec lui
+ *   (`deleted_with_project_id`), avec commentaires, fichiers, champs,
+ *   historique et liens CRM ; elles ne deviennent jamais « libres » ;
+ * - les tâches présentes dans un autre projet actif y restent disponibles.
+ */
+export async function deleteProject(actor: Actor, projectId: string): Promise<{ deletedTasks: number; keptTasks: number }> {
+  await requireProjectManage(actor, projectId);
+  const now = new Date();
+  // Sous le verrou de structure : deux suppressions de projets partageant une
+  // tâche, ou un rattachement concurrent, ne peuvent pas lire un état périmé
+  // (chacune croyant l'autre projet encore actif).
+  const result = await structureTransaction(actor.workspaceId, async (tx) => {
+    const project = await tx.project.findFirst({ where: { id: projectId, workspaceId: actor.workspaceId }, select: projectAccessSelect(actor) });
+    if (!project || !canManageProject(project, actor)) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+    await tx.project.update({ where: { id: projectId }, data: { deletedAt: now, deletedById: actor.id, version: { increment: 1 } } });
+    const memberships = await tx.taskProject.findMany({
+      where: { projectId, task: { deletedAt: null, parentId: null } },
+      select: { taskId: true, task: { select: { projects: { where: { projectId: { not: projectId }, project: { deletedAt: null } }, select: { projectId: true } } } } },
+      orderBy: { taskId: "asc" },
+    });
+    await checkpoint("deleteProject:scanned");
+    const exclusive = memberships.filter((m) => m.task.projects.length === 0).map((m) => m.taskId);
+    if (exclusive.length) {
+      await tx.task.updateMany({
+        where: { workspaceId: actor.workspaceId, deletedAt: null, OR: [{ id: { in: exclusive } }, { parentId: { in: exclusive } }] },
+        data: { deletedAt: now, deletedById: actor.id, deletedWithProjectId: projectId, version: { increment: 1 } },
+      });
+      await tx.taskActivity.createMany({
+        data: exclusive.map((taskId) => ({ workspaceId: actor.workspaceId, taskId, actorId: actor.id, projectId, kind: "project_trashed" })),
+      });
+    }
+    return { deletedTasks: exclusive.length, keptTasks: memberships.length - exclusive.length };
+  });
+  await auditProject(actor, "DELETE", projectId);
+  await changed(actor, [projectId], "project_deleted");
+  return result;
+}
+
+async function loadTrashedProject(actor: Actor, projectId: string, db: Db = prisma) {
+  const project = await db.project.findFirst({
+    where: { id: projectId, workspaceId: actor.workspaceId, deletedAt: { not: null } },
+    select: { ...projectAccessSelect(actor), name: true },
+  });
+  if (!project) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+  const rights = evaluateProjectTrashAccess(project, actor);
+  if (!rights.canRestore && !rights.canPurge) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+  return { project, rights };
+}
+
+export interface ProjectTrashItem {
+  id: string;
+  name: string;
+  color: string;
+  icon: string;
+  visibility: "WORKSPACE" | "PRIVATE";
+  deletedAt: string;
+  deletedBy: string | null;
+  /** Tâches mises à la corbeille avec le projet (sous-tâches comprises). */
+  taskCount: number;
+  canRestore: boolean;
+  canPurge: boolean;
+}
+
+/** Projets de la corbeille visibles par l'acteur : ceux dont il est propriétaire. */
+export async function listProjectTrash(actor: Actor): Promise<ProjectTrashItem[]> {
+  const rows = await prisma.project.findMany({
+    where: { workspaceId: actor.workspaceId, deletedAt: { not: null } },
+    select: {
+      ...projectAccessSelect(actor),
+      name: true,
+      color: true,
+      icon: true,
+      deletedBy: { select: { displayName: true, email: true } },
+      _count: { select: { trashedTasks: true } },
+    },
+    orderBy: { deletedAt: "desc" },
+  });
+  return rows
+    .map((p) => ({ p, rights: evaluateProjectTrashAccess(p, actor) }))
+    .filter(({ rights }) => rights.canRestore || rights.canPurge)
+    .map(({ p, rights }) => ({
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      icon: p.icon,
+      visibility: p.visibility,
+      deletedAt: p.deletedAt!.toISOString(),
+      deletedBy: p.deletedBy ? p.deletedBy.displayName?.trim() || p.deletedBy.email : null,
+      taskCount: p._count.trashedTasks,
+      ...rights,
+    }));
+}
+
+/**
+ * Restaure un projet : il réapparaît avec ses sections et rattachements ; les
+ * tâches mises à la corbeille **avec lui** reviennent, de même que celles
+ * qu'avait rendues inactives la suppression d'un autre projet et qui
+ * appartiennent aussi à celui-ci. Une tâche supprimée individuellement avant
+ * lui reste dans la corbeille des tâches.
+ */
+export async function restoreProject(actor: Actor, projectId: string): Promise<{ restoredTasks: number }> {
+  await loadTrashedProject(actor, projectId);
+  const restored = await structureTransaction(actor.workspaceId, async (tx) => {
+    const { rights } = await loadTrashedProject(actor, projectId, tx);
+    if (!rights.canRestore) throw new TaskAccessError("FORBIDDEN", "Seul le propriétaire du projet peut le restaurer.");
+    await tx.project.update({ where: { id: projectId }, data: { deletedAt: null, deletedById: null, version: { increment: 1 } } });
+    const roots = await tx.task.findMany({
+      where: {
+        workspaceId: actor.workspaceId,
+        parentId: null,
+        OR: [
+          { deletedWithProjectId: projectId },
+          { deletedWithProjectId: { not: null }, deletedWithProject: { deletedAt: { not: null } }, projects: { some: { projectId } } },
+        ],
+      },
+      select: { id: true, deletedWithProjectId: true },
+    });
+    // Une requête par projet d'origine (et non par tâche) : la restauration
+    // d'un gros projet tient dans la durée de la transaction.
+    const byOrigin = new Map<string | null, string[]>();
+    for (const root of roots) byOrigin.set(root.deletedWithProjectId, [...(byOrigin.get(root.deletedWithProjectId) ?? []), root.id]);
+    for (const [origin, ids] of byOrigin) {
+      await tx.task.updateMany({
+        where: {
+          workspaceId: actor.workspaceId,
+          deletedWithProjectId: origin,
+          OR: [{ id: { in: ids } }, { parentId: { in: ids } }],
+        },
+        data: { deletedAt: null, deletedById: null, deletedWithProjectId: null, version: { increment: 1 } },
+      });
+    }
+    if (roots.length) {
+      await tx.taskActivity.createMany({
+        data: roots.map((r) => ({ workspaceId: actor.workspaceId, taskId: r.id, actorId: actor.id, projectId, kind: "project_restored" })),
+      });
+    }
+    return roots.length;
+  });
+  await auditProject(actor, "RESTORE", projectId);
+  await changed(actor, [projectId], "project");
+  return { restoredTasks: restored };
+}
+
+export interface ProjectPurgePreview {
+  projectId: string;
+  projectName: string;
+  /** Tâches principales effacées (y compris celles supprimées individuellement avant le projet). */
+  purgedTasks: number;
+  /** Sous-tâches effacées avec elles. */
+  purgedSubtasks: number;
+  /** Parmi les tâches et sous-tâches effacées : celles déjà supprimées individuellement avant le projet. */
+  deletedEarlier: number;
+  /** Tâches conservées car liées à un autre projet conservé (actif ou en corbeille). */
+  keptTasks: number;
+  comments: number;
+  attachments: number;
+  historyEntries: number;
+  /** Empreinte du périmètre : la suppression est refusée s'il a changé depuis l'aperçu. */
+  token: string;
+}
+
+/**
+ * Périmètre exact d'une suppression définitive, recalculé à chaque appel :
+ * - effacées : les tâches principales liées au projet (ou mises à la corbeille
+ *   avec lui) qui sont dans la corbeille et n'appartiennent à **aucun autre
+ *   projet conservé** (actif ou en corbeille), avec toutes leurs sous-tâches ;
+ *   ainsi que les tâches encore actives qui n'appartiennent qu'à lui
+ *   (données antérieures à ce contrôle) : sans projet, elles deviendraient
+ *   libres, visibles de tout l'espace ;
+ * - conservées : les tâches encore actives dans un autre projet actif, celles
+ *   de la corbeille liées à un autre projet conservé, et les tâches actives
+ *   dont les autres projets sont tous dans la corbeille — elles les suivent
+ *   (`deleted_with_project_id`) au lieu de devenir libres.
+ *
+ * L'empreinte couvre ce qui sera effacé, ce qui sera conservé **et où**
+ * (restaurée, suit tel projet, inchangée), ainsi que les volumes annoncés.
+ */
+async function purgeScope(db: Db, actor: Actor, projectId: string, projectName: string) {
+  const otherProjects = { where: { projectId: { not: projectId } }, select: { projectId: true, project: { select: { deletedAt: true } } }, orderBy: { projectId: "asc" as const } };
+  const candidates = await db.task.findMany({
+    where: {
+      workspaceId: actor.workspaceId,
+      parentId: null,
+      deletedAt: { not: null },
+      OR: [{ deletedWithProjectId: projectId }, { projects: { some: { projectId } } }],
+    },
+    select: { id: true, deletedWithProjectId: true, projects: otherProjects },
+    orderBy: { id: "asc" },
+  });
+  const active = await db.task.findMany({
+    where: { workspaceId: actor.workspaceId, parentId: null, deletedAt: null, projects: { some: { projectId } } },
+    select: { id: true, projects: otherProjects },
+    orderBy: { id: "asc" },
+  });
+  const hasActive = (t: { projects: { project: { deletedAt: Date | null } }[] }) => t.projects.some((p) => !p.project.deletedAt);
+
+  const purgeTrashed = candidates.filter((t) => t.projects.length === 0);
+  const keptTrashed = candidates.filter((t) => t.projects.length > 0);
+  const keptActive = active.filter(hasActive);
+  const rehomed = active.filter((t) => !hasActive(t) && t.projects.length > 0).map((t) => ({ id: t.id, to: t.projects[0].projectId }));
+  const orphaned = active.filter((t) => t.projects.length === 0);
+
+  const purgeIds = [...purgeTrashed, ...orphaned].map((t) => t.id).sort();
+  const subtasks = purgeIds.length
+    ? await db.task.findMany({ where: { parentId: { in: purgeIds } }, select: { id: true, deletedAt: true, deletedWithProjectId: true }, orderBy: { id: "asc" } })
+    : [];
+  const all = [...purgeIds, ...subtasks.map((s) => s.id)];
+  const [comments, attachments, historyEntries] = all.length
+    ? await Promise.all([
+        db.comment.count({ where: { taskId: { in: all } } }),
+        db.taskAttachment.count({ where: { taskId: { in: all } } }),
+        db.taskActivity.count({ where: { taskId: { in: all } } }),
+      ])
+    : [0, 0, 0];
+
+  // Destination de chaque tâche conservée.
+  const routes = [
+    ...keptTrashed.map((t) => {
+      if (t.deletedWithProjectId !== projectId) return `${t.id}:inchangée`;
+      return hasActive(t) ? `${t.id}:restaurée` : `${t.id}:suit:${t.projects[0].projectId}`;
+    }),
+    ...keptActive.map((t) => `${t.id}:inchangée`),
+    ...rehomed.map((t) => `${t.id}:suit:${t.to}`),
+  ].sort();
+  const token = createHash("sha256")
+    .update(JSON.stringify({ projectId, purge: [...all].sort(), kept: routes, volumes: [comments, attachments, historyEntries] }))
+    .digest("hex");
+  const trashedEarlier = (t: { deletedAt?: Date | null; deletedWithProjectId: string | null }) => t.deletedWithProjectId !== projectId && t.deletedAt !== null;
+  const preview: ProjectPurgePreview = {
+    projectId,
+    projectName,
+    purgedTasks: purgeIds.length,
+    purgedSubtasks: subtasks.length,
+    deletedEarlier: purgeTrashed.filter((t) => t.deletedWithProjectId !== projectId).length + subtasks.filter(trashedEarlier).length,
+    keptTasks: routes.length,
+    comments,
+    attachments,
+    historyEntries,
+    token,
+  };
+  return { preview, purgeIds, all, keptTrashed, rehomed };
+}
+
+/** Aperçu de la suppression définitive d'un projet de la corbeille (propriétaire). */
+export async function previewProjectPurge(actor: Actor, projectId: string): Promise<ProjectPurgePreview> {
+  const { project, rights } = await loadTrashedProject(actor, projectId);
+  if (!rights.canPurge) throw new TaskAccessError("FORBIDDEN", "Seul le propriétaire du projet peut le supprimer définitivement.");
+  return (await purgeScope(prisma, actor, projectId, project.name)).preview;
+}
+
+export type ProjectPurgeResult =
+  | { status: "purged"; purgedTasks: number; purgedSubtasks: number; keptTasks: number }
+  | { status: "scope_changed"; preview: ProjectPurgePreview };
+
+/**
+ * Suppression définitive d'un projet de la corbeille (propriétaire, action
+ * distincte, confirmée sur un aperçu). Le périmètre est **recalculé** dans la
+ * transaction, sous verrou du projet et des tâches concernées ; s'il diffère
+ * de l'aperçu confirmé (`token`), rien n'est effacé et le nouvel aperçu est
+ * renvoyé pour une nouvelle confirmation.
+ *
+ * Efface le projet, ses sections et rattachements, et les tâches qui
+ * n'appartiennent à aucun autre projet conservé — y compris celles déjà
+ * supprimées individuellement : sans projet restant, elles deviendraient des
+ * tâches « libres » visibles de tout l'espace. Une tâche liée à un autre
+ * projet conservé n'est jamais effacée : elle suit ce projet.
+ */
+export async function purgeProject(actor: Actor, projectId: string, token: string): Promise<ProjectPurgeResult> {
+  const { project, rights } = await loadTrashedProject(actor, projectId);
+  if (!rights.canPurge) throw new TaskAccessError("FORBIDDEN", "Seul le propriétaire du projet peut le supprimer définitivement.");
+
+  // Verrou de structure de l'espace (aucune restauration, suppression,
+  // rattachement ou retrait concurrent), puis les lignes dans l'ordre :
+  // projet, tâches concernées par identifiant.
+  const outcome = await structureTransaction(actor.workspaceId, async (tx) => {
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM projects WHERE id = ${projectId}::uuid AND workspace_id = ${actor.workspaceId}::uuid AND deleted_at IS NOT NULL FOR UPDATE`;
+    if (locked.length === 0) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+    const { rights } = await loadTrashedProject(actor, projectId, tx);
+    if (!rights.canPurge) throw new TaskAccessError("FORBIDDEN", "Seul le propriétaire du projet peut le supprimer définitivement.");
+    const concerned = await tx.$queryRaw<{ id: string }[]>`
+      SELECT t.id FROM tasks t
+       WHERE t.workspace_id = ${actor.workspaceId}::uuid
+         AND (t.deleted_with_project_id = ${projectId}::uuid
+              OR EXISTS (SELECT 1 FROM task_projects tp WHERE tp.task_id = t.id AND tp.project_id = ${projectId}::uuid)
+              OR t.parent_id IN (SELECT tp.task_id FROM task_projects tp WHERE tp.project_id = ${projectId}::uuid))`;
+    await lockTasks(tx, concerned.map((r) => r.id));
+    const scope = await purgeScope(tx, actor, projectId, project.name);
+    if (scope.preview.token !== token) return { status: "scope_changed" as const, preview: scope.preview };
+
+    const attachments = await tx.taskAttachment.findMany({ where: { taskId: { in: scope.all } }, select: { storageKey: true } });
+    for (const task of scope.keptTrashed) {
+      // Encore liée à un autre projet : elle suit celui-ci (actif → elle
+      // revient ; en corbeille → elle se restaurera avec lui).
+      if (task.deletedWithProjectId !== projectId) continue;
+      const active = task.projects.find((p) => !p.project.deletedAt);
+      await tx.task.updateMany({
+        where: { workspaceId: actor.workspaceId, deletedWithProjectId: projectId, OR: [{ id: task.id }, { parentId: task.id }] },
+        data: active ? { deletedAt: null, deletedById: null, deletedWithProjectId: null } : { deletedWithProjectId: task.projects[0].projectId },
+      });
+    }
+    // Actives dont les autres projets sont tous dans la corbeille : elles les
+    // suivent dans la corbeille au lieu de devenir libres.
+    const now = new Date();
+    for (const task of scope.rehomed) {
+      await tx.task.updateMany({
+        where: { workspaceId: actor.workspaceId, deletedAt: null, OR: [{ id: task.id }, { parentId: task.id }] },
+        data: { deletedAt: now, deletedById: actor.id, deletedWithProjectId: task.to, version: { increment: 1 } },
+      });
+      await tx.taskActivity.create({ data: { workspaceId: actor.workspaceId, taskId: task.id, actorId: actor.id, projectId: task.to, kind: "project_trashed" } });
+    }
+    await tx.task.deleteMany({ where: { workspaceId: actor.workspaceId, id: { in: scope.purgeIds } } });
+    await tx.project.deleteMany({ where: { id: projectId, workspaceId: actor.workspaceId, deletedAt: { not: null } } });
+    return {
+      status: "purged" as const,
+      purgedTasks: scope.preview.purgedTasks,
+      purgedSubtasks: scope.preview.purgedSubtasks,
+      keptTasks: scope.preview.keptTasks,
+      storageKeys: attachments.map((a) => a.storageKey),
+    };
+  });
+
+  if (outcome.status === "scope_changed") return outcome;
+  for (const key of outcome.storageKeys) await objectStore.remove(key).catch(() => {});
+  await recordAudit({ workspaceId: actor.workspaceId, userId: actor.id, action: "DELETE", entityType: AUDIT_ENTITY_TYPES.PROJECT, entityId: projectId });
+  await changed(actor, [projectId], "project_deleted");
+  return { status: "purged", purgedTasks: outcome.purgedTasks, purgedSubtasks: outcome.purgedSubtasks, keptTasks: outcome.keptTasks };
+}
+
+// ─── Membres et favoris ───────────────────────────────────────────────────────
+
+export async function setProjectMember(actor: Actor, projectId: string, userId: string, role: ProjectRole | null): Promise<void> {
+  const project = await requireProjectManage(actor, projectId);
+  await validMemberIds(actor, [userId]);
+  if (role === null) {
+    if (project.ownerId === userId) throw new TaskValidationError("Le responsable du projet ne peut pas être retiré.");
+    await prisma.projectMember.deleteMany({ where: { projectId, userId } });
+  } else {
+    const existing = await prisma.projectMember.findUnique({ where: { projectId_userId: { projectId, userId } } });
+    await prisma.projectMember.upsert({
+      where: { projectId_userId: { projectId, userId } },
+      create: { projectId, userId, workspaceId: actor.workspaceId, role },
+      update: { role },
+    });
+    if (!existing) {
+      await notify({
+        workspaceId: actor.workspaceId,
+        recipients: [userId],
+        actorId: actor.id,
+        type: "PROJECT_MEMBER",
+        title: `Vous avez été ajouté au projet « ${project.name} »`,
+        projectId,
+      });
+    }
+  }
+  await prisma.project.update({ where: { id: projectId }, data: { version: { increment: 1 } } });
+  await changed(actor, [projectId]);
+}
+
+export async function setFavorite(actor: Actor, projectId: string, favorite: boolean): Promise<void> {
+  await requireProjectRead(actor, projectId);
+  if (favorite) {
+    await prisma.projectFavorite.upsert({
+      where: { userId_projectId: { userId: actor.id, projectId } },
+      create: { userId: actor.id, projectId },
+      update: {},
+    });
+  } else {
+    await prisma.projectFavorite.deleteMany({ where: { userId: actor.id, projectId } });
+  }
+}
+
+// ─── Sections ─────────────────────────────────────────────────────────────────
+
+export async function createSection(
+  actor: Actor,
+  projectId: string,
+  rawName: string,
+  afterSectionId?: string | null,
+): Promise<{ id: string; position: number }> {
+  await requireProjectEdit(actor, projectId);
+  const name = sectionNameSchema.safeParse(rawName);
+  if (!name.success) throw new TaskValidationError(name.error.issues[0]?.message ?? "Nom invalide.");
+
+  let position: number;
+  if (afterSectionId) {
+    const anchor = await prisma.projectSection.findFirst({ where: { id: afterSectionId, projectId }, select: { position: true } });
+    const next = anchor
+      ? await prisma.projectSection.findFirst({
+          where: { projectId, position: { gt: anchor.position } },
+          orderBy: { position: "asc" },
+          select: { position: true },
+        })
+      : null;
+    position = anchor ? (positionBetween(anchor.position, next?.position ?? null) ?? anchor.position + 0.001) : POSITION_STEP;
+  } else {
+    const agg = await prisma.projectSection.aggregate({ where: { projectId }, _max: { position: true } });
+    position = (agg._max.position ?? 0) + POSITION_STEP;
+  }
+  const section = await prisma.projectSection.create({
+    data: { projectId, workspaceId: actor.workspaceId, name: name.data, position },
+    select: { id: true, position: true },
+  });
+  await changed(actor, [projectId], "section");
+  return section;
+}
+
+async function requireSection(actor: Actor, sectionId: string) {
+  const section = await prisma.projectSection.findFirst({
+    where: { id: sectionId, workspaceId: actor.workspaceId },
+    select: { id: true, projectId: true, position: true, name: true },
+  });
+  if (!section) throw new TaskAccessError("NOT_FOUND", "Section introuvable.");
+  await requireProjectEdit(actor, section.projectId);
+  return section;
+}
+
+export async function renameSection(actor: Actor, sectionId: string, rawName: string): Promise<void> {
+  const section = await requireSection(actor, sectionId);
+  const name = sectionNameSchema.safeParse(rawName);
+  if (!name.success) throw new TaskValidationError(name.error.issues[0]?.message ?? "Nom invalide.");
+  await prisma.projectSection.update({ where: { id: sectionId }, data: { name: name.data } });
+  await changed(actor, [section.projectId], "section");
+}
+
+export async function moveSection(
+  actor: Actor,
+  sectionId: string,
+  beforeId: string | null,
+  afterId: string | null,
+): Promise<{ id: string; position: number }[]> {
+  const section = await requireSection(actor, sectionId);
+  const position = async (id: string | null) =>
+    id
+      ? ((await prisma.projectSection.findFirst({ where: { id, projectId: section.projectId }, select: { position: true } }))
+          ?.position ?? null)
+      : null;
+  let next = positionBetween(await position(beforeId), await position(afterId));
+  if (next === null) {
+    const all = await prisma.projectSection.findMany({ where: { projectId: section.projectId }, orderBy: { position: "asc" } });
+    const positions = evenPositions(all.length);
+    await prisma.$transaction(all.map((s, i) => prisma.projectSection.update({ where: { id: s.id }, data: { position: positions[i] } })));
+    next = positionBetween(await position(beforeId), await position(afterId)) ?? POSITION_STEP;
+  }
+  await prisma.projectSection.update({ where: { id: sectionId }, data: { position: next } });
+  await changed(actor, [section.projectId], "section");
+  const sections = await prisma.projectSection.findMany({
+    where: { projectId: section.projectId },
+    select: { id: true, position: true },
+  });
+  return sections;
+}
+
+/**
+ * Supprime une section. `mode = "keep"` : ses tâches passent dans
+ * `targetSectionId` (ou « Sans section ») ; `mode = "delete"` : les tâches qui
+ * n'appartiennent qu'à ce projet sont supprimées, les autres retirées du projet.
+ */
+/**
+ * Supprime une section **sans jamais supprimer de tâche** : toutes ses tâches
+ * (corbeille comprise, pour qu'une restauration retrouve un emplacement
+ * valide) passent dans `targetSectionId`, ou dans « Sans section » (`null`),
+ * à la suite des tâches déjà présentes et dans leur ordre actuel.
+ */
+export async function deleteSection(
+  actor: Actor,
+  sectionId: string,
+  targetSectionId: string | null = null,
+): Promise<{ moved: number }> {
+  const section = await requireSection(actor, sectionId);
+  if (targetSectionId) {
+    const target = await prisma.projectSection.findFirst({ where: { id: targetSectionId, projectId: section.projectId } });
+    if (!target || target.id === sectionId) throw new TaskValidationError("Section de destination invalide.");
+  }
+  const target = targetSectionId
+    ? await prisma.projectSection.findUnique({ where: { id: targetSectionId }, select: { name: true } })
+    : null;
+  const memberships = await prisma.taskProject.findMany({
+    where: { sectionId, projectId: section.projectId },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+    select: { taskId: true },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    const agg = await tx.taskProject.aggregate({ where: { projectId: section.projectId, sectionId: targetSectionId }, _max: { position: true } });
+    let position = agg._max.position ?? 0;
+    for (const m of memberships) {
+      position += POSITION_STEP;
+      await tx.taskProject.update({
+        where: { taskId_projectId: { taskId: m.taskId, projectId: section.projectId } },
+        data: { sectionId: targetSectionId, position },
+      });
+    }
+    if (memberships.length) {
+      await tx.task.updateMany({ where: { id: { in: memberships.map((m) => m.taskId) } }, data: { version: { increment: 1 } } });
+      await tx.taskActivity.createMany({
+        data: memberships.map((m) => ({
+          workspaceId: actor.workspaceId,
+          taskId: m.taskId,
+          actorId: actor.id,
+          projectId: section.projectId,
+          kind: "moved",
+          field: "Section",
+          oldValue: section.name.slice(0, 500),
+          newValue: target?.name.slice(0, 500) ?? "Sans section",
+        })),
+      });
+    }
+    await tx.projectSection.delete({ where: { id: sectionId } });
+  });
+  await changed(actor, [section.projectId], "section");
+  return { moved: memberships.length };
+}
+
+// ─── Points d'avancement ──────────────────────────────────────────────────────
+
+export async function postStatusUpdate(actor: Actor, projectId: string, raw: unknown): Promise<string> {
+  const project = await requireProjectEdit(actor, projectId);
+  const parsed = statusUpdateSchema.safeParse(raw);
+  if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Point d'avancement invalide.");
+  const update = await prisma.$transaction(async (tx) => {
+    const created = await tx.projectStatusUpdate.create({
+      data: {
+        projectId,
+        workspaceId: actor.workspaceId,
+        authorId: actor.id,
+        status: parsed.data.status,
+        title: parsed.data.title,
+        body: parsed.data.body ?? null,
+      },
+      select: { id: true },
+    });
+    await tx.project.update({ where: { id: projectId }, data: { status: parsed.data.status, version: { increment: 1 } } });
+    return created;
+  });
+  const members = await prisma.projectMember.findMany({ where: { projectId }, select: { userId: true } });
+  await notify({
+    workspaceId: actor.workspaceId,
+    recipients: members.map((m) => m.userId),
+    actorId: actor.id,
+    type: "PROJECT_STATUS",
+    title: `${project.name} — ${PROJECT_STATUS_LABELS[parsed.data.status]} : ${parsed.data.title}`,
+    projectId,
+  });
+  await changed(actor, [projectId]);
+  return update.id;
+}
+
+export async function commentStatusUpdate(actor: Actor, statusUpdateId: string, rawBody: string): Promise<void> {
+  const update = await prisma.projectStatusUpdate.findFirst({
+    where: { id: statusUpdateId, workspaceId: actor.workspaceId },
+    select: { projectId: true, authorId: true, title: true },
+  });
+  if (!update) throw new TaskAccessError("NOT_FOUND");
+  await requireProjectRead(actor, update.projectId);
+  const parsed = commentBodySchema.safeParse(rawBody);
+  if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Commentaire invalide.");
+  await prisma.comment.create({
+    data: { workspaceId: actor.workspaceId, statusUpdateId, authorId: actor.id, body: parsed.data },
+  });
+  await notify({
+    workspaceId: actor.workspaceId,
+    recipients: [update.authorId],
+    actorId: actor.id,
+    type: "COMMENT",
+    title: `Commentaire sur le point d'avancement « ${update.title} »`,
+    projectId: update.projectId,
+  });
+  await changed(actor, [update.projectId]);
+}
+
+// ─── Champs du projet ─────────────────────────────────────────────────────────
+
+export async function setProjectField(actor: Actor, projectId: string, fieldId: string, enabled: boolean): Promise<void> {
+  await requireProjectEdit(actor, projectId);
+  const field = await prisma.customField.findFirst({ where: { id: fieldId, workspaceId: actor.workspaceId }, select: { id: true, projectId: true } });
+  if (!field) throw new TaskValidationError("Champ introuvable.");
+  if (field.projectId && field.projectId !== projectId) {
+    throw new TaskValidationError("Ce champ est propre à un autre projet ; ajoutez un champ de la bibliothèque.");
+  }
+  if (enabled) {
+    const agg = await prisma.projectCustomField.aggregate({ where: { projectId }, _max: { position: true } });
+    await prisma.projectCustomField.upsert({
+      where: { projectId_fieldId: { projectId, fieldId } },
+      create: { projectId, fieldId, position: (agg._max.position ?? 0) + POSITION_STEP },
+      update: {},
+    });
+  } else {
+    await prisma.projectCustomField.deleteMany({ where: { projectId, fieldId } });
+  }
+  await changed(actor, [projectId]);
+}

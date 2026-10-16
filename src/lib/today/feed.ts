@@ -56,7 +56,8 @@ export function buildTodayFeed(
       (task): FeedItem => ({
         kind: "task",
         id: task.id,
-        dueDate: task.dueDate,
+        // Le feed ne reçoit que des tâches datées (`due_at <= fin du jour`).
+        dueDate: task.dueDate ?? "9999-12-31",
         title: task.title,
         task,
       }),

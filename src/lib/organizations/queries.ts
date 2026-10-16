@@ -9,6 +9,8 @@ import { computeTaskTiming } from "@/lib/tasks/domain";
 import { formatAmount, STATUS_LABELS } from "@/lib/commerce/domain";
 import { prisma } from "@/lib/prisma";
 import { getWorkspaceIdForPage } from "@/lib/workspace";
+import { requireUser } from "@/lib/auth/dal";
+import { NOT_TEMPLATE_TASK, visibleTaskWhere } from "@/lib/tasks/access";
 import {
   escapeLikePattern,
   orgSearchTokens,
@@ -237,6 +239,8 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
             workspaceId,
             contactId: { in: contactIds },
             completedAt: null,
+            // V1.0 : mêmes règles que le module Tâches (projets privés, corbeille).
+            AND: [visibleTaskWhere(await taskViewer()), NOT_TEMPLATE_TASK],
           },
           orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
           select: {
@@ -308,7 +312,7 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
       title: task.title,
       contactId: task.contactId,
       contactName: task.contact ? contactFullName(task.contact) : null,
-      dueAt: dayKey(task.dueAt, APP_TIME_ZONE),
+      dueAt: task.dueAt ? dayKey(task.dueAt, APP_TIME_ZONE) : null,
       ageLabel: timing.dueLabel,
       ageTier: timing.level.replace("done", "calm") as
         | "calm"
@@ -394,4 +398,9 @@ function websiteHostname(website: string): string | null {
   } catch {
     return null;
   }
+}
+
+async function taskViewer() {
+  const user = await requireUser();
+  return { id: user.id, workspaceId: user.workspaceId };
 }

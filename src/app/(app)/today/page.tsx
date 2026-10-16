@@ -9,7 +9,7 @@ import { NewTaskDialog } from "@/components/tasks/new-task-dialog";
 import { TaskRow } from "@/components/tasks/task-row";
 import { requireUser } from "@/lib/auth/dal";
 import { greetingName } from "@/lib/cockpit/domain";
-import { parseCockpitFilter } from "@/lib/cockpit/filters";
+import { parseCockpitFilter, parseTaskScope, TASK_SCOPES, todayHref } from "@/lib/cockpit/filters";
 import { getCockpit } from "@/lib/cockpit/queries";
 import { todayLabel } from "@/lib/cockpit/view";
 import { APP_TIME_ZONE } from "@/lib/config";
@@ -31,6 +31,8 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
 
   const [user, params] = await Promise.all([requireUser(), searchParams]);
   const filter = parseCockpitFilter(params.f);
+  // Portée des tâches : toutes celles accessibles (défaut historique) ou les miennes.
+  const scope = parseTaskScope(params.t);
   const today = dayKey(new Date(), APP_TIME_ZONE);
 
   // `endOfKpiWindow` couvre la fenêtre « À venir » (UPCOMING_WINDOW_DAYS jours)
@@ -40,7 +42,7 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
 
   const [cockpit, tasksInWindow] = await Promise.all([
     getCockpit(filter),
-    getTasksForKpi(endOfKpiWindow),
+    getTasksForKpi(endOfKpiWindow, scope),
   ]);
 
   // Compteurs combinés suivis + tâches pour les 4 KPI.
@@ -87,7 +89,7 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
         )}
         {/* Indicateurs d'attention */}
         <section aria-label="Indicateurs d'attention">
-          <AttentionSummary counters={counters} filter={filter} />
+          <AttentionSummary counters={counters} filter={filter} scope={scope} />
 
           {actionableTaskCount > 0 && (
             <p className="mt-3 text-sm text-muted">
@@ -109,11 +111,36 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
           <div className="min-w-0 space-y-6">
             <PriorityFeed section={cockpit.feed} filter={filter} />
 
-            {displayTasks.length > 0 && (
-              <section aria-label="Tâches à traiter">
-                <h2 className="mb-3 px-0.5 text-[11px] font-semibold uppercase tracking-widest text-muted">
+            <section aria-label="Tâches à traiter">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-0.5">
+                <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted">
                   Tâches
                 </h2>
+                <nav aria-label="Portée des tâches" className="inline-flex rounded-lg border border-border-subtle bg-surface p-0.5 text-xs">
+                  {TASK_SCOPES.map((option) => {
+                    const active = option.key === scope;
+                    return (
+                      <Link
+                        key={option.key}
+                        href={todayHref(filter, option.key)}
+                        aria-current={active ? "page" : undefined}
+                        className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
+                          active ? "bg-accent text-accent-contrast" : "text-muted hover:text-ink"
+                        }`}
+                      >
+                        {option.label}
+                      </Link>
+                    );
+                  })}
+                </nav>
+              </div>
+              {displayTasks.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-border-strong px-4 py-5 text-center text-sm text-muted">
+                  {scope === "mine"
+                    ? "Aucune tâche qui vous est affectée pour cette période."
+                    : "Aucune tâche accessible pour cette période."}
+                </p>
+              ) : (
                 <ul className="space-y-2">
                   {displayTasks.map((task) => (
                     <li key={task.id}>
@@ -121,8 +148,8 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
                     </li>
                   ))}
                 </ul>
-              </section>
-            )}
+              )}
+            </section>
           </div>
 
           {/* Colonne droite : à venir + en attente */}

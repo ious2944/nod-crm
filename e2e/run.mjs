@@ -20,7 +20,7 @@
  *   4. Connexion
  *   5. Cockpit « Aujourd'hui »  (V0.3 — inchangé)
  *   6. Parcours Follow-up       (V0.3 — inchangé)
- *   7. Parcours Tâches          (V0.4 — nouveau)
+ *   7. Parcours Tâches          (V0.4, adapté à « Mes tâches » V1.0)
  *   8. Module Contacts
  *   9. Organisations (V0.5)
  *  10. Suivi — Recherche & Édition (V0.6)
@@ -191,7 +191,18 @@ try {
     await page.getByRole("link", { name: filter, exact: true }).click();
     await page.waitForTimeout(500);
   }
-  check("les cinq filtres répondent", new URL(page.url()).searchParams.get("f") === "all");
+  // « Tous » est le filtre par défaut : son lien ne porte plus `?f=all`
+  // (URL canonique /follow-ups). On vérifie l'état réel — lien actif et
+  // absence d'un autre filtre — plutôt qu'un paramètre devenu facultatif.
+  {
+    const f = new URL(page.url()).searchParams.get("f");
+    const allLink = page.getByRole("navigation", { name: "Filtres" }).getByRole("link", { name: "Tous", exact: true });
+    check(
+      "les cinq filtres répondent",
+      (f === null || f === "all") && (await allLink.getAttribute("aria-current")) === "page",
+      page.url(),
+    );
+  }
 
   await card.getByRole("button", { name: "Terminer" }).click();
   await page.waitForTimeout(1200);
@@ -212,21 +223,34 @@ try {
   await page.waitForTimeout(1200);
   check("abandonné", (await page.locator("article", { hasText: title }).count()) === 0);
 
-  // ─── Section 7 : Parcours Tâches — V0.4, nouveau ──────────────────────────
+  // ─── Section 7 : Parcours Tâches — V0.4, adapté à la V1.0 ────────────────
+  // La V1.0 remplace l'ancienne page /tasks par « Mes tâches » (même table
+  // `tasks`). Les vérifications fonctionnelles de la V0.4 sont conservées ;
+  // seuls les points d'entrée changent : la création rapide se fait depuis le
+  // cockpit (dialogue historique), la liste est celle de « Mes tâches ».
   section("7. Parcours Tâches");
   const taskTitle = `Tâche E2E ${Date.now()}`;
+  const myTaskRow = (title) =>
+    page.locator("[data-row-id]", { has: page.locator(`input[aria-label="Nom de la tâche"][value="${title}"]`) });
+  const searchApi = async (title, completion) => {
+    const filters = encodeURIComponent(JSON.stringify({ search: title, completion }));
+    const response = await page.request.get(`/api/tasks/search?filters=${filters}`);
+    return response.ok() ? (await response.json()).tasks : [];
+  };
   await page.getByRole("link", { name: "Tâches", exact: true }).first().click();
   await page.waitForURL("**/tasks", { timeout: 15000 });
   check("la navigation mène aux tâches", new URL(page.url()).pathname === "/tasks");
 
   // 1. Créer une tâche indépendante, due aujourd'hui (valeur par défaut).
+  await page.goto("/today", { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Nouvelle tâche" }).click();
   await page.fill("#taskTitle", taskTitle);
   await page.getByRole("button", { name: "Créer la tâche" }).click();
   await page.waitForSelector(`text=${taskTitle}`, { timeout: 15000 });
-  const taskRow = page.locator("article", { hasText: taskTitle });
-  check("création d'une tâche indépendante", (await taskRow.count()) === 1);
-  check("elle est due aujourd'hui", (await taskRow.innerText()).includes("Aujourd'hui"));
+  await page.goto("/tasks", { waitUntil: "networkidle" });
+  await myTaskRow(taskTitle).first().waitFor({ timeout: 15000 });
+  check("création d'une tâche indépendante", (await myTaskRow(taskTitle).count()) === 1);
+  check("elle est due aujourd'hui", (await myTaskRow(taskTitle).innerText()).includes("Aujourd'hui"));
 
   // 2. Elle apparaît dans le cockpit.
   await page.getByRole("link", { name: "Aujourd'hui", exact: true }).first().click();
@@ -243,17 +267,15 @@ try {
     "terminée : elle quitte le feed immédiatement",
     (await page.locator("article", { hasText: taskTitle }).count()) === 0,
   );
-
-  await page.goto("/tasks?f=done", { waitUntil: "networkidle" });
-  check(
-    "elle est retrouvable dans « Terminées »",
-    (await page.locator("article", { hasText: taskTitle }).count()) === 1,
-  );
+  {
+    const completed = await searchApi(taskTitle, "completed");
+    check("elle est retrouvable dans « Terminées »", completed.length === 1 && completed[0].status === "DONE");
+  }
 
   // 5. Créer une tâche liée à un contact — le contact vient du module Contacts,
   //    sans qu'aucun suivi ne soit créé au passage.
   const linkedTitle = `Tâche liée E2E ${Date.now()}`;
-  await page.goto("/tasks", { waitUntil: "networkidle" });
+  await page.goto("/today", { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Nouvelle tâche" }).click();
   await page.fill("#taskTitle", linkedTitle);
   await page.getByPlaceholder("Rechercher un contact...").click();
@@ -274,33 +296,28 @@ try {
   await snoozeTomorrow.waitFor({ timeout: 10000 });
   await snoozeTomorrow.click();
   await page.waitForTimeout(1500);
-  check("report appliqué", (await linkedRow.innerText()).includes("Demain"));
-
   await page.goto("/today", { waitUntil: "networkidle" });
   check(
     "reportée à demain : hors du feed Aujourd'hui",
     (await page.locator("article", { hasText: linkedTitle }).count()) === 0,
   );
   await page.goto("/tasks", { waitUntil: "networkidle" });
-  check(
-    "mais toujours présente dans Tâches",
-    (await page.locator("article", { hasText: linkedTitle }).count()) === 1,
-  );
+  await myTaskRow(linkedTitle).first().waitFor({ timeout: 15000 });
+  check("mais toujours présente dans Tâches", (await myTaskRow(linkedTitle).count()) === 1);
+  check("report appliqué", (await myTaskRow(linkedTitle).innerText()).includes("Demain"));
 
   // 7. Responsive : aucun débordement horizontal, actions atteignables.
   for (const width of [1440, 1280, 1024, 430, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/tasks", { waitUntil: "networkidle" });
+    await myTaskRow(linkedTitle).first().waitFor({ timeout: 15000 });
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
     );
     check(`aucun défilement horizontal à ${width} px`, !overflow);
     check(
       `l'action « Terminer » reste utilisable à ${width} px`,
-      await page
-        .locator("article", { hasText: linkedTitle })
-        .getByRole("button", { name: "Terminer" })
-        .isVisible(),
+      await page.getByRole("checkbox", { name: `Terminer « ${linkedTitle} »` }).isVisible(),
     );
   }
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -635,7 +652,9 @@ try {
   // ─── Section 11 : Déconnexion ─────────────────────────────────────────────
   section("11. Déconnexion");
   await page.getByRole("button", { name: "Déconnexion" }).first().click();
-  await page.waitForURL("**/login", { timeout: 15000 });
+  // La déconnexion mène à /login?logged_out=1 (message de confirmation) : on
+  // attend le chemin, pas l'URL exacte.
+  await page.waitForURL((url) => url.pathname === "/login", { timeout: 15000 });
   check("redirection vers /login", new URL(page.url()).pathname === "/login");
   check("cookie supprimé", (await sessionCookie(context)) === undefined);
 

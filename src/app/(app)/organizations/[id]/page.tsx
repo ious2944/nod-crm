@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 
 import { OrganizationActions } from "@/components/organizations/organization-actions";
+import { LinkedWork } from "@/components/work/linked-work";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { getOrganizationDetail } from "@/lib/organizations/queries";
 import { organizationContactLabel, websiteDisplayLabel } from "@/lib/organizations/view";
@@ -221,36 +222,10 @@ export default async function OrganizationPage({ params }: PageProps<"/organizat
         </section>
       )}
 
-      {/* ── Tâches ouvertes ───────────────────────────────────────────────── */}
-      {org.openTasks.length > 0 && (
-        <section aria-label="Tâches ouvertes" className="mt-8">
-          <h2 className="text-lg font-semibold tracking-tight">
-            Tâches ouvertes{" "}
-            <span className="text-base font-normal text-muted">({org.openTasks.length})</span>
-          </h2>
-
-          <ul className="mt-3 space-y-2">
-            {org.openTasks.map((task) => (
-              <li key={task.id}>
-                <Link
-                  href={`/contacts/${task.contactId}`}
-                  className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-border-subtle bg-surface px-4 py-3 shadow-card transition-all hover:shadow-card-hover hover:border-border-strong"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-ink">{task.title}</p>
-                    {task.contactName && (
-                      <p className="text-sm text-muted">{task.contactName}</p>
-                    )}
-                  </div>
-                  <p className={`shrink-0 text-xs ${TIER_CLASS[task.ageTier] ?? "text-muted"}`}>
-                    {task.ageLabel}
-                  </p>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {/* ── Tâches et projets (directs, et ceux de ses contacts et opportunités) ── */}
+      <div className="mt-8">
+        <LinkedWork kind="organization" id={org.id} />
+      </div>
 
       {/* ── Opportunités ouvertes ─────────────────────────────────────────── */}
       {org.openOpportunities.length > 0 && (

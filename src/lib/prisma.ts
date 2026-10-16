@@ -30,9 +30,20 @@ function createPrismaClient(): PrismaClient {
   }
 
   return new PrismaClient({
-    adapter: new PrismaPg({ connectionString }),
+    adapter: new PrismaPg({ connectionString, options: `-c idle_in_transaction_session_timeout=${IDLE_IN_TRANSACTION_TIMEOUT_MS}` }),
   });
 }
+
+/**
+ * Une session restée « en transaction » sans rien faire est coupée par
+ * PostgreSQL après ce délai, ce qui annule la transaction et libère ses
+ * verrous. Prisma ouvre une transaction par écriture (BEGIN, requête, COMMIT
+ * en trois allers-retours) : un processus suspendu entre deux (pause, SIGSTOP,
+ * machine figée) bloquerait sinon indéfiniment les autres instances — c'est ce
+ * qu'a montré le test de reprise du planificateur. Aucune transaction de
+ * l'application n'attend aussi longtemps entre deux requêtes.
+ */
+export const IDLE_IN_TRANSACTION_TIMEOUT_MS = 30_000;
 
 function getPrismaClient(): PrismaClient {
   if (!globalForPrisma.prisma) {
