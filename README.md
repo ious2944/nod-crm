@@ -5,182 +5,182 @@
 [![License](https://img.shields.io/github/license/ious2944/nod-crm)](LICENSE)
 ![Self-hosted](https://img.shields.io/badge/self--hosted-Docker-informational)
 
-**Open-source, self-hosted CRM focused on follow-ups and the next action.**
+**CRM open source et auto-hébergé, centré sur les suivis et la prochaine action.**
 
-Most CRMs answer “who are my customers?”. NOD CRM starts with a smaller, more urgent question:
+La plupart des CRM répondent à la question « qui sont mes clients ? ». NOD CRM part d'une question plus petite et plus urgente :
 
-> **Who should I follow up with today?**
+> **Qui dois-je relancer aujourd'hui ?**
 
-A follow-up moves back and forth like a table-tennis ball: it is either **on your side** or **on theirs**. Tasks cover work that simply needs doing. Contacts and Organisations provide the context around both. The `Aujourd'hui` cockpit brings the work that needs attention now into one place.
+Un suivi fait des allers-retours comme une balle de ping-pong : elle est soit **dans votre camp**, soit **dans le leur**. Les tâches couvrent le travail qui doit simplement être fait. Les contacts et les organisations fournissent le contexte des deux. Le cockpit `Aujourd'hui` rassemble en un seul endroit ce qui demande de l'attention maintenant.
 
-> **V1.0 — Work management** is the current release. Tasks grow into a full tasks & projects module (projects, sections, list/board/calendar/timeline views, subtasks, dependencies, per-project permissions, notifications, automation rules, reminders), still built on the single task system and linked to contacts, organisations and opportunities. See the [changelog](CHANGELOG.md). The previous release, **V0.9 — Commerce**, added lightweight opportunity tracking; NOD CRM still provides no forecasting, deal scoring or marketing automation.
+> **V1.0 — Gestion de travail** est la version actuelle. Les tâches deviennent un module complet de tâches et projets (projets, sections, vues liste/tableau/calendrier/chronologie, sous-tâches, dépendances, droits par projet, notifications, règles d'automatisation, rappels), toujours construit sur un seul système de tâches et relié aux contacts, organisations et opportunités. Voir le [changelog](CHANGELOG.md). La version précédente, **V0.9 — Commerce**, a ajouté un suivi léger des opportunités ; NOD CRM ne propose toujours ni prévisions, ni scoring des affaires, ni marketing automation.
 
-NOD CRM is a young project used in production. Read [Limitations](#limitations) before adopting it. The interface is currently French-only; the documentation is in English.
+NOD CRM est un projet jeune, utilisé en production. Lisez les [Limites](#limites) avant de l'adopter. L'interface et ce README sont en français ; le reste de la documentation (`docs/`, `CHANGELOG.md`, `ROADMAP.md`, `CONTRIBUTING.md`, `SECURITY.md`) est en anglais.
 
 ---
 
-## What NOD CRM is
+## Ce qu'est NOD CRM
 
-NOD CRM deliberately avoids the generalist-CRM model. There is no deal scoring, forecasting or marketing automation.
+NOD CRM évite volontairement le modèle du CRM généraliste. Il n'y a ni scoring des affaires, ni prévisions, ni marketing automation.
 
-Its product areas stay intentionally distinct:
+Ses domaines restent volontairement distincts :
 
-- **Follow-ups** — something to move forward with someone.
-- **Tasks & projects** — something to do, organised in projects when the work needs it.
-- **Contacts** — the people involved.
-- **Organisations** — the structures those people belong to.
-- **Commerce** — where each commercial opportunity stands.
-- **RGPD Essentials** — the privacy work that needs to be documented and followed.
+- **Suivis** — quelque chose à faire avancer avec quelqu'un.
+- **Tâches et projets** — quelque chose à faire, organisé en projets quand le travail le demande.
+- **Contacts** — les personnes concernées.
+- **Organisations** — les structures auxquelles ces personnes appartiennent.
+- **Commerce** — où en est chaque opportunité commerciale.
+- **RGPD Essentials** — le travail de conformité qu'il faut documenter et suivre.
 
-The product is organised around the next useful action rather than around collecting more fields.
+Le produit est organisé autour de la prochaine action utile plutôt qu'autour de la collecte de toujours plus de champs.
 
 ---
 
 ## Aujourd'hui
 
-`/today` is the cockpit and the natural starting point for a session. It answers one question: **what needs attention now?**
+`/today` est le cockpit et le point de départ naturel d'une session. Il répond à une seule question : **qu'est-ce qui demande de l'attention maintenant ?**
 
-It shows four follow-up attention indicators (late, today, upcoming, waiting), a priority follow-up feed, and unfinished tasks due today or earlier — either every task the user can read (default) or only their own (« Mes tâches »). Private projects and the trash are applied on the server. Upcoming and waiting follow-ups remain visible alongside the priority feed.
+Il affiche quatre indicateurs d'attention sur les suivis (en retard, aujourd'hui, à venir, chez eux), un fil des suivis prioritaires et les tâches non terminées dont l'échéance est aujourd'hui ou passée — soit toutes les tâches que l'utilisateur peut lire (par défaut), soit uniquement les siennes (« Mes tâches »). Les projets privés et la corbeille sont appliqués côté serveur. Les suivis à venir et en attente restent visibles à côté du fil prioritaire.
 
-Tasks and follow-ups keep independent state machines: completing or snoozing one never silently changes the other.
+Tâches et suivis ont des cycles de vie indépendants : terminer ou reporter l'un ne modifie jamais l'autre en silence.
 
 ---
 
-## Features
+## Fonctionnalités
 
-### Follow-ups
+### Suivis
 
-- Subject, optional context, due date, ball owner and optional linked contact.
-- Five-level visual ageing: upcoming → tomorrow → today → overdue → 7+ days late.
-- Status: open, completed or abandoned.
-- Quick actions: Nudge, Received, Ball sent, Snooze (+1 d / +3 d / +1 w), Complete, Abandon and Reopen.
-- Filters: All / To nudge / My court / Their court / Completed.
-- Search by subject and description, preserved in the URL and compatible with filters.
-- Editing after creation: subject, description, due date and linked contact. Ball ownership and status remain quick-action-only.
+- Sujet, contexte facultatif, échéance, détenteur de la balle et contact lié facultatif.
+- Vieillissement visuel sur cinq niveaux : à venir → demain → aujourd'hui → en retard → plus de 7 jours de retard.
+- Statut : ouvert, terminé ou abandonné.
+- Actions rapides : Relancer, Reçu, Balle envoyée, Reporter (+1 j / +3 j / +1 sem.), Terminer, Abandonner et Rouvrir.
+- Filtres : Tous / À relancer / Chez moi / Chez eux / Terminés.
+- Recherche dans le sujet et la description, conservée dans l'URL et compatible avec les filtres.
+- Modification après création : sujet, description, échéance et contact lié. Le détenteur de la balle et le statut ne changent que par les actions rapides.
 
-### Tasks & projects (V1.0 — work management)
+### Tâches et projets (V1.0 — gestion de travail)
 
-An Asana-style work-management module built on the **same `tasks` table** as before — there is one task system.
+Un module de gestion de travail à la manière d'Asana, construit sur **la même table `tasks`** qu'avant — il n'existe qu'un seul système de tâches.
 
-- **Navigation**: Mes tâches (grouped Overdue / Today / Upcoming / No date), Projects, Notifications, Favourites, plus Search, Portfolio, Workload, Forms, Trash and Settings.
-- **Permissions** (server-side): private projects, per-project roles, and a separate *manage* right — an assignee who is not a project member can work on their task but cannot reassign, share, move or delete it, and never sees the rest of the project. See the policy in [docs/tasks.md](docs/tasks.md#permissions-checked-on-the-server).
-- **Projects**: name, description, colour, icon, owner, members and roles, dates, visibility (workspace / private), status updates with comments and history, favourites, templates, duplicate, archive, delete; sections can be created, renamed, reordered and deleted (their tasks move to a chosen section or « Sans section », never deleted). Deleted tasks **and projects** go to a trash and can be restored: a deleted project keeps its sections, memberships and tasks (comments, files, fields, history, CRM links), never exposes a private project's tasks, and is erased only by a separate permanent deletion by its owner, confirmed on the exact scope computed by the server (re-checked at confirmation).
-- **Views on the same data**: Overview, List (compact, collapsible sections, configurable and resizable columns, inline editing, expandable subtasks, quick add, multi-select bulk actions, context menus, keyboard), Board (by section or status), Calendar (month/week, drag to reschedule), Timeline/Gantt (bars, milestones, dependency arrows, move/resize, conflicts flagged, cascading shift only when explicitly enabled) and Dashboard.
-- **Tasks**: rich description, assignee, collaborators and followers, start/due date and optional time, status (À faire / En cours / En attente / Terminé), priority, tags, custom fields, multi-project membership, subtasks, blocked-by / blocking dependencies (cycles refused), milestones, recurrence, estimate and time tracking, attachments, comments with @mentions and reactions, change history, approval workflow, direct link `/tasks/t/<id>`.
-- **Collaboration**: in-app notifications with read/unread/archive and per-type preferences; real-time refresh of other users' views (PostgreSQL LISTEN/NOTIFY → SSE); concurrent edits are detected per field instead of silently overwritten.
-- **Automation**: trigger → conditions → actions rules, persisted, traced, idempotent per event and protected against loops, acting only with the current rights of the person who saved them; task and project templates; internal request forms; CSV import/export; multi-project portfolio; workload per assignee over a chosen period against each person's weekly capacity; scheduled due-date reminders.
-- **CRM integration**: tasks and projects link to a contact, organisation or opportunity; their sheets show the linked work and offer quick creation.
+- **Navigation** : Mes tâches (groupées En retard / Aujourd'hui / À venir / Sans échéance), Projets, Notifications, Favoris, ainsi que Recherche, Synthèse des projets, Charge de travail, Formulaires, Corbeille et Réglages.
+- **Droits** (vérifiés côté serveur) : projets privés, rôles par projet et droit *gérer* distinct — un responsable qui n'est pas membre du projet peut travailler sur sa tâche mais ne peut ni la réaffecter, ni la partager, ni la déplacer, ni la supprimer, et ne voit jamais le reste du projet. Voir la politique dans [docs/tasks.md](docs/tasks.md#permissions-checked-on-the-server).
+- **Projets** : nom, description, couleur, icône, propriétaire, membres et rôles, dates, visibilité (workspace / privé), points d'avancement avec commentaires et historique, favoris, modèles, duplication, archivage, suppression ; les sections peuvent être créées, renommées, réordonnées et supprimées (leurs tâches vont dans une section choisie ou « Sans section », jamais supprimées). Les tâches **et les projets** supprimés vont dans une corbeille et peuvent être restaurés : un projet supprimé conserve ses sections, ses membres et ses tâches (commentaires, fichiers, champs, historique, liens CRM), n'expose jamais les tâches d'un projet privé, et n'est effacé que par une suppression définitive distincte faite par son propriétaire, confirmée sur le périmètre exact calculé par le serveur (revérifié à la confirmation).
+- **Vues sur les mêmes données** : Vue d'ensemble, Liste (compacte, sections repliables, colonnes configurables et redimensionnables, édition en ligne, sous-tâches dépliables, ajout rapide, actions groupées sur sélection multiple, menus contextuels, clavier), Tableau (par section ou par statut), Calendrier (mois/semaine, glisser pour replanifier), Chronologie/Gantt (barres, jalons, flèches de dépendance, déplacement/redimensionnement, conflits signalés, décalage en cascade seulement s'il est explicitement activé) et Tableau de bord.
+- **Tâches** : description riche, responsable, collaborateurs et abonnés, date de début/d'échéance et heure facultative, statut (À faire / En cours / En attente / Terminé), priorité, tags, champs personnalisés, appartenance à plusieurs projets, sous-tâches, dépendances bloquée par / bloquante (cycles refusés), jalons, récurrence, estimation et suivi du temps, pièces jointes, commentaires avec @mentions et réactions, historique des modifications, circuit d'approbation, lien direct `/tasks/t/<id>`.
+- **Collaboration** : notifications dans l'application avec lu/non lu/archivé et préférences par type ; rafraîchissement en temps réel des vues des autres utilisateurs (PostgreSQL LISTEN/NOTIFY → SSE) ; les modifications concurrentes sont détectées champ par champ au lieu d'être écrasées en silence.
+- **Automatisation** : règles déclencheur → conditions → actions, enregistrées, tracées, idempotentes par événement et protégées contre les boucles, n'agissant qu'avec les droits actuels de la personne qui les a enregistrées ; modèles de tâches et de projets ; formulaires de demande internes ; import/export CSV ; synthèse multi-projets ; charge de travail par responsable sur une période choisie, comparée à la capacité hebdomadaire de chacun ; rappels d'échéance planifiés.
+- **Intégration CRM** : tâches et projets se lient à un contact, une organisation ou une opportunité ; leurs fiches affichent le travail lié et permettent une création rapide.
 
-See [docs/tasks.md](docs/tasks.md).
+Voir [docs/tasks.md](docs/tasks.md).
 
 ### Contacts
 
-- Dedicated directory at `/contacts` with creation, viewing and editing.
-- First name, last name, organisation, job title, email, phone, notes and optional photo.
-- PostgreSQL search across name, email, phone, job title and organisation.
-- Filters by organisation and follow-up state, four sort orders and server-side pagination.
-- Contact sheet with linked follow-ups and a shortcut to create a follow-up with that contact preselected.
-- Archive and restore instead of destructive deletion. Existing follow-up history is preserved.
+- Annuaire dédié sur `/contacts`, avec création, consultation et modification.
+- Prénom, nom, organisation, fonction, e-mail, téléphone, notes et photo facultative.
+- Recherche PostgreSQL sur le nom, l'e-mail, le téléphone, la fonction et l'organisation.
+- Filtres par organisation et par état de suivi, quatre tris et pagination côté serveur.
+- Fiche contact avec les suivis liés et un raccourci pour créer un suivi avec ce contact présélectionné.
+- Archivage et restauration plutôt que suppression destructive. L'historique des suivis existants est conservé.
 
 ### Organisations
 
-- First-class organisation records at `/organizations`.
-- Name, website, email, phone and notes.
-- Live search, archive filter and pagination.
-- Organisation sheet at `/organizations/[id]` with linked contacts, open follow-ups, open tasks and open opportunities.
-- Archive and restore.
-- Contacts link to organisations through a nullable foreign key; backward compatibility with the historical organisation text field is preserved.
-- Workspace isolation applies to organisation reads, writes and relationships.
+- Organisations à part entière sur `/organizations`.
+- Nom, site web, e-mail, téléphone et notes.
+- Recherche instantanée, filtre d'archivage et pagination.
+- Fiche organisation sur `/organizations/[id]` avec les contacts liés, les suivis ouverts, les tâches ouvertes et les opportunités ouvertes.
+- Archivage et restauration.
+- Les contacts sont reliés aux organisations par une clé étrangère facultative ; la compatibilité avec l'ancien champ texte « organisation » est conservée.
+- L'isolation par workspace s'applique aux lectures, écritures et relations des organisations.
 
-See [docs/organizations.md](docs/organizations.md).
+Voir [docs/organizations.md](docs/organizations.md).
 
 ### Commerce
 
-- Opportunity list at `/commerce` with open/closed/all filters and pipeline counts, paginated at 25 per page.
-- Opportunity fields: name, linked organisation (required), optional contact, estimated amount, expected close date, pipeline status and notes.
-- Five-stage pipeline: À qualifier → En discussion → Proposition → Gagnée / Perdue. Status transitions are enforced server-side; submitting the same status already active is a no-op (idempotent).
-- Opportunity sheet at `/commerce/[id]` with pipeline controls, edit, delete and linked tasks and follow-ups.
-- Create a task or follow-up directly from an opportunity with the opportunity preselected.
-- Deleting an opportunity preserves linked tasks and follow-ups (`ON DELETE SET NULL`).
-- Workspace isolation applies to all opportunity reads, writes and relationships.
+- Liste des opportunités sur `/commerce` avec filtres ouvertes/fermées/toutes et compteurs du pipeline, paginée par 25.
+- Champs d'une opportunité : nom, organisation liée (obligatoire), contact facultatif, montant estimé, date de clôture prévue, étape du pipeline et notes.
+- Pipeline en cinq étapes : À qualifier → En discussion → Proposition → Gagnée / Perdue. Les transitions sont contrôlées côté serveur ; renvoyer l'étape déjà active est sans effet (idempotent).
+- Fiche opportunité sur `/commerce/[id]` avec les commandes du pipeline, modification, suppression, et les tâches et suivis liés.
+- Création d'une tâche ou d'un suivi directement depuis une opportunité, avec l'opportunité présélectionnée.
+- Supprimer une opportunité conserve les tâches et suivis liés (`ON DELETE SET NULL`).
+- L'isolation par workspace s'applique à toutes les lectures, écritures et relations des opportunités.
 
-### Privacy / RGPD Essentials — V0.8
+### Données personnelles / RGPD Essentials — V0.8
 
-The `/rgpd` area is deliberately a **mini-DPO workspace**, not a legal automation suite.
+L'espace `/rgpd` est volontairement un **espace de travail de mini-DPO**, pas une suite d'automatisation juridique.
 
-It contains five building blocks:
+Il comprend cinq briques :
 
-1. **Treatment register** — purpose, people concerned, data categories, legal basis, retention rule, recipients, transfers, security measures and review dates.
-2. **Processors** — service, location, EEA status, DPA status, subprocessors and review dates. Processors can be linked to treatments.
-3. **Data-subject requests** — access, rectification, erasure, objection, restriction, portability or other requests, with due dates and status tracking.
-4. **Incidents / breaches** — discovery date, affected data, approximate number of people, consequences, measures, risk assessment and notification decisions.
-5. **Privacy cockpit** — action-oriented alerts for missing legal bases or retention rules, DPA issues, overdue reviews, rights requests and incidents that still need assessment.
+1. **Registre des traitements** — finalité, personnes concernées, catégories de données, base légale, durée de conservation, destinataires, transferts, mesures de sécurité et dates de revue.
+2. **Sous-traitants** — service, localisation, statut EEE, statut du DPA, sous-traitants ultérieurs et dates de revue. Les sous-traitants peuvent être liés aux traitements.
+3. **Demandes des personnes** — accès, rectification, effacement, opposition, limitation, portabilité ou autre, avec échéances et suivi du statut.
+4. **Incidents / violations** — date de découverte, données touchées, nombre approximatif de personnes, conséquences, mesures, évaluation du risque et décisions de notification.
+5. **Cockpit RGPD** — alertes orientées action : base légale ou durée de conservation manquante, problèmes de DPA, revues en retard, demandes de droits et incidents encore à évaluer.
 
-NOD CRM never displays “your company is GDPR compliant”. It highlights what has been documented and what still needs attention. See [docs/rgpd-essentials.md](docs/rgpd-essentials.md).
+NOD CRM n'affiche jamais « votre entreprise est conforme au RGPD ». Il met en évidence ce qui est documenté et ce qui demande encore de l'attention. Voir [docs/rgpd-essentials.md](docs/rgpd-essentials.md).
 
-### UI — V0.7
+### Interface — V0.7
 
-V0.7 is the visual system used by all modules, including RGPD Essentials:
+La V0.7 est le système visuel utilisé par tous les modules, RGPD Essentials compris :
 
-- Lumina Enterprise design system with semantic tokens and Electric Indigo (`#6366F1`) as the primary colour.
-- Geist typography and a consistent spacing, radius and elevation system.
-- Refreshed desktop sidebar and responsive mobile navigation, with Lucide vector icons in all navigation entries.
-- Sticky translucent page headers on application pages.
-- Consistent card surfaces, filter pills, form focus states and contact avatars.
-- Dark-mode token parity through `prefers-color-scheme`.
-- Dialogs rendered at the document level so they remain accessible and scrollable on short and mobile viewports.
+- Design system Lumina Enterprise avec jetons sémantiques et Electric Indigo (`#6366F1`) comme couleur principale.
+- Typographie Geist et système cohérent d'espacements, d'arrondis et d'élévations.
+- Barre latérale de bureau revue et navigation mobile adaptative, avec des icônes vectorielles Lucide pour toutes les entrées.
+- En-têtes de page translucides et fixes sur les pages de l'application.
+- Cartes, pastilles de filtre, états de focus des formulaires et avatars de contact homogènes.
+- Parité des jetons en mode sombre via `prefers-color-scheme`.
+- Boîtes de dialogue rendues au niveau du document, accessibles et défilables sur les écrans courts et mobiles.
 
-### Platform
+### Plateforme
 
-- **Authentication** — email/password, Argon2id, server-side sessions with absolute and idle expiry, rate limiting.
-- **Workspace isolation** — the workspace is derived server-side from the authenticated session, not from client input.
-- **Admin CLI** — create workspaces and users, reset passwords and disable accounts. Passwords are entered interactively.
-- **Self-hosting** — Docker Compose, PostgreSQL 16 and automatic Prisma migrations.
-- **Demo data** — fictional organisations, contacts, follow-ups and tasks for a dedicated demo workspace. Seeded business rows are identifiable as demo data where supported by the model.
-- **Mutation audit log** — every write through a Server Action appends one row to `audit_logs`: who acted, which entity, which operation, and when. No field values or diffs are stored. Scoped to the workspace. See [`src/lib/audit/README.md`](src/lib/audit/README.md).
+- **Authentification** — e-mail/mot de passe, Argon2id, sessions côté serveur avec expiration absolue et d'inactivité, limitation de débit.
+- **Isolation par workspace** — le workspace est déduit côté serveur de la session authentifiée, jamais d'une donnée envoyée par le client.
+- **CLI d'administration** — création de workspaces et d'utilisateurs, réinitialisation de mot de passe, désactivation de comptes. Les mots de passe sont saisis de façon interactive.
+- **Auto-hébergement** — Docker Compose, PostgreSQL 16 et migrations Prisma automatiques.
+- **Données de démonstration** — organisations, contacts, suivis, tâches et opportunités fictifs pour un workspace de démo dédié. Les lignes créées par le seed sont identifiables comme données de démo quand le modèle le permet.
+- **Journal d'audit des écritures** — chaque écriture passant par une Server Action ajoute une ligne à `audit_logs` : qui, quelle entité, quelle opération, quand. Aucune valeur de champ ni aucun diff n'est stocké. Limité au workspace. Voir [`src/lib/audit/README.md`](src/lib/audit/README.md).
 
-Not built yet and not shown in the navigation: a global CRM dashboard (the Dashboard view inside a project exists).
-
----
-
-## Principles
-
-- **Simplicity.** A feature must solve a real problem without making the product harder to understand.
-- **Next action first.** Follow-up workflows and work requiring attention take precedence over CRM ceremony.
-- **Self-hosting.** One application, one PostgreSQL database, no queue and no cache required.
-- **Ownership of your data.** Administrators decide where application data lives and who can reach it.
-- **No hidden telemetry.** NOD CRM sends no analytics or phone-home telemetry.
-- **Privacy tooling, not legal certification.** RGPD Essentials helps operate privacy work; it does not make legal conclusions for the user.
+Pas encore construit et absent de la navigation : un tableau de bord CRM global (la vue Tableau de bord d'un projet, elle, existe).
 
 ---
 
-## Screenshots
+## Principes
+
+- **Simplicité.** Une fonctionnalité doit résoudre un vrai problème sans rendre le produit plus difficile à comprendre.
+- **La prochaine action d'abord.** Les suivis et le travail qui demande de l'attention passent avant le cérémonial du CRM.
+- **Auto-hébergement.** Une application, une base PostgreSQL, ni file de messages ni cache nécessaires.
+- **Maîtrise de vos données.** Les administrateurs décident où vivent les données de l'application et qui peut y accéder.
+- **Pas de télémétrie cachée.** NOD CRM n'envoie ni statistiques d'usage ni télémétrie.
+- **Un outil de conformité, pas une certification juridique.** RGPD Essentials aide à mener le travail de conformité ; il ne tire pas de conclusions juridiques à la place de l'utilisateur.
+
+---
+
+## Captures d'écran
 
 ### Aujourd'hui
 
 ![NOD CRM — cockpit Aujourd'hui](docs/screenshots/today-light.png)
 
-The cockpit brings together what needs attention now: priority follow-ups, tasks due today or overdue, upcoming items and work currently waiting on someone else.
+Le cockpit rassemble ce qui demande de l'attention maintenant : suivis prioritaires, tâches dues aujourd'hui ou en retard, éléments à venir et travail en attente chez quelqu'un d'autre.
 
-### Follow-ups
+### Suivis
 
-![NOD CRM — Follow-up board](docs/screenshots/board-light.png)
+![NOD CRM — tableau des suivis](docs/screenshots/board-light.png)
 
-The Follow-up board keeps the next action visible, with attention indicators, search, ownership filters and quick actions in one view.
+Le tableau des suivis garde la prochaine action visible, avec indicateurs d'attention, recherche, filtres par détenteur de la balle et actions rapides dans une seule vue.
 
-### Tasks
+### Tâches
 
 ![NOD CRM — Mes tâches](docs/screenshots/tasks-light.png)
 
-« Mes tâches » gathers every task assigned to you across projects, grouped by due date (overdue, today, upcoming, no date) with status and priority, inline quick add, filters, grouping, configurable columns and saved views.
+« Mes tâches » rassemble toutes les tâches qui vous sont affectées, tous projets confondus, groupées par échéance (en retard, aujourd'hui, à venir, sans échéance), avec statut et priorité, ajout rapide en ligne, filtres, regroupement, colonnes configurables et vues enregistrées.
 
-All screenshots use fictional demo data only. See [docs/screenshots/README.md](docs/screenshots/README.md).
+Toutes les captures utilisent uniquement des données de démonstration fictives. Voir [docs/screenshots/README.md](docs/screenshots/README.md).
 
 ---
 
-## Quick start
+## Démarrage rapide
 
-You need [Docker](https://docs.docker.com/get-docker/) with the Compose plugin and `openssl`.
+Il vous faut [Docker](https://docs.docker.com/get-docker/) avec le plugin Compose, et `openssl`.
 
 ```bash
 git clone https://github.com/ious2944/nod-crm.git
@@ -189,197 +189,199 @@ cd nod-crm
 docker compose up -d
 ```
 
-That builds the image, starts PostgreSQL, applies migrations and starts the application on `http://localhost:3000`.
+Cela construit l'image, démarre PostgreSQL, applique les migrations et lance l'application sur `http://localhost:3000`.
 
-`init-env.sh` is a convenience, not a requirement. `cp .env.example .env` and editing the secrets by hand works too. Generate them with:
+`init-env.sh` est une commodité, pas une obligation. `cp .env.example .env` puis la saisie manuelle des secrets fonctionne aussi. Pour les générer :
 
 ```bash
 openssl rand -base64 48                              # AUTH_SECRET
 openssl rand -base64 36 | tr -d '/+=' | cut -c1-40   # POSTGRES_PASSWORD
 ```
 
-### Create your first account
+### Créer le premier compte
 
-No credentials are seeded. Accounts are created manually and interactively:
+Aucun identifiant n'est créé par défaut. Les comptes se créent à la main, de façon interactive :
 
 ```bash
 docker compose exec app node scripts/admin.mjs create-workspace
 docker compose exec app node scripts/admin.mjs create-user
 ```
 
-Then open `http://localhost:3000` and sign in.
+Ouvrez ensuite `http://localhost:3000` et connectez-vous.
 
-### Optional: demo data
+### Facultatif : données de démonstration
 
 ```bash
 docker compose exec app npx tsx prisma/seed.ts
 ```
 
-The current seed creates **4 fictional organisations, 4 contacts, 7 follow-ups, 6 tasks and 5 opportunities** in the selected demo workspace. Re-running it replaces the seeded demo business data for that workspace. It never creates login credentials.
+Le seed actuel crée **4 organisations, 4 contacts, 7 suivis, 6 tâches et 5 opportunités fictifs** dans le workspace de démo choisi. Le relancer remplace les données de démo de ce workspace. Il ne crée jamais d'identifiants de connexion.
 
-The seed refuses to run when `NODE_ENV=production` unless `ALLOW_DEMO_SEED=1` is explicitly set. For a dedicated demo workspace, `SEED_WORKSPACE_SLUG` and `SEED_WORKSPACE_NAME` can override the defaults.
+Le seed refuse de s'exécuter avec `NODE_ENV=production`, sauf si `ALLOW_DEMO_SEED=1` est explicitement défini. Pour un workspace de démo dédié, `SEED_WORKSPACE_SLUG` et `SEED_WORKSPACE_NAME` remplacent les valeurs par défaut.
 
 ### Migrations
 
-The `migrate` service runs `prisma migrate deploy` before the application starts on every `docker compose up`. There is nothing to run by hand.
+Le service `migrate` exécute `prisma migrate deploy` avant le démarrage de l'application, à chaque `docker compose up`. Il n'y a rien à lancer à la main.
 
-Upgrading a database that ran a pre-release build of the V1.0 work-management branch: run `node scripts/migration-check.mjs` first (read-only). It tells which of three states the database is in, verifies the schema structurally against the applied migrations (rebuilt in an isolated reference database: the role needs `CREATEDB`, or set `SHADOW_DATABASE_URL` to an empty database), lists rows that would make a pending migration fail, and, for the only state that needs it, reconciles the migration history **without a reset and without data loss**. Exit code 0: deploy; 3: an action is required first; 1: do not deploy; 2: the check could not run. See [docs/tasks.md](docs/tasks.md#upgrade-path-by-initial-state).
+Mise à jour d'une base qui a fait tourner une préversion de la branche de gestion de travail V1.0 : lancez d'abord `node scripts/migration-check.mjs` (lecture seule). Le script indique dans lequel des trois états se trouve la base, vérifie la structure du schéma par rapport aux migrations appliquées (reconstruites dans une base de référence isolée : le rôle doit avoir `CREATEDB`, ou bien définissez `SHADOW_DATABASE_URL` vers une base vide), liste les lignes qui feraient échouer une migration en attente et, pour le seul état qui l'exige, réconcilie l'historique des migrations **sans réinitialisation et sans perte de données**. Code de sortie 0 : déployer ; 3 : une action est d'abord nécessaire ; 1 : ne pas déployer ; 2 : la vérification n'a pas pu s'exécuter. Voir [docs/tasks.md](docs/tasks.md#upgrade-path-by-initial-state).
 
 ---
 
-## Requirements
+## Prérequis
 
-| | Self-hosting with Docker | Local development |
+| | Auto-hébergement avec Docker | Développement local |
 | --- | --- | --- |
-| Docker | Engine + Compose plugin | optional |
-| Node.js | not needed on the host | 20.9+ (22 is what CI and the image use) |
-| PostgreSQL | provided by the stack | 16, reachable |
-| RAM | ~1.5 GB for the whole stack | — |
-| Disk | ~3 GB for the image and its build cache | — |
+| Docker | Engine + plugin Compose | facultatif |
+| Node.js | inutile sur l'hôte | 20.9+ (22 en CI et dans l'image) |
+| PostgreSQL | fourni par la stack | 16, accessible |
+| RAM | ~1,5 Go pour toute la stack | — |
+| Disque | ~3 Go pour l'image et son cache de build | — |
 
-HTTPS is required in production: session cookies are `Secure`, so an instance served over plain HTTP cannot be logged into. See [docs/self-hosting.md](docs/self-hosting.md).
+HTTPS est obligatoire en production : les cookies de session sont `Secure`, il est donc impossible de se connecter à une instance servie en HTTP simple. Voir [docs/self-hosting.md](docs/self-hosting.md).
 
 ---
 
-## Environment variables
+## Variables d'environnement
 
-Every variable is documented in [`.env.example`](.env.example). Summary:
+Toutes les variables sont documentées dans [`.env.example`](.env.example). Résumé :
 
-| Variable | Required | Role |
+| Variable | Obligatoire | Rôle |
 | --- | --- | --- |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | yes | Database credentials. Compose builds `DATABASE_URL` from them. |
-| `AUTH_SECRET` | yes | HMAC pepper for session tokens, 32 characters minimum. Production refuses missing/example values. |
-| `DATABASE_URL` | dev only | Direct connection string when running outside Docker. |
-| `APP_NAME` | no | Name shown in the UI. Default `NOD CRM`. |
-| `APP_SOURCE_URL` | no | Target of the Source link. Point it at your fork when required by AGPL §13. |
-| `APP_TIME_ZONE` | no | Time zone for day-level due dates and reminders. Default `Europe/Paris`. |
-| `NOD_SCHEDULER` | no | `off` disables the in-process due-date reminder timer on this instance. Default `on`. |
-| `TASK_REMINDER_INTERVAL_MINUTES` | no | Reminder job period, 1–60 minutes. Default `5`. |
-| `TASK_REMINDER_LEASE_SECONDS` | no | Reminder job lease, 30–3600 s: takeover delay after a crash during a run. Default `600`. |
-| `APP_HOST_PORT` / `APP_BIND_ADDRESS` | no | Published address. Default `127.0.0.1:3000`. |
-| `POSTGRES_VOLUME_NAME` | no | Docker volume holding PostgreSQL data. |
-| `TEST_DATABASE_URL` | tests only | Separate database for integration tests; the suite truncates it. |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | oui | Identifiants de la base. Compose en déduit `DATABASE_URL`. |
+| `AUTH_SECRET` | oui | Poivre HMAC des jetons de session, 32 caractères minimum. La production refuse une valeur absente ou d'exemple. |
+| `DATABASE_URL` | dev uniquement | Chaîne de connexion directe hors Docker. |
+| `APP_NAME` | non | Nom affiché dans l'interface. Par défaut `NOD CRM`. |
+| `APP_SOURCE_URL` | non | Cible du lien « Source ». À pointer vers votre fork lorsque l'AGPL §13 l'exige. |
+| `APP_TIME_ZONE` | non | Fuseau horaire des échéances à la journée et des rappels. Par défaut `Europe/Paris`. |
+| `NOD_SCHEDULER` | non | `off` désactive le minuteur de rappels d'échéance de cette instance. Par défaut `on`. |
+| `TASK_REMINDER_INTERVAL_MINUTES` | non | Période du job de rappels, 1 à 60 minutes. Par défaut `5`. |
+| `TASK_REMINDER_LEASE_SECONDS` | non | Bail du job de rappels, 30 à 3600 s : délai de reprise après un crash en cours d'exécution. Par défaut `600`. |
+| `APP_HOST_PORT` / `APP_BIND_ADDRESS` | non | Adresse publiée. Par défaut `127.0.0.1:3000`. |
+| `POSTGRES_VOLUME_NAME` | non | Volume Docker contenant les données PostgreSQL. |
+| `UPLOADS_VOLUME_NAME` | non | Volume Docker des fichiers déposés (photos de contact, pièces jointes des tâches). Par défaut `nod-crm-uploads-data`. |
+| `NOD_UPLOAD_DIR` | non | Dossier des fichiers déposés hors Docker. Par défaut `var/uploads` dans le projet ; fixé à `/app/var/uploads` dans le conteneur. |
+| `TEST_DATABASE_URL` | tests uniquement | Base séparée pour les tests d'intégration ; la suite la vide. |
 
-Changing `AUTH_SECRET` invalidates every existing session.
+Changer `AUTH_SECRET` invalide toutes les sessions existantes.
 
 ---
 
-## Development
+## Développement
 
 ```bash
-cp .env.example .env         # adjust DATABASE_URL to your PostgreSQL
+cp .env.example .env         # adaptez DATABASE_URL à votre PostgreSQL
 npm install
 npm run db:migrate
 npm run dev                  # http://localhost:3000
 ```
 
-If you would rather not install PostgreSQL:
+Si vous préférez ne pas installer PostgreSQL :
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
 docker compose -f docker-compose.dev.yml exec app npm run db:migrate
 ```
 
-More in [docs/development.md](docs/development.md).
+Plus de détails dans [docs/development.md](docs/development.md).
 
 ---
 
-## Testing
+## Tests
 
 ```bash
 npm run lint
 npm run typecheck
 npm test
-npm run test:integration     # needs TEST_DATABASE_URL — truncates that database
+npm run test:integration     # nécessite TEST_DATABASE_URL — vide cette base
 npm run build
 ```
 
-Browser and CLI suites need a running instance and an account:
+Les suites navigateur et CLI nécessitent une instance en marche et un compte :
 
 ```bash
 BASE_URL=http://127.0.0.1:3000 E2E_EMAIL=you@example.com E2E_PASSWORD='…' npm run test:e2e
-npm run test:e2e:work         # V1.0 tasks & projects journey
+npm run test:e2e:work         # parcours tâches et projets de la V1.0
 npm run test:cli
 ```
 
-`npm test` requires the generated Prisma client — run `npm run db:generate` first on a fresh clone.
+`npm test` nécessite le client Prisma généré — lancez d'abord `npm run db:generate` sur un clone neuf.
 
 ---
 
-## Security
+## Sécurité
 
-NOD CRM authenticates requests server-side and derives the workspace from the session rather than client input. RGPD Essentials follows the same rule: every privacy record is scoped by `workspace_id`, and client-supplied foreign identifiers are rechecked against that workspace before relationships are created.
+NOD CRM authentifie les requêtes côté serveur et déduit le workspace de la session, jamais de ce qu'envoie le client. RGPD Essentials suit la même règle : chaque enregistrement est limité par `workspace_id`, et les identifiants étrangers fournis par le client sont revérifiés dans ce workspace avant toute création de relation.
 
-The threat model, controls and residual risks are documented in [docs/security-model.md](docs/security-model.md).
+Le modèle de menace, les contrôles et les risques résiduels sont documentés dans [docs/security-model.md](docs/security-model.md).
 
-To report a vulnerability, read [SECURITY.md](SECURITY.md). Please do not open a public issue for one.
-
----
-
-## Limitations
-
-Known and accepted in V1.0:
-
-- No MFA. A stolen password is enough. The data model is ready; the feature is not built.
-- No workspace-level roles. Outside Tasks & projects (which has private projects and per-project roles), an authenticated user can do anything inside their workspace.
-- Password reset goes through the CLI, not self-service.
-- Multi-workspace isolation is enforced, but there is no UI to create or switch workspaces beyond the CLI.
-- “Nudge” records the nudge; it does not send an email. NOD CRM sends no application email today.
-- The Follow-up board has no pagination; items for the active filter tab are loaded fully from the database. Board statistics are computed by the database. Contacts and Commerce are paginated.
-- Follow-up search on open items is in memory; the completed tab uses PostgreSQL `ILIKE`. There is no full-text/trigram index yet.
-- Contact search uses `ILIKE`; `pg_trgm` is not shipped yet.
-- Contact photos live on a volume rather than in PostgreSQL. Backup includes them, but restore remains a manual step; see [docs/backup-restore.md](docs/backup-restore.md).
-- Follow-ups can be edited, but ball ownership and status remain quick-action-only.
-- E-mail notifications are not sent: NOD CRM has no mail transport yet. Notifications are in-app only.
-- Due-date reminders run on an in-process timer (every 5 minutes by default) guarded by a database lease; they are deduplicated, resumed after interruption and never sent for past due dates. They are in-app only. A process that is down at the reminder time sends it at the next run, as long as the due date has not passed. After a crash during a run, another instance takes over once the lease expires (10 minutes by default).
-- Workload capacity is set by each user for themselves; there is no administrator role to set it for others.
-- Subtasks are one level deep. Large project lists render incrementally (150 rows per section, “show more”) rather than with full virtualisation.
-- Quick actions require JavaScript. The login screen does not.
-- The interface is French-only.
-- **RGPD Essentials is an operational aid, not legal advice, legal certification, a DPIA/AIPD tool, a consent-management platform or an automated transfer-law assessment.**
-- Legal bases, retention rules, DPA status, international-transfer assessments and breach-notification decisions are documented by the user; NOD CRM does not choose them automatically.
+Pour signaler une vulnérabilité, lisez [SECURITY.md](SECURITY.md). N'ouvrez pas d'issue publique pour cela.
 
 ---
 
-## Roadmap
+## Limites
 
-Directions, not commitments. The full roadmap lives in [ROADMAP.md](ROADMAP.md).
+Connues et assumées en V1.0 :
 
-- **V0.1 — Follow-Up — shipped.** Core follow-up workflow, authentication and self-hosting.
-- **V0.2 — Contacts — shipped.** Directory, search, filters, pagination, photos and archiving.
-- **V0.3 — Aujourd'hui — shipped.** Action-oriented cockpit for what needs attention now.
-- **V0.4 — Tasks — shipped.** A separate task object and task-aware Today cockpit.
-- **V0.5 — Organisations — shipped.** First-class organisations and Contact → Organisation relationships.
-- **V0.6 — Follow-up Search & Editing — shipped.** Search plus safe editing of follow-up content.
-- **V0.7 — Lumina Enterprise UI Refresh — shipped.** Unified visual system, responsive refinements, dark-mode parity and viewport-safe dialogs; no new business logic.
-- **V0.8 — RGPD Essentials — shipped.** Treatment register, processors, rights requests, incidents and privacy alerts.
-- **V0.9 — Commerce — shipped.** Lightweight opportunity tracking, five-stage pipeline and integration with existing tasks and follow-ups.
-- **V1.0 — Work management — current.** Tasks & projects: projects and sections, multiple views, subtasks, dependencies, recurrence, per-project permissions, trash, notifications, automation rules, scheduled reminders, CSV import/export for tasks.
-
-**Next.** CSV import/export for contacts, search-index improvements (`pg_trgm`), English UI scaffolding, broader keyboard shortcuts and e-mail notifications remain candidates rather than commitments.
-
-Later candidates include contact history and duplicate merging, follow-up per-item history, MFA, self-service password reset, multi-user invitations, follow-up pagination at larger scales and public API/webhooks.
-
-Deliberately out of scope for a long time: deal scoring, forecasting, marketing automation, plugin systems and AI features that guess what you should do.
-
----
-
-## Contributing
-
-Contributions are welcome, especially bug reports, documentation and small focused fixes. Read [CONTRIBUTING.md](CONTRIBUTING.md) first: the central rule is to **keep NOD CRM simple**.
-
-By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+- Pas de MFA. Un mot de passe volé suffit. Le modèle de données est prêt ; la fonctionnalité n'est pas construite.
+- Pas de rôles au niveau du workspace. En dehors des tâches et projets (qui ont des projets privés et des rôles par projet), un utilisateur authentifié peut tout faire dans son workspace.
+- La réinitialisation de mot de passe passe par la CLI, pas par un libre-service.
+- L'isolation multi-workspace est appliquée, mais il n'existe pas d'interface pour créer un workspace ou en changer, hors CLI.
+- « Relancer » enregistre la relance ; aucun e-mail n'est envoyé. NOD CRM n'envoie aujourd'hui aucun e-mail.
+- Le tableau des suivis n'est pas paginé ; les éléments de l'onglet actif sont chargés en entier depuis la base. Ses statistiques sont calculées par la base. Contacts et Commerce sont paginés.
+- La recherche dans les suivis ouverts se fait en mémoire ; l'onglet des suivis terminés utilise `ILIKE` de PostgreSQL. Il n'y a pas encore d'index plein texte ou trigramme.
+- La recherche de contacts utilise `ILIKE` ; `pg_trgm` n'est pas encore livré.
+- Les photos de contact et les pièces jointes des tâches sont stockées sur un volume, pas dans PostgreSQL. La sauvegarde les inclut, mais leur restauration reste une étape manuelle ; voir [docs/backup-restore.md](docs/backup-restore.md).
+- Les suivis sont modifiables, mais le détenteur de la balle et le statut ne changent que par les actions rapides.
+- Aucune notification par e-mail : NOD CRM n'a pas encore de transport de courrier. Les notifications sont uniquement dans l'application.
+- Les rappels d'échéance tournent sur un minuteur interne au processus (toutes les 5 minutes par défaut), protégé par un bail en base ; ils sont dédupliqués, repris après interruption et jamais envoyés pour une échéance passée. Ils sont uniquement dans l'application. Un processus arrêté au moment du rappel l'envoie à l'exécution suivante, tant que l'échéance n'est pas passée. Après un crash en cours d'exécution, une autre instance prend le relais à l'expiration du bail (10 minutes par défaut).
+- La capacité de charge est réglée par chaque utilisateur pour lui-même ; aucun rôle d'administrateur ne permet de la régler pour les autres.
+- Les sous-tâches n'ont qu'un niveau. Les grandes listes de projet s'affichent progressivement (150 lignes par section, « afficher plus ») plutôt qu'avec une virtualisation complète.
+- Les actions rapides nécessitent JavaScript. L'écran de connexion, non.
+- L'interface n'existe qu'en français.
+- **RGPD Essentials est une aide opérationnelle, pas un conseil juridique, une certification, un outil d'AIPD/DPIA, une plateforme de gestion du consentement ni une analyse automatisée du droit des transferts.**
+- Bases légales, durées de conservation, statut des DPA, analyses des transferts internationaux et décisions de notification des violations sont documentés par l'utilisateur ; NOD CRM ne les choisit pas automatiquement.
 
 ---
 
-## License
+## Feuille de route
 
-NOD CRM is licensed under the **GNU Affero General Public License v3.0 only** ([AGPL-3.0-only](LICENSE)).
+Des orientations, pas des engagements. La feuille de route complète se trouve dans [ROADMAP.md](ROADMAP.md).
 
-You may run it, modify it and self-host it. If you modify NOD CRM and let other people use your instance over a network, AGPL section 13 requires you to offer them the corresponding source. Point `APP_SOURCE_URL` at your repository when appropriate.
+- **V0.1 — Suivis — livrée.** Flux de suivi de base, authentification et auto-hébergement.
+- **V0.2 — Contacts — livrée.** Annuaire, recherche, filtres, pagination, photos et archivage.
+- **V0.3 — Aujourd'hui — livrée.** Cockpit orienté action pour ce qui demande de l'attention maintenant.
+- **V0.4 — Tâches — livrée.** Un objet tâche distinct et un cockpit Aujourd'hui qui tient compte des tâches.
+- **V0.5 — Organisations — livrée.** Organisations à part entière et relation Contact → Organisation.
+- **V0.6 — Recherche et modification des suivis — livrée.** Recherche et modification sûre du contenu des suivis.
+- **V0.7 — Refonte de l'interface Lumina Enterprise — livrée.** Système visuel unifié, ajustements responsive, parité du mode sombre et boîtes de dialogue adaptées à l'écran ; aucune nouvelle logique métier.
+- **V0.8 — RGPD Essentials — livrée.** Registre des traitements, sous-traitants, demandes de droits, incidents et alertes RGPD.
+- **V0.9 — Commerce — livrée.** Suivi léger des opportunités, pipeline en cinq étapes et intégration avec les tâches et suivis existants.
+- **V1.0 — Gestion de travail — actuelle.** Tâches et projets : projets et sections, vues multiples, sous-tâches, dépendances, récurrence, droits par projet, corbeille, notifications, règles d'automatisation, rappels planifiés, import/export CSV des tâches.
 
-Third-party dependencies keep their own licenses; none of them was modified.
+**Ensuite.** Import/export CSV des contacts, amélioration des index de recherche (`pg_trgm`), amorce d'une interface en anglais, raccourcis clavier plus complets et notifications par e-mail restent des pistes, pas des engagements.
+
+Pistes plus lointaines : historique et fusion des doublons de contacts, historique par suivi, MFA, réinitialisation du mot de passe en libre-service, invitations multi-utilisateurs, pagination des suivis à plus grande échelle et API publique/webhooks.
+
+Volontairement hors périmètre pour longtemps : scoring des affaires, prévisions, marketing automation, systèmes de plugins et fonctionnalités d'IA qui devinent ce que vous devriez faire.
 
 ---
 
-**Build. Open. Explain. Improve.**
+## Contribuer
+
+Les contributions sont bienvenues, en particulier les signalements de bugs, la documentation et les petits correctifs ciblés. Lisez d'abord [CONTRIBUTING.md](CONTRIBUTING.md) : la règle centrale est de **garder NOD CRM simple**.
+
+En participant, vous acceptez le [Code de conduite](CODE_OF_CONDUCT.md).
+
+---
+
+## Licence
+
+NOD CRM est distribué sous la **GNU Affero General Public License v3.0 uniquement** ([AGPL-3.0-only](LICENSE)).
+
+Vous pouvez l'exécuter, le modifier et l'auto-héberger. Si vous modifiez NOD CRM et laissez d'autres personnes utiliser votre instance via un réseau, la section 13 de l'AGPL vous oblige à leur proposer le code source correspondant. Pointez `APP_SOURCE_URL` vers votre dépôt le cas échéant.
+
+Les dépendances tierces conservent leurs propres licences ; aucune n'a été modifiée.
+
+---
+
+**Construire. Ouvrir. Expliquer. Améliorer.**
