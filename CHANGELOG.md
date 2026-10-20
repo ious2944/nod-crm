@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-20
+
 ### Added — V1.0 work management (tasks & projects)
 
 - Projects, sections, multi-project task membership (`task_projects`), subtasks,
@@ -732,5 +734,6 @@ clone, run and contribute to.
 - The interface is French only. Documentation is English.
 - No telemetry, no analytics, no phone-home.
 
-[Unreleased]: https://github.com/ious2944/nod-crm/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ious2944/nod-crm/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/ious2944/nod-crm/compare/v0.9.2...v1.0.0
 [0.1.0]: https://github.com/ious2944/nod-crm/releases/tag/v0.1.0

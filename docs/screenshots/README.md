@@ -10,6 +10,7 @@ Screenshots are intended to show the real product as it exists today — no mock
 | --- | --- | --- |
 | `today-light.png` | `/today` — the Aujourd'hui cockpit with demo data | ⏳ To add |
 | `today-dark.png` | The cockpit in dark mode | ⏳ To add |
+| `tasks-light.png` | `/tasks` — « Mes tâches » (V1.0 work management) with demo tasks | ✅ Current (V1.0) |
 | `board-light.png` | `/follow-ups` list with demo follow-ups | ⚠️ Stale — predates V0.2 |
 | `board-dark.png` | The follow-up list in dark mode | ⏳ To add |
 | `quick-actions.png` | Follow-up card with quick actions and snooze popover | ⏳ To add |

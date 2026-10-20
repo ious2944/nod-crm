@@ -13,7 +13,7 @@ Most CRMs answer “who are my customers?”. NOD CRM starts with a smaller, mor
 
 A follow-up moves back and forth like a table-tennis ball: it is either **on your side** or **on theirs**. Tasks cover work that simply needs doing. Contacts and Organisations provide the context around both. The `Aujourd'hui` cockpit brings the work that needs attention now into one place.
 
-> **V1.0 — Work management.** Tasks grow into a full tasks & projects module (projects, sections, list/board/calendar/timeline views, subtasks, dependencies, per-project permissions, notifications, automation rules, reminders), still built on the single task system and linked to contacts, organisations and opportunities. It is merged on `main` and listed under *Unreleased* in the [changelog](CHANGELOG.md) until it is tagged. The previous release, **V0.9 — Commerce**, added lightweight opportunity tracking; NOD CRM still provides no forecasting, deal scoring or marketing automation.
+> **V1.0 — Work management** is the current release. Tasks grow into a full tasks & projects module (projects, sections, list/board/calendar/timeline views, subtasks, dependencies, per-project permissions, notifications, automation rules, reminders), still built on the single task system and linked to contacts, organisations and opportunities. See the [changelog](CHANGELOG.md). The previous release, **V0.9 — Commerce**, added lightweight opportunity tracking; NOD CRM still provides no forecasting, deal scoring or marketing automation.
 
 NOD CRM is a young project used in production. Read [Limitations](#limitations) before adopting it. The interface is currently French-only; the documentation is in English.
 
@@ -170,9 +170,9 @@ The Follow-up board keeps the next action visible, with attention indicators, se
 
 ### Tasks
 
-![NOD CRM — Tasks](docs/screenshots/tasks-light.png)
+![NOD CRM — Mes tâches](docs/screenshots/tasks-light.png)
 
-The task view keeps independent work simple: overdue, today and upcoming tasks, with completion and snooze actions immediately available. This screenshot predates the V1.0 work-management views (projects, board, calendar, timeline).
+« Mes tâches » gathers every task assigned to you across projects, grouped by due date (overdue, today, upcoming, no date) with status and priority, inline quick add, filters, grouping, configurable columns and saved views.
 
 All screenshots use fictional demo data only. See [docs/screenshots/README.md](docs/screenshots/README.md).
 
@@ -354,11 +354,11 @@ Directions, not commitments. The full roadmap lives in [ROADMAP.md](ROADMAP.md).
 - **V0.7 — Lumina Enterprise UI Refresh — shipped.** Unified visual system, responsive refinements, dark-mode parity and viewport-safe dialogs; no new business logic.
 - **V0.8 — RGPD Essentials — shipped.** Treatment register, processors, rights requests, incidents and privacy alerts.
 - **V0.9 — Commerce — shipped.** Lightweight opportunity tracking, five-stage pipeline and integration with existing tasks and follow-ups.
-- **V1.0 — Work management — merged, not yet tagged.** Tasks & projects: projects and sections, multiple views, subtasks, dependencies, recurrence, per-project permissions, trash, notifications, automation rules, scheduled reminders, CSV import/export for tasks.
+- **V1.0 — Work management — current.** Tasks & projects: projects and sections, multiple views, subtasks, dependencies, recurrence, per-project permissions, trash, notifications, automation rules, scheduled reminders, CSV import/export for tasks.
 
 **Next.** CSV import/export for contacts, search-index improvements (`pg_trgm`), English UI scaffolding, broader keyboard shortcuts and e-mail notifications remain candidates rather than commitments.
 
-Later candidates include contact history and duplicate merging, follow-up per-item history, MFA, self-service password reset, multi-user invitations, follow-up pagination at larger scales and public API/webhooks. Recurring work shipped with V1.0 tasks.
+Later candidates include contact history and duplicate merging, follow-up per-item history, MFA, self-service password reset, multi-user invitations, follow-up pagination at larger scales and public API/webhooks.
 
 Deliberately out of scope for a long time: deal scoring, forecasting, marketing automation, plugin systems and AI features that guess what you should do.
 

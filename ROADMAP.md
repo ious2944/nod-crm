@@ -98,7 +98,7 @@ The product helps document and operate privacy work; it does not decide the law 
 
 ---
 
-## V0.9 — Commerce *(current)*
+## V0.9 — Commerce
 
 A lightweight commercial opportunity module.
 
@@ -122,9 +122,33 @@ Deliberate V0.9 boundaries:
 
 ---
 
+## V1.0 — Work management: tasks & projects *(current)*
+
+Tasks grow into a work-management module, still built on the single `tasks` table: there is one task system.
+
+Shipped in the V1.0 scope:
+
+- **Projects and sections** — owner, members and per-project roles, private or workspace visibility, status updates, favourites, templates, duplicate, archive, trash with restore and a separate permanent deletion.
+- **Views on the same data** — Mes tâches, Overview, List, Board, Calendar, Timeline/Gantt and Dashboard; Search, Portfolio, Workload, Forms, Notifications and Favourites.
+- **Tasks** — assignee, collaborators and followers, start/due dates, statuses, priority, tags, custom fields, multi-project membership, subtasks, dependencies (cycles refused), milestones, recurrence, estimates and time tracking, attachments, comments with @mentions, history and approvals.
+- **Permissions** checked on the server, including a separate *manage* right; notifications, history, search and exports hide what the reader cannot access.
+- **Collaboration** — in-app notifications, real-time refresh between users (PostgreSQL `LISTEN/NOTIFY` → SSE) and per-field conflict detection.
+- **Automation** — trigger → conditions → actions rules running with the current rights of their author, task and project templates, internal request forms, CSV import/export for tasks, scheduled due-date reminders.
+- **CRM integration** — tasks and projects linked to contacts, organisations and opportunities, shown on their sheets; `/today` filter between all accessible tasks and « Mes tâches ».
+
+Deliberate V1.0 boundaries:
+
+- No e-mail notifications: notifications and reminders are in-app only.
+- No workspace-level roles outside Tasks & projects.
+- Subtasks are one level deep.
+
+See [docs/tasks.md](docs/tasks.md).
+
+---
+
 ## Next
 
-Candidates after V0.9, ordered by observed product need rather than by commitment:
+Candidates after V1.0, ordered by observed product need rather than by commitment:
 
 - CSV import/export for contacts.
 - Better search indexes (`pg_trgm`) when workspace size justifies them.
@@ -132,10 +156,11 @@ Candidates after V0.9, ordered by observed product need rather than by commitmen
 - English UI scaffolding.
 - Contact history and duplicate merging.
 - Follow-up per-item history (the mutation audit log shipped in the post-V0.9 batch; per-item change history for a specific follow-up has not).
+- E-mail notifications (requires a mail transport).
 - MFA and self-service password reset.
 - Multi-user invitations.
+- Follow-up pagination at larger scales.
 - Public API/webhooks if a concrete integration needs them.
-- Recurring work.
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "nod-crm",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Open-source self-hosted CRM focused on follow-ups.",
   "license": "AGPL-3.0-only",
   "private": true,
