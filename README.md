@@ -13,7 +13,7 @@ Most CRMs answer “who are my customers?”. NOD CRM starts with a smaller, mor
 
 A follow-up moves back and forth like a table-tennis ball: it is either **on your side** or **on theirs**. Tasks cover work that simply needs doing. Contacts and Organisations provide the context around both. The `Aujourd'hui` cockpit brings the work that needs attention now into one place.
 
-> **V0.9 — Commerce.** NOD CRM adds a lightweight commercial opportunity module: track where each deal stands, link tasks and follow-ups to an opportunity, and let the `Aujourd'hui` cockpit surface the operational work. Commerce does **not** provide forecasting, deal scoring or marketing automation.
+> **V1.0 — Work management.** Tasks grow into a full tasks & projects module (projects, sections, list/board/calendar/timeline views, subtasks, dependencies, per-project permissions, notifications, automation rules, reminders), still built on the single task system and linked to contacts, organisations and opportunities. It is merged on `main` and listed under *Unreleased* in the [changelog](CHANGELOG.md) until it is tagged. The previous release, **V0.9 — Commerce**, added lightweight opportunity tracking; NOD CRM still provides no forecasting, deal scoring or marketing automation.
 
 NOD CRM is a young project used in production. Read [Limitations](#limitations) before adopting it. The interface is currently French-only; the documentation is in English.
 
@@ -26,7 +26,7 @@ NOD CRM deliberately avoids the generalist-CRM model. There is no deal scoring, 
 Its product areas stay intentionally distinct:
 
 - **Follow-ups** — something to move forward with someone.
-- **Tasks** — something to do.
+- **Tasks & projects** — something to do, organised in projects when the work needs it.
 - **Contacts** — the people involved.
 - **Organisations** — the structures those people belong to.
 - **Commerce** — where each commercial opportunity stands.
@@ -40,7 +40,7 @@ The product is organised around the next useful action rather than around collec
 
 `/today` is the cockpit and the natural starting point for a session. It answers one question: **what needs attention now?**
 
-It shows four follow-up attention indicators (late, today, upcoming, waiting), a priority follow-up feed, and unfinished tasks due today or earlier. Upcoming and waiting follow-ups remain visible alongside the priority feed.
+It shows four follow-up attention indicators (late, today, upcoming, waiting), a priority follow-up feed, and unfinished tasks due today or earlier — either every task the user can read (default) or only their own (« Mes tâches »). Private projects and the trash are applied on the server. Upcoming and waiting follow-ups remain visible alongside the priority feed.
 
 Tasks and follow-ups keep independent state machines: completing or snoozing one never silently changes the other.
 
@@ -139,7 +139,7 @@ V0.7 is the visual system used by all modules, including RGPD Essentials:
 - **Demo data** — fictional organisations, contacts, follow-ups and tasks for a dedicated demo workspace. Seeded business rows are identifiable as demo data where supported by the model.
 - **Mutation audit log** — every write through a Server Action appends one row to `audit_logs`: who acted, which entity, which operation, and when. No field values or diffs are stored. Scoped to the workspace. See [`src/lib/audit/README.md`](src/lib/audit/README.md).
 
-Not built yet and not shown in the navigation: Dashboard.
+Not built yet and not shown in the navigation: a global CRM dashboard (the Dashboard view inside a project exists).
 
 ---
 
@@ -172,7 +172,7 @@ The Follow-up board keeps the next action visible, with attention indicators, se
 
 ![NOD CRM — Tasks](docs/screenshots/tasks-light.png)
 
-The task view keeps independent work simple: overdue, today and upcoming tasks, with completion and snooze actions immediately available.
+The task view keeps independent work simple: overdue, today and upcoming tasks, with completion and snooze actions immediately available. This screenshot predates the V1.0 work-management views (projects, board, calendar, timeline).
 
 All screenshots use fictional demo data only. See [docs/screenshots/README.md](docs/screenshots/README.md).
 
@@ -298,6 +298,7 @@ Browser and CLI suites need a running instance and an account:
 
 ```bash
 BASE_URL=http://127.0.0.1:3000 E2E_EMAIL=you@example.com E2E_PASSWORD='…' npm run test:e2e
+npm run test:e2e:work         # V1.0 tasks & projects journey
 npm run test:cli
 ```
 
@@ -317,10 +318,10 @@ To report a vulnerability, read [SECURITY.md](SECURITY.md). Please do not open a
 
 ## Limitations
 
-Known and accepted in V0.9:
+Known and accepted in V1.0:
 
 - No MFA. A stolen password is enough. The data model is ready; the feature is not built.
-- No roles. An authenticated user can do anything inside their workspace.
+- No workspace-level roles. Outside Tasks & projects (which has private projects and per-project roles), an authenticated user can do anything inside their workspace.
 - Password reset goes through the CLI, not self-service.
 - Multi-workspace isolation is enforced, but there is no UI to create or switch workspaces beyond the CLI.
 - “Nudge” records the nudge; it does not send an email. NOD CRM sends no application email today.
@@ -352,11 +353,12 @@ Directions, not commitments. The full roadmap lives in [ROADMAP.md](ROADMAP.md).
 - **V0.6 — Follow-up Search & Editing — shipped.** Search plus safe editing of follow-up content.
 - **V0.7 — Lumina Enterprise UI Refresh — shipped.** Unified visual system, responsive refinements, dark-mode parity and viewport-safe dialogs; no new business logic.
 - **V0.8 — RGPD Essentials — shipped.** Treatment register, processors, rights requests, incidents and privacy alerts.
-- **V0.9 — Commerce — current.** Lightweight opportunity tracking, five-stage pipeline and integration with existing tasks and follow-ups.
+- **V0.9 — Commerce — shipped.** Lightweight opportunity tracking, five-stage pipeline and integration with existing tasks and follow-ups.
+- **V1.0 — Work management — merged, not yet tagged.** Tasks & projects: projects and sections, multiple views, subtasks, dependencies, recurrence, per-project permissions, trash, notifications, automation rules, scheduled reminders, CSV import/export for tasks.
 
-**Next.** CSV import/export, search-index improvements (`pg_trgm`), English UI scaffolding and broader keyboard shortcuts remain candidates rather than commitments.
+**Next.** CSV import/export for contacts, search-index improvements (`pg_trgm`), English UI scaffolding, broader keyboard shortcuts and e-mail notifications remain candidates rather than commitments.
 
-Later candidates include contact history and duplicate merging, follow-up per-item history, MFA, self-service password reset, multi-user invitations, follow-up pagination at larger scales, public API/webhooks and recurring work.
+Later candidates include contact history and duplicate merging, follow-up per-item history, MFA, self-service password reset, multi-user invitations, follow-up pagination at larger scales and public API/webhooks. Recurring work shipped with V1.0 tasks.
 
 Deliberately out of scope for a long time: deal scoring, forecasting, marketing automation, plugin systems and AI features that guess what you should do.
 
