@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Contacts: import from an Outlook CSV export (new and classic Outlook), with a
+  preview step (columns, duplicates in the file and in the workspace, row-level
+  errors and warnings) and an all-or-nothing import. Existing contacts can be
+  skipped or have their empty fields filled; existing data is never overwritten.
+
 ## [1.0.0] - 2026-10-20
 
 ### Added — V1.0 work management (tasks & projects)

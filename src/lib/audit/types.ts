@@ -18,6 +18,8 @@ export type AuditAction = "CREATE" | "UPDATE" | "ARCHIVE" | "RESTORE" | "DELETE"
  */
 export const AUDIT_ENTITY_TYPES = {
   CONTACT: "Contact",
+  /** Un import de contacts (CSV Outlook) : une ligne par import, sans `entityId`. */
+  CONTACT_IMPORT: "ContactImport",
   ORGANIZATION: "Organization",
   FOLLOW_UP: "FollowUp",
   TASK: "Task",

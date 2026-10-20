@@ -36,6 +36,7 @@ Toutes les mutations instrumentées dans la version actuelle :
 | Entité (`entityType`) | Actions journalisées |
 |---|---|
 | `Contact` | `CREATE` `UPDATE` `ARCHIVE` `RESTORE` |
+| `ContactImport` | `CREATE` (une ligne par import CSV, `entityId` nul) |
 | `Organization` | `CREATE` `UPDATE` `ARCHIVE` `RESTORE` |
 | `FollowUp` | `CREATE` `UPDATE` |
 | `Task` | `CREATE` `UPDATE` |
@@ -53,6 +54,11 @@ Notes :
 - La création inline d'un contact depuis le formulaire de suivi est journalisée
   comme un `CREATE Contact`, pas comme partie du suivi.
 - Les lectures ne sont pas journalisées — seules les mutations le sont.
+- L'import de contacts (`ContactImport`) est l'exception à la règle « une
+  ligne par entité » du point 4 ci-dessous : un import de 5 000 lignes
+  écrit une seule ligne d'audit, qui dit qui a importé et quand. Le schéma
+  n'ayant ni métadonnées ni liste d'identifiants, elle ne porte ni les
+  compteurs ni les contacts touchés.
 
 ## Comment instrumenter un nouveau module
 
