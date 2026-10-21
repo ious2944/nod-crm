@@ -2,7 +2,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 
-import { visibleTaskWhere, type Actor } from "./access";
+import { projectAccessWhere, visibleTaskWhere, type Actor } from "./access";
 import type { ChangeMessage } from "./realtime";
 
 export interface ChangeEvent {
@@ -22,17 +22,21 @@ export interface ChangeEvent {
  *   - que les tâches que la personne peut lire, ou qui appartiennent à un
  *     projet qu'elle peut voir (une tâche supprimée ou retirée y était
  *     visible : sa vue doit se mettre à jour) ;
- *   - que les projets ouverts à l'espace ou dont elle est membre (y compris
- *     dans la corbeille, pour qu'ils disparaissent de ses listes).
+ *   - que les projets dont elle est propriétaire ou membre (y compris dans la
+ *     corbeille, pour qu'ils disparaissent de ses listes) — même règle que
+ *     `projectAccessWhere` ;
+ *   - l'auteur du changement (`actorId`) seulement si c'est elle, ou si le
+ *     changement porte sur un élément qu'elle voit : sinon il révélerait
+ *     l'activité d'une personne hors de son périmètre.
  * Un changement qui ne concernait que des éléments invisibles n'est pas
  * transmis du tout. Un changement sans identifiant (réglages de l'espace) est
- * transmis tel quel.
+ * transmis sans auteur.
  */
 export async function changeFor(actor: Actor, message: ChangeMessage): Promise<ChangeEvent | null> {
   const forMe = (message.u ?? []).includes(actor.id);
   const taskIds = message.t ?? [];
   const projectIds = message.p ?? [];
-  const seenProject = { workspaceId: actor.workspaceId, OR: [{ visibility: "WORKSPACE" as const }, { members: { some: { userId: actor.id } } }] };
+  const seenProject = projectAccessWhere(actor);
 
   const [tasks, projects] = await Promise.all([
     taskIds.length
@@ -56,12 +60,14 @@ export async function changeFor(actor: Actor, message: ChangeMessage): Promise<C
   const visibleProjects = new Set(projects.map((p) => p.id));
   const event: ChangeEvent = {
     kind: message.k,
-    actorId: message.a,
+    actorId: null,
     taskIds: taskIds.filter((id) => visibleTasks.has(id)),
     projectIds: projectIds.filter((id) => visibleProjects.has(id)),
     forMe,
   };
   const hadTargets = taskIds.length > 0 || projectIds.length > 0;
-  if (hadTargets && !forMe && event.taskIds.length === 0 && event.projectIds.length === 0) return null;
+  const seesTarget = event.taskIds.length > 0 || event.projectIds.length > 0;
+  if (hadTargets && !forMe && !seesTarget) return null;
+  event.actorId = message.a === actor.id || seesTarget ? message.a : null;
   return event;
 }

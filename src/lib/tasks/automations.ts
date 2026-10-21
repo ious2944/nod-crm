@@ -15,6 +15,7 @@ import {
   type TaskEvent,
 } from "./automation-model";
 import {
+  canAutomateTask,
   canEditProjectContent,
   canReadProject,
   evaluateTaskAccess,
@@ -230,7 +231,7 @@ async function ruleActor(rule: RuleRow): Promise<Actor | null> {
       where: { id: rule.projectId, workspaceId: rule.workspaceId },
       select: projectAccessSelect(actor),
     });
-    if (!project || !canReadProject(project) || !canEditProjectContent(project, actor)) return null;
+    if (!project || !canReadProject(project, actor) || !canEditProjectContent(project, actor)) return null;
   }
   return actor;
 }
@@ -242,12 +243,15 @@ async function runRule(rule: RuleRow, event: TaskEvent, eventKey: string) {
 
   const actor = await ruleActor(rule);
   if (!actor) return;
-  // Seulement sur une tâche que cette personne peut modifier.
+  // Seulement sur une tâche que cette personne peut modifier, dans son
+  // périmètre d'automatisation (`canAutomateTask`) : ses données, ou un projet
+  // où elle a l'Édition. Une personne qui déclenche la règle n'agit donc
+  // jamais, par son intermédiaire, au-delà de ce que l'auteur pourrait faire.
   const access = await prisma.task.findFirst({
     where: { id: event.taskId, workspaceId: rule.workspaceId, deletedAt: null },
     select: taskAccessSelect(actor),
   });
-  if (!access || !evaluateTaskAccess(access, actor).canEdit) return;
+  if (!access || !evaluateTaskAccess(access, actor).canEdit || !canAutomateTask(access, actor)) return;
 
   // Une règle de projet ne s'applique qu'aux tâches de ce projet.
   if (rule.projectId) {

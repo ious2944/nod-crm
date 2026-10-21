@@ -13,35 +13,33 @@ import type { ProjectRole } from "./types";
  * 1. **L'espace (workspace)** — dérivé de la session, jamais d'une entrée
  *    client. Chaque `where` commence par `workspaceId: actor.workspaceId`.
  *
- * 2. **Le projet.** Un projet `WORKSPACE` est lisible par tout l'espace ; un
- *    projet `PRIVATE` par ses seuls membres. Écrire dans un projet demande le
- *    rôle `OWNER` ou `EDITOR` — ou, pour un projet `WORKSPACE`, de ne pas y
- *    avoir été restreint au rôle `COMMENTER`. Administrer (renommer, membres,
- *    archiver, supprimer) demande d'être propriétaire.
+ * 2. **Le projet** (permissions V1, lot A — privé par défaut). Un projet est
+ *    lisible par son propriétaire (`ownerId`, ou `createdById` s'il n'a plus
+ *    de propriétaire) et par ses membres (`ProjectMember`), **par personne
+ *    d'autre** : la visibilité `WORKSPACE` n'ouvre plus rien (la valeur reste
+ *    dans l'enum, elle est refusée à l'écriture). Écrire dans un projet
+ *    demande d'en être propriétaire ou membre `OWNER` / `EDITOR` ;
+ *    administrer (renommer, membres, archiver, supprimer), d'en être
+ *    propriétaire.
  *
- * Une tâche est visible si elle n'est pas dans la corbeille, si tous ses
- * projets ne sont pas dans la corbeille, et :
- *   - elle n'appartient à aucun projet (comportement historique de la V0.4 :
- *     les tâches « libres » restent partagées dans l'espace) ;
- *   - ou elle appartient à au moins un projet lisible ;
- *   - ou l'utilisateur en est responsable, créateur, collaborateur ou abonné.
- * Une sous-tâche est visible si elle l'est elle-même à ce titre, ou si sa
- * parente l'est (un seul niveau). La réciproque est fausse : le responsable
- * d'une sous-tâche ne voit pas la parente pour autant.
- *
- * Cette visibilité « par implication » ne s'étend jamais au-delà de la tâche :
- * le responsable d'une tâche d'un projet privé n'en voit ni les autres tâches,
- * ni les sections, ni le nom du projet (voir `serialize.ts`).
+ * Une tâche **racine** est visible si elle n'est pas dans la corbeille, si
+ * tous ses projets ne sont pas dans la corbeille, et :
+ *   - elle appartient à au moins un projet lisible ;
+ *   - ou elle n'appartient à aucun projet (tâche « libre ») et l'utilisateur
+ *     en est créateur, responsable ou collaborateur.
+ * Être abonné (`FOLLOWER`) ne donne aucun accès ; être responsable d'une
+ * tâche d'un projet qu'on ne lit pas non plus. Une **sous-tâche** suit sa
+ * tâche racine, et seulement elle : elle n'est jamais lisible par un autre
+ * chemin (même pas par son propre responsable).
  *
  * Droits sur une tâche visible (`evaluateTaskAccess`) :
  *   - lire et commenter : toute personne qui la voit ;
  *   - modifier ses champs : un éditeur d'un de ses projets, ou son
- *     responsable / créateur / collaborateur (même commentateur ou non membre) ;
+ *     responsable / créateur / collaborateur (règle inchangée ; la règle du
+ *     responsable en Lecture est au lot B) ;
  *   - gérer (supprimer, dupliquer, rattacher à un autre projet, changer de
  *     parente, réaffecter, partager avec d'autres personnes) : un éditeur
- *     d'un de ses projets — ou, pour une tâche libre, tout l'espace.
- *     Un responsable non membre ne peut donc pas faire sortir la tâche de son
- *     projet privé ni y donner accès à quelqu'un d'autre.
+ *     d'un de ses projets — ou, pour une tâche libre, quiconque la voit.
  */
 
 export interface Actor {
@@ -49,20 +47,49 @@ export interface Actor {
   workspaceId: string;
 }
 
-export function readableProjectWhere(actor: Actor): Prisma.ProjectWhereInput {
+/** Projets dont l'acteur est propriétaire ou membre, corbeille comprise (même règle que `isProjectOwner` / `canReadProject`). */
+export function projectAccessWhere(actor: Actor): Prisma.ProjectWhereInput {
   return {
     workspaceId: actor.workspaceId,
-    // Un projet de la corbeille n'est lisible par personne (voir `evaluateProjectTrashAccess`).
-    deletedAt: null,
-    OR: [{ visibility: "WORKSPACE" }, { members: { some: { userId: actor.id } } }],
+    OR: [
+      { ownerId: actor.id },
+      { ownerId: null, createdById: actor.id },
+      { members: { some: { userId: actor.id } } },
+    ],
   };
 }
 
+export function readableProjectWhere(actor: Actor): Prisma.ProjectWhereInput {
+  return {
+    // Un projet de la corbeille n'est lisible par personne (voir `evaluateProjectTrashAccess`).
+    deletedAt: null,
+    AND: [projectAccessWhere(actor)],
+  };
+}
+
+/**
+ * Annuaire de l'acteur (décision b) : lui-même, et les personnes avec qui il
+ * partage un projet lisible (propriétaire ou membre). Aucune autre personne de
+ * l'espace n'est listée, proposée dans un sélecteur ni acceptée comme
+ * responsable ou collaborateur.
+ */
+export function directoryUserWhere(actor: Actor): Prisma.UserWhereInput {
+  return {
+    workspaceId: actor.workspaceId,
+    OR: [
+      { id: actor.id },
+      { projectMemberships: { some: { project: readableProjectWhere(actor) } } },
+      { ownedProjects: { some: readableProjectWhere(actor) } },
+    ],
+  };
+}
+
+/** Voies d'accès personnelles à une tâche **libre** : créateur, responsable, collaborateur (jamais abonné). */
 function ownTaskConditions(actor: Actor): Prisma.TaskWhereInput[] {
   return [
     { assigneeId: actor.id },
     { createdById: actor.id },
-    { followers: { some: { userId: actor.id } } },
+    { followers: { some: { userId: actor.id, kind: "COLLABORATOR" } } },
   ];
 }
 
@@ -84,27 +111,22 @@ function rootVisibleWhere(actor: Actor): Prisma.TaskWhereInput {
       NOT_ONLY_IN_TRASH,
       {
         OR: [
-          { projects: { none: {} } },
           { projects: { some: { project: readableProjectWhere(actor) } } },
-          ...ownTaskConditions(actor),
+          { projects: { none: {} }, OR: ownTaskConditions(actor) },
         ],
       },
     ],
   };
 }
 
-/** Filtre Prisma des tâches que l'acteur peut lire. */
+/** Filtre Prisma des tâches que l'acteur peut lire. Une sous-tâche ne l'est que par sa racine. */
 export function visibleTaskWhere(actor: Actor): Prisma.TaskWhereInput {
   return {
     workspaceId: actor.workspaceId,
     deletedAt: null,
     OR: [
       { parentId: null, AND: [rootVisibleWhere(actor)] },
-      {
-        parentId: { not: null },
-        parent: { deletedAt: null, AND: [NOT_ONLY_IN_TRASH] },
-        OR: [...ownTaskConditions(actor), { parent: rootVisibleWhere(actor) }],
-      },
+      { parentId: { not: null }, parent: rootVisibleWhere(actor) },
     ],
   };
 }
@@ -143,9 +165,13 @@ export function projectRole(project: ProjectAccessInfo): ProjectRole | null {
   return project.members[0]?.role ?? null;
 }
 
-export function canReadProject(project: ProjectAccessInfo): boolean {
+/**
+ * Lire le projet : propriétaire ou membre. `members` n'est chargé que pour
+ * l'acteur (`projectAccessSelect`) : un membre quelconque, c'est lui.
+ */
+export function canReadProject(project: ProjectAccessInfo, actor: Actor): boolean {
   if (project.deletedAt) return false;
-  return project.visibility === "WORKSPACE" || project.members.length > 0;
+  return project.members.length > 0 || isProjectOwner(project, actor);
 }
 
 /** Modifier le contenu (tâches, sections) d'un projet. */
@@ -154,8 +180,7 @@ export function canEditProjectContent(project: ProjectAccessInfo, actor: Actor):
   const role = projectRole(project);
   if (role === "OWNER" || role === "EDITOR") return true;
   if (role === "COMMENTER") return false;
-  if (project.ownerId === actor.id) return true;
-  return project.visibility === "WORKSPACE";
+  return isProjectOwner(project, actor);
 }
 
 /** Administrer le projet : réglages, membres, archivage, suppression. */
@@ -233,7 +258,6 @@ export function evaluateTaskAccess(task: TaskAccessInfo, actor: Actor): TaskPerm
   const involvement = (node: TaskAccessRoot) => ({
     owns: node.assigneeId === actor.id || node.createdById === actor.id,
     collaborates: node.followers.some((f) => f.kind === "COLLABORATOR"),
-    follows: node.followers.length > 0,
   });
   const self = involvement(task);
   const top = involvement(root);
@@ -245,18 +269,33 @@ export function evaluateTaskAccess(task: TaskAccessInfo, actor: Actor): TaskPerm
   const projects = all.filter((p) => !p.deletedAt);
   const free = all.length === 0;
   const onlyInTrash = all.length > 0 && projects.length === 0;
-  const readableProject = projects.some(canReadProject);
+  const readableProject = projects.some((p) => canReadProject(p, actor));
   const editableProject = projects.some((p) => canEditProjectContent(p, actor));
 
   const deleted = Boolean(task.deletedAt || task.parent?.deletedAt);
-  const canRead =
-    !deleted && !onlyInTrash && (free || readableProject || self.owns || self.follows || top.owns || top.follows);
+  // Lecture par la racine seulement : projet lisible, ou tâche libre dont
+  // l'acteur est créateur, responsable ou collaborateur (jamais abonné).
+  const canRead = !deleted && !onlyInTrash && (readableProject || (free && (top.owns || top.collaborates)));
   const canEdit =
     canRead &&
     (free || editableProject || self.owns || self.collaborates || top.owns || top.collaborates);
   const canManage = canRead && (free || editableProject);
 
   return { canRead, canEdit, canComment: canRead, canManage };
+}
+
+/**
+ * Périmètre d'une règle d'automatisation (lot A) : elle n'agit, avec les
+ * droits de son auteur, que sur ses propres données — une tâche libre dont il
+ * est créateur, responsable ou collaborateur — et sur les tâches d'un projet
+ * où il a l'Édition. Être responsable d'une tâche d'un projet en Lecture ne
+ * suffit pas (contrairement à la modification manuelle de ses champs).
+ */
+export function canAutomateTask(task: TaskAccessInfo, actor: Actor): boolean {
+  if (!evaluateTaskAccess(task, actor).canRead) return false;
+  const root = task.parent ?? task;
+  if (root.projects.length === 0) return true;
+  return root.projects.some((p) => !p.project.deletedAt && canEditProjectContent(p.project, actor));
 }
 
 /**
@@ -281,7 +320,14 @@ export function evaluateTrashAccess(
   // d'un projet.
   if (all.length > 0 && projects.length === 0) return { canRestore: false, canPurge: false };
   if (projects.length === 0) {
-    return { canRestore: true, canPurge: task.createdById === actor.id || task.deletedById === actor.id };
+    // Tâche libre : seulement les personnes qui la voyaient (racine : créateur,
+    // responsable, collaborateur) ou qui l'ont supprimée.
+    const involved =
+      root.assigneeId === actor.id ||
+      root.createdById === actor.id ||
+      root.followers.some((f) => f.kind === "COLLABORATOR") ||
+      task.deletedById === actor.id;
+    return { canRestore: involved, canPurge: task.createdById === actor.id || task.deletedById === actor.id };
   }
   return {
     canRestore: projects.some((p) => canEditProjectContent(p, actor)),

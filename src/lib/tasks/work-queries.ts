@@ -148,7 +148,7 @@ export async function getProjectDetail(actor: Actor, projectId: string): Promise
       opportunity: { select: { id: true, name: true } },
     },
   });
-  if (!project || !canReadProject(project)) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+  if (!project || !canReadProject(project, actor)) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
   const members = await prisma.projectMember.findMany({
     where: { projectId },
     select: { userId: true, role: true },
@@ -463,7 +463,7 @@ export async function resolveTaskLocation(actor: Actor, taskId: string): Promise
     },
   });
   if (!task) throw new TaskAccessError("NOT_FOUND");
-  const readable = [...task.projects, ...(task.parent?.projects ?? [])].find((p) => canReadProject(p.project));
+  const readable = [...task.projects, ...(task.parent?.projects ?? [])].find((p) => canReadProject(p.project, actor));
   const projectId = readable?.projectId;
   return projectId ? `/tasks/projects/${projectId}?view=list&task=${taskId}` : `/tasks?task=${taskId}`;
 }
@@ -791,7 +791,7 @@ export async function getForm(actor: Actor, formId: string) {
     where: { id: formId, workspaceId: actor.workspaceId },
     include: { project: { select: { ...projectSummarySelect(actor) } } },
   });
-  if (!form || !canReadProject(form.project)) throw new TaskAccessError("NOT_FOUND", "Formulaire introuvable.");
+  if (!form || !canReadProject(form.project, actor)) throw new TaskAccessError("NOT_FOUND", "Formulaire introuvable.");
   return {
     id: form.id,
     name: form.name,

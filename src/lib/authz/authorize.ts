@@ -21,31 +21,30 @@ import { CAPABILITY_RULES, type Capability } from "./capabilities";
  * `authorize` (via `runAction`, `runCrmAction` ou `withActor`) avant toute
  * lecture ou écriture métier. Voir `docs/permissions-v1.md`.
  *
- * **Lot 0 : aucune règle nouvelle.** `authorize` ne fait que ré-exprimer les
- * règles en vigueur :
+ * Règles :
  *   - sans ressource : l'acteur est authentifié et son espace vient de la
- *     session — c'est la seule condition actuelle à l'entrée d'une action ;
- *     les contrôles fins restent dans les services et les `where` bornés à
- *     l'espace, inchangés ;
- *   - avec ressource : même espace que l'acteur, puis la fonction existante de
- *     `access.ts` qui correspond à la capacité (voir `CAPABILITY_RULES`).
+ *     session (contrôle d'entrée de chaque action) ;
+ *   - avec ressource : même espace que l'acteur, puis la règle de la capacité
+ *     (`CAPABILITY_RULES`) — propriété pour le CRM et le RGPD (lot A), auteur
+ *     pour les réglages d'espace, fonctions de `access.ts` pour les tâches et
+ *     les projets. Les services des tâches et des projets passent leur
+ *     ressource ici (`requireTask*`, `requireProject*`) ; le CRM et le RGPD
+ *     filtrent en base avec `crmReadableWhere`, la même règle exprimée en
+ *     `where`.
  *
  * Les refus reprennent la convention de `access.ts` : `NOT_FOUND` quand la
  * ressource n'est pas lisible (« absent » et « interdit » indiscernables),
  * `FORBIDDEN` quand elle l'est mais que le droit demandé manque.
  *
- * ─── Point d'extension — lot A (propriété) ─────────────────────────────────
- * Le lot A ajoutera un `ownerId` aux fiches CRM, RGPD et aux tâches libres.
- * C'est ici, dans `checkRecord`, que la règle « privé par défaut » se branchera
- * (`resource.ownerId === actor.id` pour les capacités `crm.*` / `privacy.*`),
- * et dans `checkTask` / `checkProject` que les services passeront leur
- * ressource au lieu d'appeler directement `access.ts`. Les appelants n'auront
- * pas à changer : ils passent déjà par `authorize`.
  */
 
 export type AuthzResource =
-  /** Une donnée bornée à un espace (fiche CRM, RGPD, réglage). */
-  | { kind: "record"; workspaceId: string }
+  /**
+   * Une donnée bornée à un espace (fiche CRM, RGPD, réglage). `ownerId` : son
+   * propriétaire (`ownerId` d'une fiche) ou son auteur (`createdById` d'un
+   * réglage), selon la capacité.
+   */
+  | { kind: "record"; workspaceId: string; ownerId?: string | null }
   | { kind: "task"; workspaceId: string; task: TaskAccessInfo }
   | { kind: "task-trash"; workspaceId: string; task: Parameters<typeof evaluateTrashAccess>[0] }
   | { kind: "project"; workspaceId: string; project: ProjectAccessInfo }
@@ -69,7 +68,11 @@ export function authorize(actor: Actor, capability: Capability, resource?: Authz
   const rule = CAPABILITY_RULES[capability];
   switch (rule.scope) {
     case "record":
-      return checkRecord();
+      return ALLOW;
+    case "owned":
+    case "authored":
+    case "personal":
+      return checkRecord(actor, rule.scope, expectKind(resource, "record", capability));
     case "task":
       return checkTask(actor, rule.right, expectKind(resource, "task", capability).task);
     case "task-trash":
@@ -81,10 +84,17 @@ export function authorize(actor: Actor, capability: Capability, resource?: Authz
   }
 }
 
-/** Une donnée de l'espace : aujourd'hui, toute personne de l'espace y a droit. */
-function checkRecord(): AuthzDecision {
-  // Lot A : contrôle de propriété ici.
-  return ALLOW;
+/**
+ * Propriété (lot A) : une fiche d'autrui est introuvable ; un réglage d'espace
+ * d'autrui (`authored`) reste visible, sa modification est refusée.
+ */
+function checkRecord(
+  actor: Actor,
+  scope: "owned" | "authored" | "personal",
+  record: Extract<AuthzResource, { kind: "record" }>,
+): AuthzDecision {
+  if (record.ownerId === actor.id) return ALLOW;
+  return deny(scope === "authored" ? "FORBIDDEN" : "NOT_FOUND");
 }
 
 function checkTask(
@@ -98,7 +108,7 @@ function checkTask(
 }
 
 function checkProject(actor: Actor, right: "read" | "edit" | "manage", project: ProjectAccessInfo): AuthzDecision {
-  if (!canReadProject(project)) return deny("NOT_FOUND");
+  if (!canReadProject(project, actor)) return deny("NOT_FOUND");
   if (right === "edit" && !canEditProjectContent(project, actor)) return deny("FORBIDDEN");
   if (right === "manage" && !canManageProject(project, actor)) return deny("FORBIDDEN");
   return ALLOW;

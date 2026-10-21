@@ -10,6 +10,7 @@ import { dayKey, startOfDay } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
 import { objectStore } from "@/lib/storage";
 
+import { authorize } from "@/lib/authz/authorize";
 import {
   canEditProjectContent,
   canManageProject,
@@ -45,36 +46,55 @@ import type { ProjectRole } from "./types";
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
-async function loadProject(actor: Actor, projectId: string) {
+/**
+ * Charge le projet et passe le point de contrôle central (`authorize`,
+ * capacités `project.*`) : introuvable s'il n'est pas lisible, refus explicite
+ * s'il l'est mais que le droit manque.
+ */
+async function loadProject(
+  actor: Actor,
+  projectId: string,
+  capability: "project.read" | "project.edit" | "project.manage",
+  refused?: (project: { archivedAt: Date | null }) => string,
+) {
   const project = await prisma.project.findFirst({
     where: { id: projectId, workspaceId: actor.workspaceId },
-    select: { ...projectAccessSelect(actor), name: true, version: true },
+    select: { ...projectAccessSelect(actor), workspaceId: true, name: true, version: true },
   });
-  if (!project || !canReadProject(project)) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+  if (!project) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+  const decision = authorize(actor, capability, { kind: "project", workspaceId: project.workspaceId, project });
+  if (!decision.allowed) {
+    throw decision.code === "NOT_FOUND" ? new TaskAccessError("NOT_FOUND", "Projet introuvable.") : new TaskAccessError("FORBIDDEN", refused?.(project));
+  }
   return project;
 }
 
 export async function requireProjectRead(actor: Actor, projectId: string) {
-  return loadProject(actor, projectId);
+  return loadProject(actor, projectId, "project.read");
 }
 
 export async function requireProjectEdit(actor: Actor, projectId: string) {
-  const project = await loadProject(actor, projectId);
-  if (!canEditProjectContent(project, actor)) {
-    throw new TaskAccessError("FORBIDDEN", project.archivedAt ? "Ce projet est archivé." : "Vous ne pouvez pas modifier ce projet.");
-  }
-  return project;
+  return loadProject(actor, projectId, "project.edit", (project) =>
+    project.archivedAt ? "Ce projet est archivé." : "Vous ne pouvez pas modifier ce projet.",
+  );
 }
 
 export async function requireProjectManage(actor: Actor, projectId: string) {
-  const project = await loadProject(actor, projectId);
-  if (!canManageProject(project, actor)) {
-    throw new TaskAccessError("FORBIDDEN", "Seul le propriétaire du projet peut faire cela.");
-  }
-  return project;
+  return loadProject(actor, projectId, "project.manage", () => "Seul le propriétaire du projet peut faire cela.");
 }
 
 const toDate = (key: string | null | undefined) => (key ? startOfDay(key, APP_TIME_ZONE) : null);
+
+/**
+ * Décision (f), lot A : un projet est privé, partagé avec ses membres. La
+ * valeur `WORKSPACE` reste dans l'enum (données historiques) mais n'est plus
+ * acceptée à l'écriture.
+ */
+function refuseWorkspaceVisibility(visibility: "WORKSPACE" | "PRIVATE" | undefined): void {
+  if (visibility === "WORKSPACE") {
+    throw new TaskValidationError("Un projet ne peut plus être ouvert à tout l'espace : partagez-le avec ses membres.");
+  }
+}
 
 function changed(actor: Actor, projectIds: string[], kind = "project") {
   return publishChange({ w: actor.workspaceId, a: actor.id, p: projectIds, k: kind });
@@ -283,6 +303,7 @@ export async function createProject(actor: Actor, raw: unknown): Promise<string>
   const parsed = projectInputSchema.safeParse(raw);
   if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Projet invalide.");
   const input = parsed.data;
+  refuseWorkspaceVisibility(input.visibility);
   if (input.startDate && input.dueDate && input.startDate > input.dueDate) {
     throw new TaskValidationError("La date de début doit précéder l'échéance.");
   }
@@ -296,7 +317,7 @@ export async function createProject(actor: Actor, raw: unknown): Promise<string>
       where: { id: input.templateId, workspaceId: actor.workspaceId },
       select: { ...projectAccessSelect(actor), startAt: true, color: true, icon: true, description: true },
     });
-    if (!source || !canReadProject(source)) throw new TaskValidationError("Modèle introuvable.");
+    if (!source || !canReadProject(source, actor)) throw new TaskValidationError("Modèle introuvable.");
     template = source;
   }
 
@@ -306,7 +327,7 @@ export async function createProject(actor: Actor, raw: unknown): Promise<string>
     if (template) {
       // Revérifié sous verrou : le modèle a pu être supprimé entre-temps.
       const source = await tx.project.findFirst({ where: { id: template.id, workspaceId: actor.workspaceId }, select: projectAccessSelect(actor) });
-      if (!source || !canReadProject(source)) throw new TaskValidationError("Modèle introuvable.");
+      if (!source || !canReadProject(source, actor)) throw new TaskValidationError("Modèle introuvable.");
     }
     const created = await tx.project.create({
       data: {
@@ -319,7 +340,7 @@ export async function createProject(actor: Actor, raw: unknown): Promise<string>
         createdById: actor.id,
         startAt: toDate(input.startDate),
         dueAt: toDate(input.dueDate),
-        visibility: input.visibility ?? "WORKSPACE",
+        visibility: "PRIVATE",
         status: input.status ?? "ON_TRACK",
         contactId: input.contactId ?? null,
         organizationId: input.organizationId ?? null,
@@ -376,6 +397,7 @@ export async function updateProject(actor: Actor, projectId: string, raw: unknow
   const parsed = projectPatchSchema.safeParse(raw);
   if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Modification invalide.");
   const input = parsed.data;
+  refuseWorkspaceVisibility(input.visibility);
   if (input.ownerId) await validMemberIds(actor, [input.ownerId]);
   await assertCrmLinks(actor, input);
   if (baseVersion !== undefined && baseVersion !== project.version) {
@@ -428,7 +450,7 @@ export async function duplicateProject(
 
   const id = await structureTransaction(actor.workspaceId, async (tx) => {
     const current = await tx.project.findFirst({ where: { id: projectId, workspaceId: actor.workspaceId }, select: projectAccessSelect(actor) });
-    if (!current || !canReadProject(current)) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+    if (!current || !canReadProject(current, actor)) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
     const full = await tx.project.findUniqueOrThrow({ where: { id: projectId } });
     const created = await tx.project.create({
       data: {
@@ -441,7 +463,7 @@ export async function duplicateProject(
         createdById: actor.id,
         startAt: full.startAt,
         dueAt: full.dueAt,
-        visibility: full.visibility,
+        visibility: "PRIVATE",
         isTemplate: options.asTemplate ?? false,
         contactId: full.contactId,
         organizationId: full.organizationId,

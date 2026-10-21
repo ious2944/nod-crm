@@ -286,7 +286,7 @@ export function toTaskItem(
     // Les appartenances à des projets illisibles par l'acteur ne sont pas
     // divulguées : on ne montre que ce qu'il pourrait ouvrir.
     memberships: record.projects
-      .filter((p) => canReadProject(p.project))
+      .filter((p) => canReadProject(p.project, actor))
       .map((p) => ({ projectId: p.projectId, sectionId: p.sectionId, position: p.position })),
     subtaskCount: record._count.subtasks,
     subtaskDoneCount,
