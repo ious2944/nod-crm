@@ -12,6 +12,10 @@ import type { ImportCandidate, ImportDetail } from "./parse";
  * - Avec la base : le contact existant (archivé compris) est retrouvé ; selon
  *   le choix de l'utilisateur, on l'ignore ou on complète ses champs vides.
  *   Une valeur déjà présente n'est jamais remplacée.
+ * - Ligne **sans e-mail** : « doublon probable » si un contact du workspace
+ *   (archivé compris) a le même prénom + nom + organisation (normalisés) ou
+ *   le même téléphone. Ignorée par défaut ; l'utilisateur peut la cocher pour
+ *   l'importer quand même (`includeLines`).
  */
 
 export type DuplicateMode = "skip" | "complete";
@@ -63,10 +67,76 @@ export interface ExistingDuplicate {
   candidate: ImportCandidate;
 }
 
+/** Ce qu'il faut d'un contact existant pour juger un doublon probable. */
+export interface ExistingIdentity {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  organizationName: string | null;
+  phone: string | null;
+  archived: boolean;
+  createdAt: Date;
+}
+
+export type ProbableReason = "identity" | "phone";
+
+export interface ProbableDuplicate {
+  line: number;
+  contactId: string;
+  contactName: string;
+  archived: boolean;
+  reasons: ProbableReason[];
+  candidate: ImportCandidate;
+}
+
 export interface ImportPlan {
   toCreate: ImportCandidate[];
   fileDuplicates: FileDuplicate[];
   existingDuplicates: ExistingDuplicate[];
+  /** Lignes sans e-mail ressemblant à un contact existant, non importées. */
+  probableDuplicates: ProbableDuplicate[];
+}
+
+/** Casse, accents et espaces neutralisés. */
+function normalizeText(value: string | null): string {
+  return (value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "");
+}
+
+/** Prénom + nom + organisation normalisés ; `null` si les trois sont vides. */
+export function identityKey(contact: {
+  firstName: string;
+  lastName: string;
+  organizationName: string | null;
+}): string | null {
+  const parts = [contact.firstName, contact.lastName, contact.organizationName].map(normalizeText);
+  return parts.some(Boolean) ? parts.join("\u0000") : null;
+}
+
+/**
+ * Téléphone réduit à ses chiffres, `+33` / `0033` ramenés au `0` national.
+ * Moins de 8 chiffres : trop court pour affirmer quoi que ce soit.
+ */
+export function phoneKey(phone: string | null): string | null {
+  if (!phone) return null;
+  // « +33 (0)6 … » : le (0) facultatif des numéros internationaux.
+  let digits = phone.replace(/\(0\)/g, "").replace(/\D/g, "");
+  if (digits.startsWith("0033")) digits = `0${digits.slice(4)}`;
+  else if (phone.trim().startsWith("+33")) digits = `0${digits.slice(2)}`;
+  return digits.length >= 8 ? digits : null;
+}
+
+function indexBy<T>(items: T[], key: (item: T) => string | null): Map<string, T> {
+  const map = new Map<string, T>();
+  for (const item of items) {
+    const k = key(item);
+    if (k && !map.has(k)) map.set(k, item);
+  }
+  return map;
 }
 
 const isEmpty = (value: string | null) => value === null || value.trim() === "";
@@ -77,7 +147,12 @@ export function fillableFields(existing: ExistingContact, candidate: ImportCandi
   );
 }
 
-export function planImport(candidates: ImportCandidate[], existing: ExistingContact[]): ImportPlan {
+export function planImport(
+  candidates: ImportCandidate[],
+  existing: ExistingContact[],
+  identities: ExistingIdentity[] = [],
+  includeLines: ReadonlySet<number> = new Set(),
+): ImportPlan {
   const existingByKey = new Map<string, ExistingContact[]>();
   for (const contact of existing) {
     const list = existingByKey.get(contact.emailKey) ?? [];
@@ -89,8 +164,14 @@ export function planImport(candidates: ImportCandidate[], existing: ExistingCont
     list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
   }
 
+  const byAge = [...identities].sort(
+    (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id),
+  );
+  const byIdentity = indexBy(byAge, identityKey);
+  const byPhone = indexBy(byAge, (contact) => phoneKey(contact.phone));
+
   const seen = new Map<string, ImportCandidate>();
-  const plan: ImportPlan = { toCreate: [], fileDuplicates: [], existingDuplicates: [] };
+  const plan: ImportPlan = { toCreate: [], fileDuplicates: [], existingDuplicates: [], probableDuplicates: [] };
 
   for (const candidate of candidates) {
     const key = candidate.emailKey;
@@ -120,6 +201,23 @@ export function planImport(candidates: ImportCandidate[], existing: ExistingCont
           archived: target.archived,
           otherMatches: matches.length - 1,
           fillable: fillableFields(target, candidate),
+          candidate,
+        });
+        continue;
+      }
+    } else if (!includeLines.has(candidate.line)) {
+      const identityKeyValue = identityKey(candidate);
+      const phoneKeyValue = phoneKey(candidate.phone);
+      const byName = identityKeyValue ? byIdentity.get(identityKeyValue) : undefined;
+      const byTel = phoneKeyValue ? byPhone.get(phoneKeyValue) : undefined;
+      const target = byName ?? byTel;
+      if (target) {
+        plan.probableDuplicates.push({
+          line: candidate.line,
+          contactId: target.id,
+          contactName: contactDisplayName(target),
+          archived: target.archived,
+          reasons: [...(byName ? ["identity" as const] : []), ...(byTel ? ["phone" as const] : [])],
           candidate,
         });
         continue;

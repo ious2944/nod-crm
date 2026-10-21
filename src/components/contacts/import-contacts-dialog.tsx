@@ -173,12 +173,15 @@ export function ImportContactsDialog({ open, onClose }: { open: boolean; onClose
   const panelRef = useRef<HTMLDivElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [mode, setMode] = useState<DuplicateMode>("skip");
+  /** Doublons probables cochés pour être importés quand même. */
+  const [include, setInclude] = useState<ReadonlySet<number>>(new Set());
   const [step, setStep] = useState<Step>({ name: "choose" });
   const [pending, startTransition] = useTransition();
 
   const close = () => {
     setFile(null);
     setMode("skip");
+    setInclude(new Set());
     setStep({ name: "choose" });
     onClose();
   };
@@ -191,6 +194,7 @@ export function ImportContactsDialog({ open, onClose }: { open: boolean; onClose
     const data = new FormData();
     data.set("file", file!);
     for (const [key, value] of Object.entries(extra)) data.set(key, value);
+    for (const line of include) data.append("include", String(line));
     return data;
   };
 
@@ -200,6 +204,7 @@ export function ImportContactsDialog({ open, onClose }: { open: boolean; onClose
     // d'atteindre le serveur, sans message utile.
     if (file.size > IMPORT_MAX_BYTES) return setStep({ name: "choose", error: tooLargeMessage(file.size) });
     startTransition(async () => {
+      setInclude(new Set());
       const result = await previewContactImport(withFile());
       setStep(result.ok ? { name: "preview", preview: result.preview } : { name: "choose", error: result.error });
     });
@@ -286,6 +291,33 @@ export function ImportContactsDialog({ open, onClose }: { open: boolean; onClose
             <>
               <PreviewView preview={step.preview} />
 
+              {step.preview.probableDuplicates.length > 0 && (
+                <fieldset className="space-y-1.5 text-sm">
+                  <legend className={LABEL}>Doublons probables (sans e-mail) — ignorés par défaut</legend>
+                  <p className="text-muted">Coche une ligne pour l’importer quand même.</p>
+                  {step.preview.probableDuplicates.map((d) => (
+                    <label key={d.line} className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={include.has(d.line)}
+                        onChange={(event) => {
+                          const next = new Set(include);
+                          if (event.target.checked) next.add(d.line);
+                          else next.delete(d.line);
+                          setInclude(next);
+                        }}
+                      />
+                      <span>
+                        Ligne {d.line} : {d.label} ressemble à {d.contactName}
+                        {d.archived && " (archivé)"}
+                        <span className="text-muted"> — {d.reasons.join(", ")}</span>
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
+
               {step.preview.existingDuplicates.length > 0 && (
                 <fieldset className="space-y-1 text-sm">
                   <legend className={LABEL}>Que faire des contacts déjà présents ?</legend>
@@ -325,11 +357,12 @@ export function ImportContactsDialog({ open, onClose }: { open: boolean; onClose
                   onClick={() => confirm(step.preview)}
                   disabled={
                     pending ||
-                    (step.preview.toCreate === 0 && (mode === "skip" || step.preview.existingDuplicates.length === 0))
+                    (step.preview.toCreate + include.size === 0 &&
+                      (mode === "skip" || step.preview.existingDuplicates.length === 0))
                   }
                   className={BUTTON_PRIMARY}
                 >
-                  {pending ? "Import…" : `Importer ${plural(step.preview.toCreate, "contact")}`}
+                  {pending ? "Import…" : `Importer ${plural(step.preview.toCreate + include.size, "contact")}`}
                 </button>
               </div>
             </>

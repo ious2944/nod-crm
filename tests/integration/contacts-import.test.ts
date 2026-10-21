@@ -205,6 +205,68 @@ describe("import de contacts Outlook", () => {
     });
   });
 
+  describe("doublons probables (lignes sans e-mail)", () => {
+    it("réimporter le fichier de référence ne crée plus rien", async () => {
+      expect(await importContacts(upload(fixtureBytes(), { mode: "skip" }))).toMatchObject({ created: 3 });
+
+      const preview = await previewOk(upload(fixtureBytes()));
+      expect(preview.toCreate).toBe(0);
+      expect(preview.probableDuplicates).toEqual([
+        {
+          line: 5,
+          label: "Contact sans nom ni e-mail",
+          contactName: "Contact sans nom ni e-mail",
+          archived: false,
+          reasons: ["même prénom, nom et organisation", "même téléphone"],
+        },
+      ]);
+
+      for (const mode of ["skip", "complete"]) {
+        expect(await importContacts(upload(fixtureBytes(), { mode }))).toEqual({
+          ok: true,
+          created: 0,
+          updated: 0,
+          skipped: 4,
+          rejected: 0,
+        });
+      }
+      expect(await prisma.contact.count({ where: { workspaceId: alice.workspaceId } })).toBe(3);
+    });
+
+    it("détecte aussi par téléphone normalisé, contre un contact archivé", async () => {
+      await createContactRecord(alice.workspaceId, {
+        firstName: "",
+        lastName: "Standard",
+        phone: "+33 (0)1 23 45 67 89",
+        archivedAt: new Date(),
+      });
+      const preview = await previewOk(upload(fixtureBytes()));
+      expect(preview.probableDuplicates).toEqual([
+        expect.objectContaining({ line: 5, contactName: "Standard", archived: true, reasons: ["même téléphone"] }),
+      ]);
+    });
+
+    it("une ligne cochée est importée quand même", async () => {
+      await importContacts(upload(fixtureBytes(), { mode: "skip" }));
+
+      const data = upload(fixtureBytes(), { mode: "skip" });
+      data.append("include", "5");
+      // Une ligne qui n'est pas un doublon probable ne change rien.
+      data.append("include", "2");
+      expect(await importContacts(data)).toEqual({ ok: true, created: 1, updated: 0, skipped: 3, rejected: 0 });
+      expect(
+        await prisma.contact.count({ where: { workspaceId: alice.workspaceId, organizationName: "Contact sans nom ni e-mail" } }),
+      ).toBe(2);
+    });
+
+    it("refuse une sélection de lignes invalide", async () => {
+      const data = upload(fixtureBytes(), { mode: "skip" });
+      data.append("include", "abc");
+      expect(await importContacts(data)).toEqual({ ok: false, error: "Sélection de lignes invalide." });
+      expect(await prisma.contact.count()).toBe(0);
+    });
+  });
+
   describe("organisations", () => {
     it("rattache à une organisation existante par nom normalisé, sans en créer", async () => {
       const orgId = await createOrganizationRecord(alice.workspaceId, { name: "  exemple   SARL " });
@@ -237,11 +299,19 @@ describe("import de contacts Outlook", () => {
         phone: null,
         organizationName: null,
       });
+      // Même nom d'organisation et même téléphone que la ligne 5, mais chez Bob.
+      await createContactRecord(bob.workspaceId, {
+        firstName: "",
+        lastName: "",
+        organizationName: "Contact sans nom ni e-mail",
+        phone: "01 23 45 67 89",
+      });
     });
 
     it("l'aperçu ne voit pas les contacts d'un autre workspace", async () => {
       const preview = await previewOk(upload(fixtureBytes()));
       expect(preview.existingDuplicates).toEqual([]);
+      expect(preview.probableDuplicates).toEqual([]);
       expect(preview.toCreate).toBe(3);
     });
 

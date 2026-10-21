@@ -177,6 +177,12 @@ Windows-1252). Code: `src/lib/contacts/import/` (pure parsing and planning),
   preview lists what the later ones would have brought. Against the database,
   the user picks *skip* or *fill empty fields*; the "never overwrite" rule is
   enforced in the `UPDATE` itself.
+- **Probable duplicates.** A row without an e-mail is flagged when a contact of
+  the workspace (archived included) has the same first name + last name +
+  organisation (case, accents and spaces ignored) or the same phone number
+  (digits only, `+33` / `0033` equivalent to a leading `0`). Flagged rows are
+  skipped unless the user ticks them in the preview. Re-importing the same file
+  therefore creates nothing.
 - **Organisations.** Linked to an existing, non-archived organisation of the
   workspace by normalised name when the match is unique; never created.
 - **Limits.** 2.5 MB (under the 3 MB Server Action body limit) and 5,000 rows.

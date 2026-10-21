@@ -7,7 +7,7 @@ import { decodeCsvBytes } from "./decode";
 import { mapOutlookHeader, OUTLOOK_COLUMNS } from "./outlook-columns";
 import { IMPORT_MAX_BYTES, IMPORT_MAX_ROWS } from "./limits";
 import { parseOutlookCsv, parseOutlookDate } from "./parse";
-import { planImport, type ExistingContact } from "./plan";
+import { identityKey, phoneKey, planImport, type ExistingContact, type ExistingIdentity } from "./plan";
 
 const FIXTURE = path.resolve(__dirname, "../../../../tests/fixtures/outlook/contacts-outlook-fixture.csv");
 const fixtureBytes = () => new Uint8Array(readFileSync(FIXTURE));
@@ -196,6 +196,66 @@ describe("doublons avec la base", () => {
       archived: true,
       otherMatches: 1,
     });
+  });
+});
+
+describe("doublons probables (lignes sans e-mail)", () => {
+  const identity = (overrides: Partial<ExistingIdentity>): ExistingIdentity => ({
+    id: "00000000-0000-4000-8000-0000000000aa",
+    firstName: "",
+    lastName: "",
+    email: null,
+    organizationName: null,
+    phone: null,
+    archived: false,
+    createdAt: new Date("2026-01-01"),
+    ...overrides,
+  });
+
+  it("normalise prénom + nom + organisation (casse, accents, espaces)", () => {
+    expect(identityKey({ firstName: "Jean-Paul ", lastName: "ÉLIE", organizationName: "Café  du Port" })).toBe(
+      identityKey({ firstName: "jean-paul", lastName: "elie", organizationName: "cafe du port" }),
+    );
+    expect(identityKey({ firstName: "", lastName: "", organizationName: null })).toBeNull();
+  });
+
+  it("normalise le téléphone : chiffres seuls, +33 et 0 équivalents", () => {
+    const expected = "0612345678";
+    for (const raw of ["06 12 34 56 78", "06.12.34.56.78", "+33 6 12 34 56 78", "+33 (0)6 12 34 56 78", "0033612345678"]) {
+      expect(phoneKey(raw), raw).toBe(expected);
+    }
+    expect(phoneKey("12 34")).toBeNull();
+  });
+
+  it("signale la ligne 5 du fichier de référence face à un contact identique ou au même numéro", () => {
+    const parsed = parseOk(fixtureBytes());
+    const byOrg = planImport(parsed.candidates, [], [
+      identity({ organizationName: "contact sans nom ni E-MAIL", archived: true }),
+    ]);
+    expect(byOrg.probableDuplicates).toEqual([
+      expect.objectContaining({ line: 5, archived: true, reasons: ["identity"] }),
+    ]);
+    expect(byOrg.toCreate.map((c) => c.line)).toEqual([2, 3]);
+
+    const byPhone = planImport(parsed.candidates, [], [identity({ lastName: "Autre", phone: "+33 1 23 45 67 89" })]);
+    expect(byPhone.probableDuplicates).toEqual([expect.objectContaining({ line: 5, reasons: ["phone"] })]);
+  });
+
+  it("une ligne cochée est importée quand même", () => {
+    const parsed = parseOk(fixtureBytes());
+    const plan = planImport(parsed.candidates, [], [identity({ phone: "01 23 45 67 89" })], new Set([5]));
+    expect(plan.probableDuplicates).toEqual([]);
+    expect(plan.toCreate.map((c) => c.line)).toEqual([2, 3, 5]);
+  });
+
+  it("ne concerne pas les lignes avec e-mail, ni un nom seulement proche", () => {
+    const parsed = parseOk(fixtureBytes());
+    const plan = planImport(parsed.candidates, [], [
+      identity({ firstName: "Jean", lastName: "Dupont", organizationName: "Exemple SARL", phone: "+33 6 12 34 56 78" }),
+      identity({ organizationName: "Contact sans nom" }),
+    ]);
+    expect(plan.probableDuplicates).toEqual([]);
+    expect(plan.toCreate.map((c) => c.line)).toEqual([2, 3, 5]);
   });
 });
 

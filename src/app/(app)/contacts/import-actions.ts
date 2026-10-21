@@ -26,6 +26,8 @@ import { getActorForAction } from "@/lib/workspace";
  */
 
 const modeSchema = z.enum(["skip", "complete"]);
+/** Numéros de ligne des doublons probables à importer quand même. */
+const includeSchema = z.array(z.coerce.number().int().min(2).max(10_000)).max(5000);
 
 const FAILURE = "L'import a échoué : aucun contact n'a été enregistré. Réessaie dans un instant.";
 
@@ -55,12 +57,15 @@ export async function importContacts(formData: FormData): Promise<ImportOutcome>
   const mode = modeSchema.safeParse(formData.get("mode"));
   if (!mode.success) return { ok: false, error: "Choisis quoi faire des contacts déjà présents." };
 
+  const include = includeSchema.safeParse(formData.getAll("include"));
+  if (!include.success) return { ok: false, error: "Sélection de lignes invalide." };
+
   const upload = await readUpload(formData.get("file"));
   if (!upload.ok) return upload;
 
   let outcome: ImportOutcome;
   try {
-    outcome = await runImport(actor, upload.bytes, mode.data);
+    outcome = await runImport(actor, upload.bytes, mode.data, new Set(include.data));
   } catch (error) {
     logFailure("écriture", error);
     return { ok: false, error: FAILURE };

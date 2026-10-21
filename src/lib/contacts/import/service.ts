@@ -6,12 +6,15 @@ import { AUDIT_ENTITY_TYPES } from "@/lib/audit/types";
 import { normalizeOrgName } from "@/lib/organizations/domain";
 import { prisma } from "@/lib/prisma";
 
+import { contactDisplayName } from "../view";
+
 import { IMPORT_MAX_BYTES, tooLargeMessage } from "./limits";
 import { parseOutlookCsv, type ImportCandidate, type ImportIssue } from "./parse";
 import {
   FILLABLE_FIELDS,
   planImport,
   type DuplicateMode,
+  type ExistingIdentity,
   type ExistingContact,
   type FileDuplicate,
   type ImportPlan,
@@ -62,6 +65,14 @@ export interface ImportPreview {
     otherMatches: number;
     fillable: string[];
   }[];
+  /** Lignes sans e-mail qui ressemblent à un contact existant : non importées sauf choix contraire. */
+  probableDuplicates: {
+    line: number;
+    label: string;
+    contactName: string;
+    archived: boolean;
+    reasons: string[];
+  }[];
   issues: ImportIssue[];
   errorCount: number;
   warningCount: number;
@@ -108,10 +119,36 @@ async function findExisting(db: Db, workspaceId: string, keys: string[]): Promis
       AND lower(regexp_replace(email, '\\s+', '', 'g')) = ANY(${keys}::text[])`;
 }
 
+/**
+ * Contacts du workspace (archivés compris) pour juger les doublons probables
+ * des lignes sans e-mail. La normalisation (accents, préfixe +33) se fait en
+ * TypeScript : on lit donc les quatre colonnes utiles de tout le workspace,
+ * et seulement si le fichier contient au moins une ligne sans e-mail.
+ */
+async function findIdentities(db: Db, workspaceId: string): Promise<ExistingIdentity[]> {
+  const rows = await db.contact.findMany({
+    where: { workspaceId },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      organizationName: true,
+      phone: true,
+      archivedAt: true,
+      createdAt: true,
+    },
+  });
+  return rows.map(({ archivedAt, ...row }) => ({ ...row, archived: archivedAt !== null }));
+}
+
+const REASON_LABELS = { identity: "même prénom, nom et organisation", phone: "même téléphone" } as const;
+
 async function analyse(
   db: Db,
   workspaceId: string,
   bytes: Uint8Array,
+  includeLines: ReadonlySet<number> = new Set(),
 ): Promise<
   | { ok: false; error: string }
   | { ok: true; parsed: Extract<ReturnType<typeof parseOutlookCsv>, { ok: true }>; plan: ImportPlan }
@@ -120,7 +157,8 @@ async function analyse(
   if (!parsed.ok) return parsed;
   const keys = [...new Set(parsed.candidates.flatMap((c) => (c.emailKey ? [c.emailKey] : [])))];
   const existing = await findExisting(db, workspaceId, keys);
-  return { ok: true, parsed, plan: planImport(parsed.candidates, existing) };
+  const identities = parsed.candidates.some((c) => !c.emailKey) ? await findIdentities(db, workspaceId) : [];
+  return { ok: true, parsed, plan: planImport(parsed.candidates, existing, identities, includeLines) };
 }
 
 export async function previewImport(workspaceId: string, bytes: Uint8Array): Promise<PreviewResult> {
@@ -147,6 +185,13 @@ export async function previewImport(workspaceId: string, bytes: Uint8Array): Pro
         archived: d.archived,
         otherMatches: d.otherMatches,
         fillable: d.fillable.map((field) => FILLABLE_FIELDS[field]),
+      })),
+      probableDuplicates: plan.probableDuplicates.map((d) => ({
+        line: d.line,
+        label: contactDisplayName(d.candidate),
+        contactName: d.contactName,
+        archived: d.archived,
+        reasons: d.reasons.map((reason) => REASON_LABELS[reason]),
       })),
       issues: parsed.issues.slice(0, MAX_PREVIEW_ISSUES),
       errorCount: parsed.issues.filter((i) => i.level === "error").length,
@@ -228,6 +273,8 @@ export async function runImport(
   actor: ImportActor,
   bytes: Uint8Array,
   mode: DuplicateMode,
+  /** Doublons probables que l'utilisateur a cochés pour les importer quand même. */
+  includeLines: ReadonlySet<number> = new Set(),
 ): Promise<ImportOutcome> {
   const { workspaceId } = actor;
 
@@ -235,7 +282,7 @@ export async function runImport(
     async (tx): Promise<ImportOutcome> => {
       // L'analyse est refaite dans la transaction : les doublons sont jugés
       // sur l'état de la base au moment de l'écriture, pas de l'aperçu.
-      const result = await analyse(tx, workspaceId, bytes);
+      const result = await analyse(tx, workspaceId, bytes, includeLines);
       if (!result.ok) return result;
       const { parsed, plan } = result;
       const resolveOrg = await organizationResolver(tx, workspaceId);
@@ -267,7 +314,11 @@ export async function runImport(
         ok: true,
         created,
         updated,
-        skipped: plan.fileDuplicates.length + plan.existingDuplicates.length - updated,
+        skipped:
+          plan.fileDuplicates.length +
+          plan.existingDuplicates.length +
+          plan.probableDuplicates.length -
+          updated,
         rejected: errorCount,
       };
     },
