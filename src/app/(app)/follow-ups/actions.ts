@@ -21,7 +21,7 @@ import { createFollowUpSchema, quickActionSchema, updateFollowUpSchema } from "@
 import type { EditFollowUpState } from "@/lib/follow-ups/edit-state";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
-import { getActorForAction } from "@/lib/workspace";
+import { runCrmAction } from "@/lib/authz/run-crm-action";
 
 /**
  * Les pages qui montrent des suivis. Depuis la V0.4, le cockpit « Aujourd'hui »
@@ -48,110 +48,110 @@ export async function createFollowUp(
   _previous: CreateFollowUpState,
   formData: FormData,
 ): Promise<CreateFollowUpState> {
-  // Authentification d'abord : une action appelée sans session est rejetée
-  // avant même de regarder le contenu du formulaire.
-  const { id: userId, workspaceId } = await getActorForAction();
+  // Authentification d'abord (`runCrmAction`) : une action appelée sans
+  // session est rejetée avant même de regarder le contenu du formulaire.
+  return runCrmAction("crm.followup.create", async ({ id: userId, workspaceId }) => {
+    const parsed = createFollowUpSchema.safeParse(Object.fromEntries(formData));
 
-  const parsed = createFollowUpSchema.safeParse(Object.fromEntries(formData));
-
-  if (!parsed.success) {
-    const fieldErrors: Record<string, string> = {};
-    for (const issue of parsed.error.issues) {
-      const key = String(issue.path[0] ?? "form");
-      fieldErrors[key] ??= issue.message;
+    if (!parsed.success) {
+      const fieldErrors: Record<string, string> = {};
+      for (const issue of parsed.error.issues) {
+        const key = String(issue.path[0] ?? "form");
+        fieldErrors[key] ??= issue.message;
+      }
+      return { status: "error", message: "Le formulaire est incomplet.", fieldErrors };
     }
-    return { status: "error", message: "Le formulaire est incomplet.", fieldErrors };
-  }
 
-  const input = parsed.data;
+    const input = parsed.data;
 
-  let contactId: string | null = null;
+    let contactId: string | null = null;
 
-  if (input.contactId === "new") {
-    const contact = await prisma.contact.create({
+    if (input.contactId === "new") {
+      const contact = await prisma.contact.create({
+        data: {
+          workspaceId,
+          firstName: input.newContactFirstName ?? "",
+          lastName: input.newContactLastName ?? "",
+          organizationName: input.newContactOrganization,
+        },
+        select: { id: true },
+      });
+      contactId = contact.id;
+      await recordAudit({
+        workspaceId,
+        userId,
+        action: "CREATE",
+        entityType: AUDIT_ENTITY_TYPES.CONTACT,
+        entityId: contact.id,
+      });
+    } else if (input.contactId) {
+      // On re-vérifie que le contact appartient bien au workspace : l'id vient du
+      // client. `archivedAt: null` fait partie du filtre, pas d'un contrôle
+      // séparé : un contact archivé ne doit pas plus accepter un nouveau suivi
+      // que le contact d'un autre workspace. Le sélecteur ne le propose plus,
+      // mais un formulaire resté ouvert dans un onglet, lui, le poste encore.
+      const contact = await prisma.contact.findFirst({
+        where: { id: input.contactId, workspaceId, archivedAt: null },
+        select: { id: true },
+      });
+
+      if (!contact) {
+        return {
+          status: "error",
+          message: "Ce contact n'existe pas ou a été archivé.",
+          fieldErrors: { contactId: "Contact introuvable." },
+        };
+      }
+      contactId = contact.id;
+    }
+
+    let opportunityId: string | null = null;
+
+    if (input.opportunityId) {
+      const opportunity = await prisma.opportunity.findFirst({
+        where: {
+          id: input.opportunityId,
+          workspaceId,
+          status: { in: ["A_QUALIFIER", "EN_DISCUSSION", "PROPOSITION"] },
+        },
+        select: { id: true },
+      });
+
+      if (!opportunity) {
+        return {
+          status: "error",
+          message: "Cette opportunité n'existe pas ou est clôturée.",
+          fieldErrors: { opportunityId: "Opportunité introuvable." },
+        };
+      }
+      opportunityId = opportunity.id;
+    }
+
+    const followUp = await prisma.followUp.create({
       data: {
         workspaceId,
-        firstName: input.newContactFirstName ?? "",
-        lastName: input.newContactLastName ?? "",
-        organizationName: input.newContactOrganization,
+        contactId,
+        opportunityId,
+        title: input.title,
+        description: input.description,
+        ballOwner: input.ballOwner,
+        dueAt: startOfDay(input.dueDate, APP_TIME_ZONE),
       },
       select: { id: true },
     });
-    contactId = contact.id;
+
     await recordAudit({
       workspaceId,
       userId,
       action: "CREATE",
-      entityType: AUDIT_ENTITY_TYPES.CONTACT,
-      entityId: contact.id,
-    });
-  } else if (input.contactId) {
-    // On re-vérifie que le contact appartient bien au workspace : l'id vient du
-    // client. `archivedAt: null` fait partie du filtre, pas d'un contrôle
-    // séparé : un contact archivé ne doit pas plus accepter un nouveau suivi
-    // que le contact d'un autre workspace. Le sélecteur ne le propose plus,
-    // mais un formulaire resté ouvert dans un onglet, lui, le poste encore.
-    const contact = await prisma.contact.findFirst({
-      where: { id: input.contactId, workspaceId, archivedAt: null },
-      select: { id: true },
+      entityType: AUDIT_ENTITY_TYPES.FOLLOW_UP,
+      entityId: followUp.id,
     });
 
-    if (!contact) {
-      return {
-        status: "error",
-        message: "Ce contact n'existe pas ou a été archivé.",
-        fieldErrors: { contactId: "Contact introuvable." },
-      };
-    }
-    contactId = contact.id;
-  }
-
-  let opportunityId: string | null = null;
-
-  if (input.opportunityId) {
-    const opportunity = await prisma.opportunity.findFirst({
-      where: {
-        id: input.opportunityId,
-        workspaceId,
-        status: { in: ["A_QUALIFIER", "EN_DISCUSSION", "PROPOSITION"] },
-      },
-      select: { id: true },
-    });
-
-    if (!opportunity) {
-      return {
-        status: "error",
-        message: "Cette opportunité n'existe pas ou est clôturée.",
-        fieldErrors: { opportunityId: "Opportunité introuvable." },
-      };
-    }
-    opportunityId = opportunity.id;
-  }
-
-  const followUp = await prisma.followUp.create({
-    data: {
-      workspaceId,
-      contactId,
-      opportunityId,
-      title: input.title,
-      description: input.description,
-      ballOwner: input.ballOwner,
-      dueAt: startOfDay(input.dueDate, APP_TIME_ZONE),
-    },
-    select: { id: true },
+    revalidateFollowUpPages();
+    revalidateCommerceIfLinked(opportunityId);
+    return { status: "success", message: "Suivi créé." };
   });
-
-  await recordAudit({
-    workspaceId,
-    userId,
-    action: "CREATE",
-    entityType: AUDIT_ENTITY_TYPES.FOLLOW_UP,
-    entityId: followUp.id,
-  });
-
-  revalidateFollowUpPages();
-  revalidateCommerceIfLinked(opportunityId);
-  return { status: "success", message: "Suivi créé." };
 }
 
 /**
@@ -159,58 +159,58 @@ export async function createFollowUp(
  * Un seul point d'entrée = une seule validation, un seul contrôle de workspace.
  */
 export async function applyQuickAction(formData: FormData): Promise<void> {
-  const { id: userId, workspaceId } = await getActorForAction();
+  return runCrmAction("crm.followup.update", async ({ id: userId, workspaceId }) => {
+    const parsed = quickActionSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) {
+      throw new Error("Action invalide.");
+    }
 
-  const parsed = quickActionSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    throw new Error("Action invalide.");
-  }
+    const { id, intent, days } = parsed.data;
 
-  const { id, intent, days } = parsed.data;
+    const followUp = await prisma.followUp.findFirst({
+      where: { id, workspaceId },
+      select: { id: true, status: true, dueAt: true, opportunityId: true },
+    });
 
-  const followUp = await prisma.followUp.findFirst({
-    where: { id, workspaceId },
-    select: { id: true, status: true, dueAt: true, opportunityId: true },
+    if (!followUp) {
+      throw new Error("Suivi introuvable.");
+    }
+
+    if (!isTransitionAllowed(intent, followUp.status)) {
+      throw new FollowUpConflictError();
+    }
+
+    const now = new Date();
+    // Un report part de la date la plus tardive entre aujourd'hui et l'échéance :
+    // reporter un suivi en retard de 10 jours doit donner « demain », pas « il y a 9 jours ».
+    const base = followUp.dueAt > now ? followUp.dueAt : now;
+
+    const data = buildTransition(intent, { now, base, days });
+
+    // Écriture conditionnelle : le `where` reprend l'état exact lu juste avant.
+    // Deux clics simultanés lisent le même état, mais un seul `UPDATE` trouve
+    // encore la ligne dans cet état — l'autre repart à zéro ligne modifiée.
+    // C'est ce qui rend la transition atomique sans transaction explicite.
+    const { count } = await prisma.followUp.updateMany({
+      where: { id, workspaceId, status: followUp.status, dueAt: followUp.dueAt },
+      data,
+    });
+
+    if (count !== 1) {
+      throw new FollowUpConflictError();
+    }
+
+    await recordAudit({
+      workspaceId,
+      userId,
+      action: "UPDATE",
+      entityType: AUDIT_ENTITY_TYPES.FOLLOW_UP,
+      entityId: id,
+    });
+
+    revalidateFollowUpPages();
+    revalidateCommerceIfLinked(followUp.opportunityId);
   });
-
-  if (!followUp) {
-    throw new Error("Suivi introuvable.");
-  }
-
-  if (!isTransitionAllowed(intent, followUp.status)) {
-    throw new FollowUpConflictError();
-  }
-
-  const now = new Date();
-  // Un report part de la date la plus tardive entre aujourd'hui et l'échéance :
-  // reporter un suivi en retard de 10 jours doit donner « demain », pas « il y a 9 jours ».
-  const base = followUp.dueAt > now ? followUp.dueAt : now;
-
-  const data = buildTransition(intent, { now, base, days });
-
-  // Écriture conditionnelle : le `where` reprend l'état exact lu juste avant.
-  // Deux clics simultanés lisent le même état, mais un seul `UPDATE` trouve
-  // encore la ligne dans cet état — l'autre repart à zéro ligne modifiée.
-  // C'est ce qui rend la transition atomique sans transaction explicite.
-  const { count } = await prisma.followUp.updateMany({
-    where: { id, workspaceId, status: followUp.status, dueAt: followUp.dueAt },
-    data,
-  });
-
-  if (count !== 1) {
-    throw new FollowUpConflictError();
-  }
-
-  await recordAudit({
-    workspaceId,
-    userId,
-    action: "UPDATE",
-    entityType: AUDIT_ENTITY_TYPES.FOLLOW_UP,
-    entityId: id,
-  });
-
-  revalidateFollowUpPages();
-  revalidateCommerceIfLinked(followUp.opportunityId);
 }
 
 /**
@@ -229,65 +229,65 @@ export async function updateFollowUp(
   _previous: EditFollowUpState,
   formData: FormData,
 ): Promise<EditFollowUpState> {
-  const { id: userId, workspaceId } = await getActorForAction();
+  return runCrmAction("crm.followup.update", async ({ id: userId, workspaceId }) => {
+    const parsed = updateFollowUpSchema.safeParse(Object.fromEntries(formData));
 
-  const parsed = updateFollowUpSchema.safeParse(Object.fromEntries(formData));
-
-  if (!parsed.success) {
-    const fieldErrors: Record<string, string> = {};
-    for (const issue of parsed.error.issues) {
-      const key = String(issue.path[0] ?? "form");
-      fieldErrors[key] ??= issue.message;
+    if (!parsed.success) {
+      const fieldErrors: Record<string, string> = {};
+      for (const issue of parsed.error.issues) {
+        const key = String(issue.path[0] ?? "form");
+        fieldErrors[key] ??= issue.message;
+      }
+      return { status: "error", message: "Le formulaire est incomplet.", fieldErrors };
     }
-    return { status: "error", message: "Le formulaire est incomplet.", fieldErrors };
-  }
 
-  const { id, title, description, dueDate, contactId } = parsed.data;
+    const { id, title, description, dueDate, contactId } = parsed.data;
 
-  // Résoudre le contact : vide = pas de contact, sinon vérifier l'appartenance
-  // au workspace et que le contact n'est pas archivé.
-  let resolvedContactId: string | null = null;
+    // Résoudre le contact : vide = pas de contact, sinon vérifier l'appartenance
+    // au workspace et que le contact n'est pas archivé.
+    let resolvedContactId: string | null = null;
 
-  if (contactId) {
-    const contact = await prisma.contact.findFirst({
-      where: { id: contactId, workspaceId, archivedAt: null },
-      select: { id: true },
+    if (contactId) {
+      const contact = await prisma.contact.findFirst({
+        where: { id: contactId, workspaceId, archivedAt: null },
+        select: { id: true },
+      });
+
+      if (!contact) {
+        return {
+          status: "error",
+          message: "Ce contact n'existe pas ou a été archivé.",
+          fieldErrors: { contactId: "Contact introuvable." },
+        };
+      }
+      resolvedContactId = contact.id;
+    }
+
+    const { count } = await prisma.followUp.updateMany({
+      where: { id, workspaceId },
+      data: {
+        title,
+        description,
+        dueAt: startOfDay(dueDate, APP_TIME_ZONE),
+        contactId: resolvedContactId,
+      },
     });
 
-    if (!contact) {
-      return {
-        status: "error",
-        message: "Ce contact n'existe pas ou a été archivé.",
-        fieldErrors: { contactId: "Contact introuvable." },
-      };
+    if (count !== 1) {
+      return { status: "error", message: "Suivi introuvable." };
     }
-    resolvedContactId = contact.id;
-  }
 
-  const { count } = await prisma.followUp.updateMany({
-    where: { id, workspaceId },
-    data: {
-      title,
-      description,
-      dueAt: startOfDay(dueDate, APP_TIME_ZONE),
-      contactId: resolvedContactId,
-    },
+    await recordAudit({
+      workspaceId,
+      userId,
+      action: "UPDATE",
+      entityType: AUDIT_ENTITY_TYPES.FOLLOW_UP,
+      entityId: id,
+    });
+
+    revalidateFollowUpPages();
+    return { status: "success", message: "Suivi mis à jour." };
   });
-
-  if (count !== 1) {
-    return { status: "error", message: "Suivi introuvable." };
-  }
-
-  await recordAudit({
-    workspaceId,
-    userId,
-    action: "UPDATE",
-    entityType: AUDIT_ENTITY_TYPES.FOLLOW_UP,
-    entityId: id,
-  });
-
-  revalidateFollowUpPages();
-  return { status: "success", message: "Suivi mis à jour." };
 }
 
 /** Effet de chaque transition. Séparé de l'écriture pour rester lisible. */

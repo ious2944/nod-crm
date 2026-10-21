@@ -3,6 +3,8 @@ import "server-only";
 import { z } from "zod";
 
 import { getCurrentUser } from "@/lib/auth/dal";
+import { authorize } from "@/lib/authz/authorize";
+import type { Capability } from "@/lib/authz/capabilities";
 
 import { TaskAccessError, TaskValidationError, type Actor } from "./access";
 
@@ -24,11 +26,20 @@ export function json(data: unknown, init: ResponseInit = {}): Response {
   return Response.json(data, { ...init, headers: { ...PRIVATE_HEADERS, ...(init.headers ?? {}) } });
 }
 
-export async function withActor(handler: (actor: Actor) => Promise<Response>): Promise<Response> {
+/**
+ * `capability` : obligatoire pour une route qui écrit (point de contrôle
+ * central, voir `src/lib/authz`) ; les lectures s'en passent. Un refus suit la
+ * même conversion qu'un `TaskAccessError` (404 / 403).
+ */
+export async function withActor(handler: (actor: Actor) => Promise<Response>, capability?: Capability): Promise<Response> {
   const user = await getCurrentUser();
   if (!user) return json({ error: "Authentification requise." }, { status: 401 });
   const actor = { id: user.id, workspaceId: user.workspaceId };
   try {
+    if (capability) {
+      const decision = authorize(actor, capability);
+      if (!decision.allowed) throw new TaskAccessError(decision.code);
+    }
     return await handler(actor);
   } catch (error) {
     if (error instanceof TaskAccessError) {

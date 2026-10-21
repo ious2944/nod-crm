@@ -1,6 +1,8 @@
 import "server-only";
 
 import { UnauthenticatedError } from "@/lib/auth/dal";
+import { authorize } from "@/lib/authz/authorize";
+import type { Capability } from "@/lib/authz/capabilities";
 import { getActorForAction } from "@/lib/workspace";
 
 import { TaskAccessError, TaskValidationError, TaskVersionConflictError, type Actor } from "./access";
@@ -17,8 +19,11 @@ import "./automations";
  * erreurs métier (droits, validation, conflit) arrivent avec un message clair ;
  * les autres sont journalisées côté serveur et remplacées par un message
  * générique, sans détail interne.
+ *
+ * `capability` passe par le point de contrôle central (`authorize`) avant
+ * l'action ; un refus prend la forme d'un `TaskAccessError` du même code.
  */
-export async function runAction<T>(fn: (actor: Actor) => Promise<T>): Promise<ActionResult<T>> {
+export async function runAction<T>(capability: Capability, fn: (actor: Actor) => Promise<T>): Promise<ActionResult<T>> {
   let actor: Actor;
   try {
     actor = await getActorForAction();
@@ -30,6 +35,8 @@ export async function runAction<T>(fn: (actor: Actor) => Promise<T>): Promise<Ac
   }
 
   try {
+    const decision = authorize(actor, capability);
+    if (!decision.allowed) throw new TaskAccessError(decision.code);
     return { ok: true, data: await fn(actor) };
   } catch (error) {
     if (error instanceof TaskVersionConflictError) {

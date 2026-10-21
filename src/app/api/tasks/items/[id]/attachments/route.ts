@@ -24,5 +24,5 @@ export async function POST(request: Request, context: RouteContext<"/api/tasks/i
     const bytes = new Uint8Array(await file.arrayBuffer());
     const attachmentId = await addAttachment(actor, id, file.name, bytes);
     return json({ id: attachmentId }, { status: 201 });
-  });
+  }, "task.edit");
 }
