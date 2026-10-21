@@ -102,7 +102,8 @@ export const PROJECT_STATUS_DOTS: Record<ProjectStatus, string> = {
 };
 
 export const VISIBILITY_LABELS: Record<ProjectVisibility, string> = {
-  WORKSPACE: "Tout l'espace",
+  // Valeur héritée (décision f) : n'ouvre plus rien, le projet est réservé à ses membres.
+  WORKSPACE: "Membres uniquement",
   PRIVATE: "Membres uniquement",
 };
 

@@ -16,7 +16,6 @@ import {
   PROJECT_STATUSES,
   PROJECT_STATUS_LABELS,
   ROLE_LABELS,
-  VISIBILITY_LABELS,
 } from "@/lib/tasks/constants";
 import type { CrmRef, ProjectDetail, ProjectRole, ProjectStatus, SectionItem } from "@/lib/tasks/types";
 
@@ -235,7 +234,6 @@ export function ProjectFormModal({
   const [description, setDescription] = useState(project?.description ?? "");
   const [color, setColor] = useState(project?.color ?? "indigo");
   const [icon, setIcon] = useState(project?.icon ?? "folder");
-  const [visibility, setVisibility] = useState(project?.visibility ?? "WORKSPACE");
   const [ownerId, setOwnerId] = useState<string | null>(project?.ownerId ?? me);
   const [dates, setDates] = useState({ startDate: project?.startDate ?? null, dueDate: project?.dueDate ?? null, dueTime: null as string | null });
   const [templateId, setTemplateId] = useState(defaults.templateId ?? "");
@@ -266,7 +264,6 @@ export function ProjectFormModal({
       description: description.trim() || null,
       color,
       icon,
-      visibility,
       ownerId,
       startDate: dates.startDate,
       dueDate: dates.dueDate,
@@ -358,17 +355,9 @@ export function ProjectFormModal({
             </DatePicker>
           </div>
           <div>
-            <label htmlFor="project-visibility" className={LABEL}>
-              Visibilité
-            </label>
-            <select id="project-visibility" value={visibility} onChange={(e) => setVisibility(e.target.value as typeof visibility)} className={INPUT}>
-              {(["WORKSPACE", "PRIVATE"] as const).map((v) => (
-                <option key={v} value={v}>
-                  {VISIBILITY_LABELS[v]}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-[11px] text-muted">{visibility === "PRIVATE" ? "Seuls les membres voient le projet et ses tâches." : "Tout l'espace voit le projet et peut y contribuer."}</p>
+            <span className={LABEL}>Visibilité</span>
+            {/* Permissions V1 (décision f) : un projet est privé, partagé avec ses membres. */}
+            <p className="text-[13px]">Privé — seuls le propriétaire et les membres voient le projet et ses tâches.</p>
           </div>
           {!project && templates.length > 0 && (
             <div>
@@ -439,7 +428,7 @@ export function MembersModal({ project, onClose, onChanged }: { project: Project
       <p className="mb-3 text-[12px] text-muted">
         {project.visibility === "PRIVATE"
           ? "Projet privé : seuls les membres ci-dessous y ont accès."
-          : "Projet visible par tout l'espace. Les membres reçoivent les points d'avancement ; un commentateur ne peut pas modifier les tâches."}
+          : "Projet hérité « ouvert à l'espace » : il n'est plus visible que de ses membres. Un commentateur ne peut pas modifier les tâches."}
       </p>
       <ul className="divide-y divide-border-subtle">
         {project.members.map((member) => {
