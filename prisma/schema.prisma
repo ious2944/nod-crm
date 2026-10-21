@@ -178,6 +178,16 @@ model User {
   savedViews              SavedView[]
   automationRules         AutomationRule[]
   taskTemplates           TaskTemplate[]
+  ownedOrganizations      Organization[]           @relation("OrganizationOwner")
+  ownedContacts           Contact[]                @relation("ContactOwner")
+  ownedFollowUps          FollowUp[]               @relation("FollowUpOwner")
+  ownedOpportunities      Opportunity[]            @relation("OpportunityOwner")
+  ownedPrivacyTreatments  PrivacyTreatment[]       @relation("PrivacyTreatmentOwner")
+  ownedPrivacyProcessors  PrivacyProcessor[]       @relation("PrivacyProcessorOwner")
+  ownedPrivacyRequests    PrivacyRequest[]         @relation("PrivacyRequestOwner")
+  ownedPrivacyIncidents   PrivacyIncident[]        @relation("PrivacyIncidentOwner")
+  createdTags             Tag[]                    @relation("TagCreator")
+  createdCustomFields     CustomField[]            @relation("CustomFieldCreator")
 
   @@index([workspaceId])
   @@map("users")
@@ -225,6 +235,9 @@ model LoginAttempt {
 model Organization {
   id          String    @id @default(uuid()) @db.Uuid
   workspaceId String    @map("workspace_id") @db.Uuid
+  /// Propriétaire (permissions V1, lot A) : seul lui voit et modifie la fiche.
+  /// Nullable jusqu'au backfill, puis NOT NULL (migration suivante).
+  ownerId     String?   @map("owner_id") @db.Uuid
   name        String
   website     String?
   phone       String?
@@ -236,12 +249,14 @@ model Organization {
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
   workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownerUser     User?         @relation("OrganizationOwner", fields: [ownerId], references: [id], onDelete: NoAction)
   contacts      Contact[]
   opportunities Opportunity[]
   tasks         Task[]
   projects      Project[]
 
   @@index([workspaceId, archivedAt, name])
+  @@index([workspaceId, ownerId])
   @@map("organizations")
 }
 
@@ -249,6 +264,9 @@ model Organization {
 model Contact {
   id               String    @id @default(uuid()) @db.Uuid
   workspaceId      String    @map("workspace_id") @db.Uuid
+  /// Propriétaire (permissions V1, lot A) : seul lui voit et modifie la fiche.
+  /// Nullable jusqu'au backfill, puis NOT NULL (migration suivante).
+  ownerId          String?   @map("owner_id") @db.Uuid
   organizationId   String?   @map("organization_id") @db.Uuid
   firstName        String    @map("first_name")
   lastName         String    @map("last_name")
@@ -265,6 +283,7 @@ model Contact {
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
   workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownerUser       User?            @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: NoAction)
   organization    Organization?    @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   followUps       FollowUp[]
   tasks           Task[]
@@ -276,12 +295,16 @@ model Contact {
   @@index([workspaceId, archivedAt, createdAt])
   @@index([workspaceId, archivedAt, updatedAt])
   @@index([organizationId])
+  @@index([workspaceId, ownerId])
   @@map("contacts")
 }
 
 model FollowUp {
   id            String         @id @default(uuid()) @db.Uuid
   workspaceId   String         @map("workspace_id") @db.Uuid
+  /// Propriétaire (permissions V1, lot A) : seul lui voit et modifie la fiche.
+  /// Nullable jusqu'au backfill, puis NOT NULL (migration suivante).
+  ownerId       String?        @map("owner_id") @db.Uuid
   contactId     String?        @map("contact_id") @db.Uuid
   /// Lien facultatif vers une opportunité commerciale. N'altère pas le
   /// fonctionnement normal du suivi (balle, relance, Today).
@@ -299,6 +322,7 @@ model FollowUp {
   completedAt   DateTime?      @map("completed_at")
 
   workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownerUser   User?        @relation("FollowUpOwner", fields: [ownerId], references: [id], onDelete: NoAction)
   contact     Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
   opportunity Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
   tasks       Task[]
@@ -306,6 +330,7 @@ model FollowUp {
   @@index([workspaceId, status, dueAt])
   @@index([contactId])
   @@index([opportunityId])
+  @@index([workspaceId, ownerId])
   @@map("follow_ups")
 }
 
@@ -387,9 +412,9 @@ model Task {
   blockedBy      TaskDependency[]       @relation("DependencyBlocked")
   attachments    TaskAttachment[]
   comments       Comment[]
-  activities     TaskActivity[]        @relation("TaskActivities")
+  activities     TaskActivity[]         @relation("TaskActivities")
   /// Lignes d'historique d'autres tâches qui citent celle-ci (dépendance, copie).
-  citedIn        TaskActivity[]        @relation("ActivityRefTask")
+  citedIn        TaskActivity[]         @relation("ActivityRefTask")
   timeEntries    TaskTimeEntry[]
   notifications  Notification[]
   automationRuns AutomationRun[]
@@ -553,9 +578,13 @@ model Tag {
   workspaceId String   @map("workspace_id") @db.Uuid
   name        String
   color       String   @default("slate")
+  /// Seul le créateur modifie ou supprime l'étiquette ; tout l'espace la lit
+  /// (permissions V1, décision a).
+  createdById String?  @map("created_by_id") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at")
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("TagCreator", fields: [createdById], references: [id], onDelete: SetNull)
   tasks     TaskTag[]
 
   @@unique([workspaceId, name])
@@ -585,10 +614,14 @@ model CustomField {
   projectId   String?         @map("project_id") @db.Uuid
   /// Options des champs de sélection : `[{ id, label, color }]`.
   options     Json            @default("[]")
+  /// Seul le créateur modifie ou supprime un champ d'espace ; tout l'espace
+  /// le lit (permissions V1, décision a).
+  createdById String?         @map("created_by_id") @db.Uuid
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
 
   workspace Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?                  @relation("CustomFieldCreator", fields: [createdById], references: [id], onDelete: SetNull)
   project   Project?               @relation("ProjectOwnedFields", fields: [projectId], references: [id], onDelete: Cascade)
   projects  ProjectCustomField[]
   values    TaskCustomFieldValue[]
@@ -927,6 +960,9 @@ model TaskForm {
 model Opportunity {
   id              String            @id @default(uuid()) @db.Uuid
   workspaceId     String            @map("workspace_id") @db.Uuid
+  /// Propriétaire (permissions V1, lot A) : seul lui voit et modifie la fiche.
+  /// Nullable jusqu'au backfill, puis NOT NULL (migration suivante).
+  ownerId         String?           @map("owner_id") @db.Uuid
   organizationId  String            @map("organization_id") @db.Uuid
   /// Contact principal : doit appartenir au même workspace. Facultatif.
   contactId       String?           @map("contact_id") @db.Uuid
@@ -944,6 +980,7 @@ model Opportunity {
   updatedAt       DateTime          @updatedAt @map("updated_at")
 
   workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownerUser    User?        @relation("OpportunityOwner", fields: [ownerId], references: [id], onDelete: NoAction)
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   contact      Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
   tasks        Task[]
@@ -954,6 +991,7 @@ model Opportunity {
   @@index([workspaceId, status, estimatedAmount])
   @@index([organizationId])
   @@index([contactId])
+  @@index([workspaceId, ownerId])
   @@map("opportunities")
 }
 
@@ -961,6 +999,9 @@ model Opportunity {
 model PrivacyTreatment {
   id                 String    @id @default(uuid()) @db.Uuid
   workspaceId        String    @map("workspace_id") @db.Uuid
+  /// Propriétaire (permissions V1, lot A) : seul lui voit et modifie la fiche.
+  /// Nullable jusqu'au backfill, puis NOT NULL (migration suivante).
+  ownerId            String?   @map("owner_id") @db.Uuid
   name               String
   purpose            String
   description        String?
@@ -981,10 +1022,12 @@ model PrivacyTreatment {
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
   workspace  Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownerUser  User?                       @relation("PrivacyTreatmentOwner", fields: [ownerId], references: [id], onDelete: NoAction)
   processors PrivacyTreatmentProcessor[]
 
   @@index([workspaceId, archivedAt, name])
   @@index([workspaceId, nextReviewAt])
+  @@index([workspaceId, ownerId])
   @@map("privacy_treatments")
 }
 
@@ -992,6 +1035,9 @@ model PrivacyTreatment {
 model PrivacyProcessor {
   id                  String    @id @default(uuid()) @db.Uuid
   workspaceId         String    @map("workspace_id") @db.Uuid
+  /// Propriétaire (permissions V1, lot A) : seul lui voit et modifie la fiche.
+  /// Nullable jusqu'au backfill, puis NOT NULL (migration suivante).
+  ownerId             String?   @map("owner_id") @db.Uuid
   name                String
   service             String
   category            String?
@@ -1011,10 +1057,12 @@ model PrivacyProcessor {
   updatedAt           DateTime  @updatedAt @map("updated_at")
 
   workspace  Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownerUser  User?                       @relation("PrivacyProcessorOwner", fields: [ownerId], references: [id], onDelete: NoAction)
   treatments PrivacyTreatmentProcessor[]
 
   @@index([workspaceId, archivedAt, name])
   @@index([workspaceId, nextReviewAt])
+  @@index([workspaceId, ownerId])
   @@map("privacy_processors")
 }
 
@@ -1038,6 +1086,9 @@ model PrivacyTreatmentProcessor {
 model PrivacyRequest {
   id             String    @id @default(uuid()) @db.Uuid
   workspaceId    String    @map("workspace_id") @db.Uuid
+  /// Propriétaire (permissions V1, lot A) : seul lui voit et modifie la fiche.
+  /// Nullable jusqu'au backfill, puis NOT NULL (migration suivante).
+  ownerId        String?   @map("owner_id") @db.Uuid
   contactId      String?   @map("contact_id") @db.Uuid
   requesterName  String?   @map("requester_name")
   requesterEmail String?   @map("requester_email")
@@ -1053,10 +1104,12 @@ model PrivacyRequest {
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownerUser User?     @relation("PrivacyRequestOwner", fields: [ownerId], references: [id], onDelete: NoAction)
   contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId, status, dueAt])
   @@index([contactId])
+  @@index([workspaceId, ownerId])
   @@map("privacy_requests")
 }
 
@@ -1064,6 +1117,9 @@ model PrivacyRequest {
 model PrivacyIncident {
   id                    String    @id @default(uuid()) @db.Uuid
   workspaceId           String    @map("workspace_id") @db.Uuid
+  /// Propriétaire (permissions V1, lot A) : seul lui voit et modifie la fiche.
+  /// Nullable jusqu'au backfill, puis NOT NULL (migration suivante).
+  ownerId               String?   @map("owner_id") @db.Uuid
   title                 String
   discoveredAt          DateTime  @map("discovered_at")
   occurredAt            DateTime? @map("occurred_at")
@@ -1084,8 +1140,10 @@ model PrivacyIncident {
   updatedAt             DateTime  @updatedAt @map("updated_at")
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownerUser User?     @relation("PrivacyIncidentOwner", fields: [ownerId], references: [id], onDelete: NoAction)
 
   @@index([workspaceId, status, discoveredAt])
+  @@index([workspaceId, ownerId])
   @@map("privacy_incidents")
 }
 
