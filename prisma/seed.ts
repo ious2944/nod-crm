@@ -164,6 +164,25 @@ async function main() {
     create: { slug: WORKSPACE_SLUG, name: WORKSPACE_NAME },
   });
 
+  // Permissions V1 : chaque fiche a un propriétaire, et seul lui la voit. Les
+  // données de démonstration appartiennent donc à l'utilisateur de l'espace —
+  // `SEED_OWNER_EMAIL` s'il y en a plusieurs. Sans utilisateur, rien n'est créé.
+  const ownerEmail = process.env.SEED_OWNER_EMAIL?.trim().toLowerCase();
+  const candidates = await prisma.user.findMany({
+    where: { workspaceId: workspace.id, isActive: true, ...(ownerEmail ? { email: ownerEmail } : {}) },
+    select: { id: true, email: true },
+  });
+  if (candidates.length !== 1) {
+    console.log(
+      candidates.length === 0
+        ? `Aucun utilisateur actif${ownerEmail ? ` « ${ownerEmail} »` : ""} dans « ${WORKSPACE_SLUG} ». Créez-en un d'abord : npm run user:create -- --workspace ${WORKSPACE_SLUG}`
+        : `Plusieurs utilisateurs actifs dans « ${WORKSPACE_SLUG} » : précisez le propriétaire avec SEED_OWNER_EMAIL.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const ownerId = candidates[0].id;
+
   // Idempotent : on repart d'un jeu de démo propre à chaque exécution.
   // Les tâches et suivis d'abord : ils peuvent référencer les opportunités.
   await prisma.task.deleteMany({ where: { workspaceId: workspace.id, isDemo: true } });
@@ -182,6 +201,7 @@ async function main() {
     const created = await prisma.organization.create({
       data: {
         workspaceId: workspace.id,
+        ownerId,
         name: org.name,
         website: org.website,
         email: org.email,
@@ -198,6 +218,7 @@ async function main() {
     const created = await prisma.contact.create({
       data: {
         workspaceId: workspace.id,
+        ownerId,
         firstName: contact.firstName,
         lastName: contact.lastName,
         organizationName: contact.organizationName,
@@ -277,6 +298,7 @@ async function main() {
       select: { id: true },
       data: {
         workspaceId: workspace.id,
+        ownerId,
         contactId: followUp.contact ? contacts.get(followUp.contact) : null,
         title: followUp.title,
         description: followUp.description ?? null,
@@ -354,6 +376,8 @@ async function main() {
     await prisma.task.create({
       data: {
         workspaceId: workspace.id,
+        // Tâche libre : sans créateur, personne ne la verrait.
+        createdById: ownerId,
         contactId: task.contact ? contacts.get(task.contact) : null,
         followUpId: task.followUp ? followUpIds.get(task.followUp) : null,
         title: task.title,
@@ -372,6 +396,7 @@ async function main() {
     await prisma.opportunity.create({
       data: {
         workspaceId: workspace.id,
+        ownerId,
         organizationId,
         contactId: contactId ?? null,
         name: opp.name,
@@ -388,13 +413,8 @@ async function main() {
   console.log(
     `Seed terminé : ${ORGANIZATIONS.length} organisations, ${CONTACTS.length} contacts, ${followUps.length} suivis, ${tasks.length} tâches et ${OPPORTUNITIES.length} opportunités de démonstration.`,
   );
-  // Aucun identifiant n'est seedé : les comptes se créent uniquement à la main.
-  const userCount = await prisma.user.count({ where: { workspaceId: workspace.id } });
-  if (userCount === 0) {
-    console.log(
-      `Aucun utilisateur dans « ${WORKSPACE_SLUG} ». Créez-en un : npm run user:create -- --workspace ${WORKSPACE_SLUG}`,
-    );
-  }
+  // Aucun identifiant n'est seedé : les comptes se créent uniquement à la main
+  // (et avant le seed, qui leur attribue les données de démonstration).
 }
 
 main()
