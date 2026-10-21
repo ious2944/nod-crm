@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { Pagination } from "@/components/ui/pagination";
 import { ContactRow } from "@/components/contacts/contact-row";
 import { ContactToolbar } from "@/components/contacts/contact-toolbar";
+import { ImportContactsButton } from "@/components/contacts/import-contacts-button";
 import { NewContactButton } from "@/components/contacts/new-contact-button";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -45,7 +46,10 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
                 Les personnes que tu suis, avec ou sans suivi en cours.
               </p>
             </div>
-            <NewContactButton />
+            <div className="flex items-center gap-2">
+              <ImportContactsButton />
+              <NewContactButton />
+            </div>
           </div>
         </div>
       </header>

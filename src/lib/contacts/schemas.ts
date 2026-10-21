@@ -45,10 +45,12 @@ const optionalText = (max: number) =>
  * seulement que ce soit plausible — au moins quatre chiffres — plutôt que de
  * rejeter des numéros valides au nom d'un format.
  */
+export function isPlausiblePhone(value: string): boolean {
+  return /^[+(]?[\d\s().\-/+]+$/.test(value) && (value.match(/\d/g)?.length ?? 0) >= 4;
+}
+
 const phone = optionalText(CONTACT_LIMITS.phone).refine(
-  (value) =>
-    value === null ||
-    (/^[+(]?[\d\s().\-/+]+$/.test(value) && (value.match(/\d/g)?.length ?? 0) >= 4),
+  (value) => value === null || isPlausiblePhone(value),
   "Numéro de téléphone invalide.",
 );
 

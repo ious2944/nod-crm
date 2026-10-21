@@ -1,0 +1,3 @@
+# Fixtures dont l’encodage et les fins de ligne font partie du test :
+# jamais de conversion CRLF/LF par Git, quelle que soit la config locale.
+tests/fixtures/outlook/*.csv -text

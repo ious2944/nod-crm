@@ -151,9 +151,47 @@ The upgrade path is short and is not blocked by this choice:
 Steps 1–4 are additive and reversible. That is the whole point of stopping at
 step 0 today.
 
+## Outlook CSV import
+
+`Contacts → Importer` reads a contacts export from the new Outlook (61 English
+headers, UTF-8 with BOM, CRLF) or from classic Outlook (French headers,
+Windows-1252). Code: `src/lib/contacts/import/` (pure parsing and planning),
+`src/app/(app)/contacts/import-actions.ts` (the two Server Actions).
+
+- **Two steps.** `previewContactImport` analyses the file and the database
+  without writing. `importContacts` receives the **same file again**, redoes the
+  whole analysis inside one transaction and writes all or nothing, in batches
+  of 500. Nothing is kept between the two calls, on disk or in memory.
+- **Reading.** Encoding: BOM, then UTF-16 heuristics, strict UTF-8, otherwise
+  Windows-1252. `,` or `;` is detected by the shared parser in
+  `src/lib/tasks/csv.ts`. Headers are matched ignoring case, accents and
+  spaces. Dates: `YYYY-MM-DD`, `M/D/YYYY` with English headers, `D/M/YYYY` with
+  French headers; `0/0/00` means "no date".
+- **Mapping.** Each of the 61 columns is imported, appended to the notes under
+  an `— Import Outlook —` block, or ignored (`outlook-columns.ts`). The first
+  valid e-mail and the first plausible phone number (Primary, Mobile, Business…)
+  become the contact's own fields; the others go to the notes. Ignored for data
+  minimisation: home address, spouse, schools, hobby, anniversary.
+- **Duplicates.** Key: the main e-mail, lower-cased, within the workspace,
+  archived contacts included. Inside the file, the first occurrence wins and the
+  preview lists what the later ones would have brought. Against the database,
+  the user picks *skip* or *fill empty fields*; the "never overwrite" rule is
+  enforced in the `UPDATE` itself.
+- **Probable duplicates.** A row without an e-mail is flagged when a contact of
+  the workspace (archived included) has the same first name + last name +
+  organisation (case, accents and spaces ignored) or the same phone number
+  (digits only, `+33` / `0033` equivalent to a leading `0`). Flagged rows are
+  skipped unless the user ticks them in the preview. Re-importing the same file
+  therefore creates nothing.
+- **Organisations.** Linked to an existing, non-archived organisation of the
+  workspace by normalised name when the match is unique; never created.
+- **Limits.** 2.5 MB (under the 3 MB Server Action body limit) and 5,000 rows.
+- **Audit and logs.** One `ContactImport` audit row per import. The file and
+  its values are never logged; on failure only the error class is.
+
 ## What V0.2 deliberately does not do
 
-No CSV import or export, no tags, no activity history, no Gmail or Google
+No CSV export (import arrived later, see above), no tags, no activity history, no Gmail or Google
 Contacts sync, no deduplication, no bulk actions, no opportunities. The
 architecture leaves room for `Organizations` and `Activities` to slot in
 between `Contacts` and `Follow-Ups`; nothing here has to be undone first.
