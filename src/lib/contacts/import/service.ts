@@ -3,6 +3,7 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { recordAudit } from "@/lib/audit/log";
 import { AUDIT_ENTITY_TYPES } from "@/lib/audit/types";
+import { crmReadableWhere, type CrmOwned } from "@/lib/authz/crm-access";
 import { normalizeOrgName } from "@/lib/organizations/domain";
 import { prisma } from "@/lib/prisma";
 
@@ -32,6 +33,9 @@ import {
  *    de contacts « déjà analysés ».
  *
  * Le `workspaceId` vient toujours de l'acteur, c'est-à-dire de la session.
+ * Depuis le lot A, tout se fait **dans les contacts de l'acteur**
+ * (`crmReadableWhere`) : dédoublonnage, complément, organisations rattachées,
+ * contacts créés — l'aperçu ne révèle donc jamais la fiche d'autrui.
  * Toute lecture et toute écriture le portent dans leur `WHERE`.
  *
  * Journalisation : ni le contenu du fichier ni aucune valeur de contact ne
@@ -99,7 +103,7 @@ export async function readUpload(
 }
 
 /** Contacts du workspace dont l'e-mail correspond à une clé — archivés compris. */
-async function findExisting(db: Db, workspaceId: string, keys: string[]): Promise<ExistingContact[]> {
+async function findExisting(db: Db, owned: CrmOwned, keys: string[]): Promise<ExistingContact[]> {
   if (keys.length === 0) return [];
   return db.$queryRaw<ExistingContact[]>`
     SELECT id,
@@ -115,7 +119,8 @@ async function findExisting(db: Db, workspaceId: string, keys: string[]): Promis
            archived_at IS NOT NULL AS archived,
            created_at AS "createdAt"
     FROM contacts
-    WHERE workspace_id = ${workspaceId}::uuid
+    WHERE workspace_id = ${owned.workspaceId}::uuid
+      AND owner_id = ${owned.ownerId}::uuid
       AND lower(regexp_replace(email, '\\s+', '', 'g')) = ANY(${keys}::text[])`;
 }
 
@@ -125,9 +130,9 @@ async function findExisting(db: Db, workspaceId: string, keys: string[]): Promis
  * TypeScript : on lit donc les quatre colonnes utiles de tout le workspace,
  * et seulement si le fichier contient au moins une ligne sans e-mail.
  */
-async function findIdentities(db: Db, workspaceId: string): Promise<ExistingIdentity[]> {
+async function findIdentities(db: Db, owned: CrmOwned): Promise<ExistingIdentity[]> {
   const rows = await db.contact.findMany({
-    where: { workspaceId },
+    where: { ...owned },
     select: {
       id: true,
       firstName: true,
@@ -146,7 +151,7 @@ const REASON_LABELS = { identity: "même prénom, nom et organisation", phone: "
 
 async function analyse(
   db: Db,
-  workspaceId: string,
+  owned: CrmOwned,
   bytes: Uint8Array,
   includeLines: ReadonlySet<number> = new Set(),
 ): Promise<
@@ -156,13 +161,13 @@ async function analyse(
   const parsed = parseOutlookCsv(bytes);
   if (!parsed.ok) return parsed;
   const keys = [...new Set(parsed.candidates.flatMap((c) => (c.emailKey ? [c.emailKey] : [])))];
-  const existing = await findExisting(db, workspaceId, keys);
-  const identities = parsed.candidates.some((c) => !c.emailKey) ? await findIdentities(db, workspaceId) : [];
+  const existing = await findExisting(db, owned, keys);
+  const identities = parsed.candidates.some((c) => !c.emailKey) ? await findIdentities(db, owned) : [];
   return { ok: true, parsed, plan: planImport(parsed.candidates, existing, identities, includeLines) };
 }
 
-export async function previewImport(workspaceId: string, bytes: Uint8Array): Promise<PreviewResult> {
-  const result = await analyse(prisma, workspaceId, bytes);
+export async function previewImport(actor: ImportActor, bytes: Uint8Array): Promise<PreviewResult> {
+  const result = await analyse(prisma, crmReadableWhere(actor), bytes);
   if (!result.ok) return result;
   const { parsed, plan } = result;
 
@@ -201,9 +206,9 @@ export async function previewImport(workspaceId: string, bytes: Uint8Array): Pro
 }
 
 /** Rattachement par nom normalisé, seulement s'il est sans ambiguïté. */
-async function organizationResolver(db: Db, workspaceId: string) {
+async function organizationResolver(db: Db, owned: CrmOwned) {
   const organizations = await db.organization.findMany({
-    where: { workspaceId, archivedAt: null },
+    where: { ...owned, archivedAt: null },
     select: { id: true, name: true },
   });
   const byName = new Map<string, string | null>();
@@ -220,8 +225,8 @@ function chunks<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-const toRow = (workspaceId: string, c: ImportCandidate, organizationId: string | null) => ({
-  workspaceId,
+const toRow = (owned: CrmOwned, c: ImportCandidate, organizationId: string | null) => ({
+  ...owned,
   firstName: c.firstName,
   lastName: c.lastName,
   email: c.email,
@@ -241,7 +246,7 @@ const toRow = (workspaceId: string, c: ImportCandidate, organizationId: string |
  */
 async function completeBatch(
   db: Prisma.TransactionClient,
-  workspaceId: string,
+  owned: CrmOwned,
   rows: { id: string; candidate: ImportCandidate; organizationId: string | null }[],
 ): Promise<string[]> {
   const values = Prisma.join(
@@ -264,7 +269,7 @@ async function completeBatch(
       notes = COALESCE(NULLIF(btrim(c.notes), ''), v.notes),
       updated_at = now()
     FROM (VALUES ${values}) AS v(id, first_name, last_name, phone, job_title, organization_name, organization_id, notes)
-    WHERE c.id = v.id AND c.workspace_id = ${workspaceId}::uuid
+    WHERE c.id = v.id AND c.workspace_id = ${owned.workspaceId}::uuid AND c.owner_id = ${owned.ownerId}::uuid
     RETURNING c.id`;
   return updated.map((row) => row.id);
 }
@@ -276,21 +281,22 @@ export async function runImport(
   /** Doublons probables que l'utilisateur a cochés pour les importer quand même. */
   includeLines: ReadonlySet<number> = new Set(),
 ): Promise<ImportOutcome> {
-  const { workspaceId } = actor;
+  const owned = crmReadableWhere(actor);
+  const { workspaceId } = owned;
 
   const outcome = await prisma.$transaction(
     async (tx): Promise<ImportOutcome> => {
       // L'analyse est refaite dans la transaction : les doublons sont jugés
       // sur l'état de la base au moment de l'écriture, pas de l'aperçu.
-      const result = await analyse(tx, workspaceId, bytes, includeLines);
+      const result = await analyse(tx, owned, bytes, includeLines);
       if (!result.ok) return result;
       const { parsed, plan } = result;
-      const resolveOrg = await organizationResolver(tx, workspaceId);
+      const resolveOrg = await organizationResolver(tx, owned);
 
       let created = 0;
       for (const batch of chunks(plan.toCreate, IMPORT_BATCH_SIZE)) {
         const { count } = await tx.contact.createMany({
-          data: batch.map((c) => toRow(workspaceId, c, resolveOrg(c.organizationName))),
+          data: batch.map((c) => toRow(owned, c, resolveOrg(c.organizationName))),
         });
         created += count;
       }
@@ -305,7 +311,7 @@ export async function runImport(
             organizationId: resolveOrg(d.candidate.organizationName),
           }));
         for (const batch of chunks(toComplete, IMPORT_BATCH_SIZE)) {
-          updated += (await completeBatch(tx, workspaceId, batch)).length;
+          updated += (await completeBatch(tx, owned, batch)).length;
         }
       }
 

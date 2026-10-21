@@ -12,7 +12,7 @@ import { prisma } from "@/lib/prisma";
 import type { ActionResult } from "@/lib/tasks/types";
 import { getProjectSettings, getTaskDetail } from "@/lib/tasks/work-queries";
 
-import { addUserToWorkspace, createWorkspaceWithUser, resetDatabase, signIn, type TestUser } from "./fixtures";
+import { addUserToWorkspace, createWorkspaceWithUser, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
 
 /**
  * Règles d'automatisation et droits (revue c580137, constat B1).
@@ -41,9 +41,16 @@ describe("règles d'automatisation : droits de la personne qui les enregistre", 
     bob = await addUserToWorkspace(alice.workspaceId, "Bob");
     carol = await addUserToWorkspace(alice.workspaceId, "Carol");
     dan = await addUserToWorkspace(alice.workspaceId, "Dan");
+    // Lot A (décision b) : les personnes du scénario partagent un projet « Équipe », donc l'annuaire.
+    await shareDirectory(alice, bob, carol, dan);
     await signIn(alice);
     P = ok(await createProjectAction({ name: "Privé", visibility: "PRIVATE" }));
-    W = ok(await createProjectAction({ name: "Public" }));
+    // Lot A (décision f) : plus de projet ouvert à l'espace. « W » est un
+    // projet partagé dont Bob et Carol sont éditeurs (Carol peut y être
+    // restreinte au rôle commentatrice dans un test).
+    W = ok(await createProjectAction({ name: "Partagé" }));
+    ok(await setProjectMemberAction(W, bob.userId, "EDITOR"));
+    ok(await setProjectMemberAction(W, carol.userId, "EDITOR"));
     ok(await setProjectMemberAction(P, dan.userId, "EDITOR"));
   });
 
@@ -99,21 +106,22 @@ describe("règles d'automatisation : droits de la personne qui les enregistre", 
     expect((await prisma.task.findUniqueOrThrow({ where: { id: task.id } })).assigneeId).toBeNull();
   });
 
-  it("une règle d'espace n'est modifiable et supprimable que par son auteur", async () => {
+  it("une règle d'espace est personnelle : invisible, ni modifiable ni supprimable par une autre personne", async () => {
     await signIn(bob);
     const ruleId = ok(await saveRuleAction(null, null, rule([{ kind: "add_comment", body: "auto" }])));
     await signIn(carol);
-    expect(await saveRuleAction(ruleId, null, rule([{ kind: "set_assignee", userId: carol.userId }]))).toMatchObject({ ok: false, code: "FORBIDDEN" });
-    expect(await deleteRuleAction(ruleId)).toMatchObject({ ok: false, code: "FORBIDDEN" });
+    // Lot A (décision a) : pour Carol, la règle de Bob n'existe pas.
+    expect(await saveRuleAction(ruleId, null, rule([{ kind: "set_assignee", userId: carol.userId }]))).toMatchObject({ ok: false, code: "NOT_FOUND" });
+    expect(await deleteRuleAction(ruleId)).toMatchObject({ ok: false, code: "NOT_FOUND" });
     const stored = await prisma.automationRule.findUniqueOrThrow({ where: { id: ruleId } });
     expect(stored.createdById).toBe(bob.userId);
     expect(JSON.stringify(stored.actions)).toContain("add_comment");
 
-    // Auteur désactivé : la règle est inerte, un autre membre peut la reprendre ou la supprimer.
+    // Auteur désactivé : la règle est inerte, et reste la sienne (plus de reprise par un tiers).
     await prisma.user.update({ where: { id: bob.userId }, data: { isActive: false } });
-    ok(await saveRuleAction(ruleId, null, rule([{ kind: "add_comment", body: "reprise" }])));
-    expect((await prisma.automationRule.findUniqueOrThrow({ where: { id: ruleId } })).createdById).toBe(carol.userId);
-    ok(await deleteRuleAction(ruleId));
+    expect(await saveRuleAction(ruleId, null, rule([{ kind: "add_comment", body: "reprise" }]))).toMatchObject({ ok: false, code: "NOT_FOUND" });
+    expect(await deleteRuleAction(ruleId)).toMatchObject({ ok: false, code: "NOT_FOUND" });
+    expect((await prisma.automationRule.findUniqueOrThrow({ where: { id: ruleId } })).createdById).toBe(bob.userId);
   });
 
   it("modifier une règle de projet la fait exécuter avec les droits de la personne qui l'enregistre", async () => {
@@ -135,10 +143,11 @@ describe("règles d'automatisation : droits de la personne qui les enregistre", 
     const open = ok(await createTaskAction({ title: "Ouverte", projectId: W }));
     expect(await prisma.automationRun.count({ where: { taskId: secret.id } })).toBe(1);
 
+    // Lot A (décision a) : la règle d'espace d'Alice est personnelle — Bob ne
+    // voit ni la règle ni son journal, même sur une tâche qu'il lit.
     const forBob = await getProjectSettings(actorOf(bob), W);
-    const taskIds = forBob.runs.map((r) => r.taskId);
-    expect(taskIds).toContain(open.id);
-    expect(taskIds).not.toContain(secret.id);
+    expect(forBob.rules).toEqual([]);
+    expect(forBob.runs).toEqual([]);
     // Alice, elle, voit les deux.
     const forAlice = await getProjectSettings(actorOf(alice), W);
     expect(forAlice.runs.map((r) => r.taskId)).toEqual(expect.arrayContaining([open.id, secret.id]));

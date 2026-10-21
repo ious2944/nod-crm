@@ -62,7 +62,7 @@ export async function createOpportunity(
 
     // L'organisation est obligatoire ; on vérifie qu'elle appartient au workspace.
     const organization = await prisma.organization.findFirst({
-      where: { id: input.organizationId, workspaceId, archivedAt: null },
+      where: { id: input.organizationId, workspaceId, ownerId: userId, archivedAt: null },
       select: { id: true },
     });
 
@@ -78,7 +78,7 @@ export async function createOpportunity(
 
     if (input.contactId) {
       const contact = await prisma.contact.findFirst({
-        where: { id: input.contactId, workspaceId, archivedAt: null },
+        where: { id: input.contactId, workspaceId, ownerId: userId, archivedAt: null },
         select: { id: true },
       });
 
@@ -99,6 +99,7 @@ export async function createOpportunity(
     const opportunity = await prisma.opportunity.create({
       data: {
         workspaceId,
+        ownerId: userId,
         organizationId: organization.id,
         contactId,
         name: input.name,
@@ -145,7 +146,7 @@ export async function updateOpportunity(
 
     // Vérification d'appartenance au workspace, anti–mass-assignment.
     const existing = await prisma.opportunity.findFirst({
-      where: { id: input.id, workspaceId },
+      where: { id: input.id, workspaceId, ownerId: userId },
       select: { id: true },
     });
 
@@ -159,7 +160,7 @@ export async function updateOpportunity(
 
     // Vérification de l'organisation.
     const organization = await prisma.organization.findFirst({
-      where: { id: input.organizationId, workspaceId, archivedAt: null },
+      where: { id: input.organizationId, workspaceId, ownerId: userId, archivedAt: null },
       select: { id: true },
     });
 
@@ -175,7 +176,7 @@ export async function updateOpportunity(
 
     if (input.contactId) {
       const contact = await prisma.contact.findFirst({
-        where: { id: input.contactId, workspaceId, archivedAt: null },
+        where: { id: input.contactId, workspaceId, ownerId: userId, archivedAt: null },
         select: { id: true },
       });
 
@@ -236,7 +237,7 @@ export async function changeOpportunityStatus(formData: FormData): Promise<void>
     const { id, status: newStatus } = parsed.data;
 
     const opportunity = await prisma.opportunity.findFirst({
-      where: { id, workspaceId },
+      where: { id, workspaceId, ownerId: userId },
       select: { id: true, status: true },
     });
 
@@ -304,7 +305,7 @@ export async function deleteOpportunity(formData: FormData): Promise<void> {
     }
 
     const opportunity = await prisma.opportunity.findFirst({
-      where: { id, workspaceId },
+      where: { id, workspaceId, ownerId: userId },
       select: { id: true },
     });
 

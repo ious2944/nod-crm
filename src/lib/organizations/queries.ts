@@ -8,8 +8,8 @@ import { contactFullName } from "@/lib/follow-ups/view";
 import { computeTaskTiming } from "@/lib/tasks/domain";
 import { formatAmount, STATUS_LABELS } from "@/lib/commerce/domain";
 import { prisma } from "@/lib/prisma";
-import { getWorkspaceIdForPage } from "@/lib/workspace";
-import { requireUser } from "@/lib/auth/dal";
+import { crmReadableWhere, type CrmOwned } from "@/lib/authz/crm-access";
+import { getActorForPage } from "@/lib/workspace";
 import { NOT_TEMPLATE_TASK, visibleTaskWhere } from "@/lib/tasks/access";
 import {
   escapeLikePattern,
@@ -51,7 +51,7 @@ export interface OrganizationListPage {
 }
 
 function buildWhere(
-  workspaceId: string,
+  owned: CrmOwned,
   params: OrganizationListParams,
 ): Prisma.OrganizationWhereInput {
   const and: Prisma.OrganizationWhereInput[] = [];
@@ -68,7 +68,7 @@ function buildWhere(
   }
 
   return {
-    workspaceId,
+    ...owned,
     archivedAt: params.archived ? { not: null } : null,
     ...(and.length > 0 ? { AND: and } : {}),
   };
@@ -83,8 +83,8 @@ function buildWhere(
 export async function listOrganizationsPage(
   params: OrganizationListParams,
 ): Promise<OrganizationListPage> {
-  const workspaceId = await getWorkspaceIdForPage();
-  const where = buildWhere(workspaceId, params);
+  const owned = crmReadableWhere(await getActorForPage());
+  const where = buildWhere(owned, params);
 
   const [total, records] = await Promise.all([
     prisma.organization.count({ where }),
@@ -106,7 +106,7 @@ export async function listOrganizationsPage(
 
   // Compte des contacts actifs par organisation, en une seule agrégation groupée.
   const contactCounts = await countActiveContactsByOrganization(
-    workspaceId,
+    owned,
     records.map((r) => r.id),
   );
 
@@ -141,7 +141,7 @@ export async function listOrganizationsPage(
  * Compte les contacts actifs de plusieurs organisations en une seule requête.
  */
 async function countActiveContactsByOrganization(
-  workspaceId: string,
+  owned: CrmOwned,
   organizationIds: string[],
 ): Promise<Map<string, number>> {
   const counts = new Map<string, number>();
@@ -150,7 +150,7 @@ async function countActiveContactsByOrganization(
   const rows = await prisma.contact.groupBy({
     by: ["organizationId"],
     where: {
-      workspaceId,
+      ...owned,
       organizationId: { in: organizationIds },
       archivedAt: null,
     },
@@ -170,10 +170,12 @@ async function countActiveContactsByOrganization(
  * Fiche détaillée. `null` si l'identifiant ne désigne rien dans CE workspace.
  */
 export async function getOrganizationDetail(id: string): Promise<OrganizationDetail | null> {
-  const workspaceId = await getWorkspaceIdForPage();
+  const actor = await getActorForPage();
+  const owned = crmReadableWhere(actor);
+  const { workspaceId } = owned;
 
   const record = await prisma.organization.findFirst({
-    where: { id, workspaceId },
+    where: { id, ...owned },
     select: {
       id: true,
       name: true,
@@ -191,7 +193,7 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
   // Contacts rattachés, tous statuts d'archivage confondus : on montre aussi
   // les archivés pour ne pas cacher qu'une relation existait.
   const contacts = await prisma.contact.findMany({
-    where: { workspaceId, organizationId: id },
+    where: { ...owned, organizationId: id },
     orderBy: [{ archivedAt: "asc" }, { firstName: "asc" }, { lastName: "asc" }],
     select: {
       id: true,
@@ -213,7 +215,7 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
     contactIds.length > 0
       ? await prisma.followUp.findMany({
           where: {
-            workspaceId,
+            ...owned,
             contactId: { in: contactIds },
             status: "OPEN",
           },
@@ -240,7 +242,7 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
             contactId: { in: contactIds },
             completedAt: null,
             // V1.0 : mêmes règles que le module Tâches (projets privés, corbeille).
-            AND: [visibleTaskWhere(await taskViewer()), NOT_TEMPLATE_TASK],
+            AND: [visibleTaskWhere(actor), NOT_TEMPLATE_TASK],
           },
           orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
           select: {
@@ -258,7 +260,7 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
   // Opportunités ouvertes directement rattachées à cette organisation.
   const openOpportunitiesRaw = await prisma.opportunity.findMany({
     where: {
-      workspaceId,
+      ...owned,
       organizationId: id,
       status: { in: ["A_QUALIFIER", "EN_DISCUSSION", "PROPOSITION"] },
     },
@@ -360,10 +362,10 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
 export async function searchOrganizationOptions(
   search: string,
 ): Promise<OrganizationPickerOption[]> {
-  const workspaceId = await getWorkspaceIdForPage();
+  const owned = crmReadableWhere(await getActorForPage());
 
   const where: Prisma.OrganizationWhereInput = {
-    workspaceId,
+    ...owned,
     archivedAt: null,
     ...(search.trim()
       ? {
@@ -400,7 +402,3 @@ function websiteHostname(website: string): string | null {
   }
 }
 
-async function taskViewer() {
-  const user = await requireUser();
-  return { id: user.id, workspaceId: user.workspaceId };
-}

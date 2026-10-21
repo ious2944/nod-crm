@@ -12,7 +12,6 @@ import { objectStore } from "@/lib/storage";
 
 import { authorize } from "@/lib/authz/authorize";
 import {
-  canEditProjectContent,
   canManageProject,
   evaluateProjectTrashAccess,
   canReadProject,
@@ -585,6 +584,7 @@ export async function listProjectTrash(actor: Actor): Promise<ProjectTrashItem[]
       name: true,
       color: true,
       icon: true,
+      deletedById: true,
       deletedBy: { select: { displayName: true, email: true } },
       _count: { select: { trashedTasks: true } },
     },
@@ -600,7 +600,8 @@ export async function listProjectTrash(actor: Actor): Promise<ProjectTrashItem[]
       icon: p.icon,
       visibility: p.visibility,
       deletedAt: p.deletedAt!.toISOString(),
-      deletedBy: p.deletedBy ? p.deletedBy.displayName?.trim() || p.deletedBy.email : null,
+      // Adresse d'autrui jamais exposée (décision b) : nom, sinon libellé neutre.
+      deletedBy: p.deletedBy ? p.deletedBy.displayName?.trim() || (p.deletedById === actor.id ? p.deletedBy.email : "Membre de l'espace") : null,
       taskCount: p._count.trashedTasks,
       ...rights,
     }));

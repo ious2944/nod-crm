@@ -21,6 +21,7 @@ import {
   resetDatabase,
   signIn,
   type TestUser,
+  defaultOwnerId,
 } from "./fixtures";
 
 function treatmentData(overrides: Record<string, string> = {}) {
@@ -88,7 +89,7 @@ describe("RGPD Essentials — isolation workspace", () => {
   it("ne modifie pas un traitement d'un autre workspace", async () => {
     const bob = await createWorkspaceWithUser("privacy-bob");
     const foreign = await prisma.privacyTreatment.create({
-      data: { workspaceId: bob.workspaceId, name: "Bob", purpose: "Privé" },
+      data: { workspaceId: bob.workspaceId, ownerId: await defaultOwnerId(bob.workspaceId), name: "Bob", purpose: "Privé" },
     });
 
     await updateTreatment(treatmentData({ id: foreign.id, name: "Pwned" }));
@@ -99,7 +100,7 @@ describe("RGPD Essentials — isolation workspace", () => {
   it("refuse de lier un sous-traitant d'un autre workspace", async () => {
     const bob = await createWorkspaceWithUser("privacy-bob");
     const foreign = await prisma.privacyProcessor.create({
-      data: { workspaceId: bob.workspaceId, name: "Bob Cloud", service: "Cloud" },
+      data: { workspaceId: bob.workspaceId, ownerId: await defaultOwnerId(bob.workspaceId), name: "Bob Cloud", service: "Cloud" },
     });
     const data = treatmentData();
     data.append("processorId", foreign.id);
@@ -132,10 +133,10 @@ describe("RGPD Essentials — isolation workspace", () => {
   it("les requêtes de liste ne renvoient que le workspace courant", async () => {
     const bob = await createWorkspaceWithUser("privacy-bob");
     await prisma.privacyTreatment.create({
-      data: { workspaceId: alice.workspaceId, name: "Alice", purpose: "A" },
+      data: { workspaceId: alice.workspaceId, ownerId: await defaultOwnerId(alice.workspaceId), name: "Alice", purpose: "A" },
     });
     await prisma.privacyTreatment.create({
-      data: { workspaceId: bob.workspaceId, name: "Bob", purpose: "B" },
+      data: { workspaceId: bob.workspaceId, ownerId: await defaultOwnerId(bob.workspaceId), name: "Bob", purpose: "B" },
     });
 
     const treatments = await listPrivacyTreatments();
@@ -153,7 +154,7 @@ describe("RGPD Essentials — isolation workspace", () => {
     const bob = await createWorkspaceWithUser("privacy-bob");
     const incident = await prisma.privacyIncident.create({
       data: {
-        workspaceId: bob.workspaceId,
+        workspaceId: bob.workspaceId, ownerId: await defaultOwnerId(bob.workspaceId),
         title: "Incident Bob",
         description: "Description",
         discoveredAt: new Date("2026-08-20"),

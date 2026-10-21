@@ -131,6 +131,25 @@ export function visibleTaskWhere(actor: Actor): Prisma.TaskWhereInput {
   };
 }
 
+/**
+ * Notifications que l'acteur voit : les siennes, sur une tâche qu'il lit ou un
+ * projet qu'il lit (ou sans cible). Une notification ne survit pas à la perte
+ * d'accès — tâche à la corbeille, retirée du projet, projet devenu privé : elle
+ * est masquée (liste ET compteur), pas supprimée, et sa copie figée (titre,
+ * corps) ne s'affiche plus.
+ */
+export function readableNotificationWhere(actor: Actor): Prisma.NotificationWhereInput {
+  return {
+    userId: actor.id,
+    workspaceId: actor.workspaceId,
+    OR: [
+      { taskId: null, projectId: null },
+      { taskId: { not: null }, task: visibleTaskWhere(actor) },
+      { taskId: null, projectId: { not: null }, project: readableProjectWhere(actor) },
+    ],
+  };
+}
+
 /** Les tâches des modèles de projet n'apparaissent dans aucune vue transverse. */
 export const NOT_TEMPLATE_TASK: Prisma.TaskWhereInput = {
   NOT: { projects: { some: { project: { isTemplate: true } } } },

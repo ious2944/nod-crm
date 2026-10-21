@@ -14,6 +14,11 @@ import type { Actor } from "@/lib/tasks/access";
  * Le filtre d'espace reste explicite : la propriété s'ajoute, elle ne le
  * remplace pas.
  */
-export function crmReadableWhere(actor: Actor): { workspaceId: string; ownerId: string } {
+export interface CrmOwned {
+  workspaceId: string;
+  ownerId: string;
+}
+
+export function crmReadableWhere(actor: Actor): CrmOwned {
   return { workspaceId: actor.workspaceId, ownerId: actor.id };
 }

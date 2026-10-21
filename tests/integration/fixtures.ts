@@ -23,6 +23,16 @@ export async function resetDatabase(): Promise<void> {
 
 let counter = 0;
 
+/**
+ * Propriétaire par défaut d'une fiche créée en base (lot A : chaque fiche CRM
+ * ou RGPD a un propriétaire, et seul lui la voit) : le premier utilisateur de
+ * l'espace — celui de `createWorkspaceWithUser`.
+ */
+export async function defaultOwnerId(workspaceId: string): Promise<string> {
+  const user = await prisma.user.findFirstOrThrow({ where: { workspaceId }, orderBy: { createdAt: "asc" }, select: { id: true } });
+  return user.id;
+}
+
 /** Crée un workspace avec son utilisateur actif. */
 export async function createWorkspaceWithUser(
   slug: string,
@@ -69,6 +79,7 @@ export async function createFollowUpRecord(
   const followUp = await prisma.followUp.create({
     data: {
       workspaceId,
+      ownerId: await defaultOwnerId(workspaceId),
       title,
       ballOwner: "THEM",
       dueAt: new Date(Date.now() - 86_400_000),
@@ -91,6 +102,8 @@ export async function createTaskRecord(
     completedAt: Date | null;
     contactId: string | null;
     followUpId: string | null;
+    /** Créateur : par défaut le premier utilisateur de l'espace (une tâche libre sans créateur n'est visible de personne). */
+    createdById: string | null;
   }> = {},
 ): Promise<string> {
   const { dueInDays = 0, ...rest } = overrides;
@@ -98,6 +111,7 @@ export async function createTaskRecord(
   const task = await prisma.task.create({
     data: {
       workspaceId,
+      createdById: "createdById" in rest ? rest.createdById : await defaultOwnerId(workspaceId),
       title: "Tâche de test",
       dueAt: new Date(Date.now() + dueInDays * 86_400_000),
       // V1.0 : statut et date d'achèvement sont toujours tenus ensemble.
@@ -121,10 +135,11 @@ export async function createContactRecord(
     organizationId: string | null;
     notes: string | null;
     archivedAt: Date | null;
+    ownerId: string;
   }> = {},
 ): Promise<string> {
   const contact = await prisma.contact.create({
-    data: { workspaceId, firstName: "Test", lastName: "Contact", ...overrides },
+    data: { workspaceId, ownerId: await defaultOwnerId(workspaceId), firstName: "Test", lastName: "Contact", ...overrides },
     select: { id: true },
   });
   return contact.id;
@@ -140,10 +155,11 @@ export async function createOrganizationRecord(
     phone: string | null;
     notes: string | null;
     archivedAt: Date | null;
+    ownerId: string;
   }> = {},
 ): Promise<string> {
   const org = await prisma.organization.create({
-    data: { workspaceId, name: "Organisation de test", ...overrides },
+    data: { workspaceId, ownerId: await defaultOwnerId(workspaceId), name: "Organisation de test", ...overrides },
     select: { id: true },
   });
   return org.id;
@@ -157,11 +173,13 @@ export async function createOpportunityRecord(
     name: string;
     status: "A_QUALIFIER" | "EN_DISCUSSION" | "PROPOSITION" | "GAGNEE" | "PERDUE";
     contactId: string | null;
+    ownerId: string;
   }> = {},
 ): Promise<string> {
   const opportunity = await prisma.opportunity.create({
     data: {
       workspaceId,
+      ownerId: await defaultOwnerId(workspaceId),
       organizationId,
       name: "Opportunité de test",
       status: "A_QUALIFIER",
@@ -211,4 +229,31 @@ export async function addUserToWorkspace(
     select: { id: true },
   });
   return { userId: user.id, workspaceId, email, password };
+}
+
+/**
+ * Met des personnes du même espace dans l'annuaire les unes des autres
+ * (lot A, décision b : l'annuaire = soi + les co-membres d'un projet lisible).
+ * Crée un projet vide « Équipe » appartenant à `owner`, dont les autres sont
+ * membres éditeurs. Sans cela, on ne peut ni affecter une tâche à une autre
+ * personne, ni l'ajouter en collaboratrice, ni la mentionner.
+ */
+export async function shareDirectory(owner: TestUser, ...others: TestUser[]): Promise<string> {
+  const project = await prisma.project.create({
+    data: {
+      workspaceId: owner.workspaceId,
+      name: "Équipe",
+      ownerId: owner.userId,
+      createdById: owner.userId,
+      visibility: "PRIVATE",
+      members: {
+        create: [
+          { userId: owner.userId, workspaceId: owner.workspaceId, role: "OWNER" },
+          ...others.map((u) => ({ userId: u.userId, workspaceId: u.workspaceId, role: "EDITOR" as const })),
+        ],
+      },
+    },
+    select: { id: true },
+  });
+  return project.id;
 }

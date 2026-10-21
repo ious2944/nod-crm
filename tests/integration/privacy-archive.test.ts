@@ -4,7 +4,7 @@ import { restoreProcessor, restoreTreatment } from "@/app/(app)/rgpd/archive-act
 import { archiveProcessor, archiveTreatment } from "@/app/(app)/rgpd/actions";
 import { prisma } from "@/lib/prisma";
 
-import { createWorkspaceWithUser, formData, resetDatabase, signIn, type TestUser } from "./fixtures";
+import { createWorkspaceWithUser, formData, resetDatabase, signIn, type TestUser, defaultOwnerId } from "./fixtures";
 
 describe("RGPD Essentials — archive / restore", () => {
   let user: TestUser;
@@ -17,7 +17,7 @@ describe("RGPD Essentials — archive / restore", () => {
 
   it("archive puis restaure un traitement du workspace", async () => {
     const item = await prisma.privacyTreatment.create({
-      data: { workspaceId: user.workspaceId, name: "Support", purpose: "Support client" },
+      data: { workspaceId: user.workspaceId, ownerId: await defaultOwnerId(user.workspaceId), name: "Support", purpose: "Support client" },
     });
 
     await archiveTreatment(formData({ id: item.id }));
@@ -33,7 +33,7 @@ describe("RGPD Essentials — archive / restore", () => {
     const foreignUser = await createWorkspaceWithUser("privacy-archive-other");
     const foreign = await prisma.privacyTreatment.create({
       data: {
-        workspaceId: foreignUser.workspaceId,
+        workspaceId: foreignUser.workspaceId, ownerId: await defaultOwnerId(foreignUser.workspaceId),
         name: "Foreign",
         purpose: "Foreign",
         status: "ARCHIVED",
@@ -47,7 +47,7 @@ describe("RGPD Essentials — archive / restore", () => {
 
   it("archive puis restaure un sous-traitant du workspace", async () => {
     const processor = await prisma.privacyProcessor.create({
-      data: { workspaceId: user.workspaceId, name: "Cloud", service: "Hosting" },
+      data: { workspaceId: user.workspaceId, ownerId: await defaultOwnerId(user.workspaceId), name: "Cloud", service: "Hosting" },
     });
 
     await archiveProcessor(formData({ id: processor.id }));
@@ -61,7 +61,7 @@ describe("RGPD Essentials — archive / restore", () => {
     const foreignUser = await createWorkspaceWithUser("privacy-archive-other");
     const foreign = await prisma.privacyProcessor.create({
       data: {
-        workspaceId: foreignUser.workspaceId,
+        workspaceId: foreignUser.workspaceId, ownerId: await defaultOwnerId(foreignUser.workspaceId),
         name: "Foreign Cloud",
         service: "Hosting",
         archivedAt: new Date(),

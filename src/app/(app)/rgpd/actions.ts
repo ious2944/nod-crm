@@ -15,6 +15,7 @@ import {
   updateRequestSchema,
 } from "@/lib/privacy/schemas";
 import type { ProcessorFormState } from "@/lib/privacy/processor-form-state";
+import type { CrmOwned } from "@/lib/authz/crm-access";
 import { runCrmAction } from "@/lib/authz/run-crm-action";
 
 // `.parse()` throws the raw ZodError straight into the Server Action's
@@ -61,14 +62,15 @@ function processorIdsFrom(formData: FormData) {
   ].map((value) => parseOrThrow(privacyIdSchema, value));
 }
 
-async function assertProcessors(workspaceId: string, ids: string[]) {
+// Liaisons : seulement vers ses propres fiches (lot A) — celle d'autrui est introuvable.
+async function assertProcessors(owned: CrmOwned, ids: string[]) {
   if (ids.length === 0) {
     return;
   }
 
   const count = await prisma.privacyProcessor.count({
     where: {
-      workspaceId,
+      ...owned,
       id: { in: ids },
       archivedAt: null,
     },
@@ -80,7 +82,7 @@ async function assertProcessors(workspaceId: string, ids: string[]) {
 }
 
 async function assertContact(
-  workspaceId: string,
+  owned: CrmOwned,
   contactId: string | undefined,
 ) {
   if (!contactId) {
@@ -90,7 +92,7 @@ async function assertContact(
   const contact = await prisma.contact.findFirst({
     where: {
       id: contactId,
-      workspaceId,
+      ...owned,
       archivedAt: null,
     },
     select: {
@@ -114,12 +116,13 @@ export async function createTreatment(formData: FormData) {
 
     const processorIds = processorIdsFrom(formData);
 
-    await assertProcessors(workspaceId, processorIds);
+    await assertProcessors({ workspaceId, ownerId: userId }, processorIds);
 
     const treatment = await prisma.$transaction(async (tx) => {
       const createdTreatment = await tx.privacyTreatment.create({
         data: {
           workspaceId,
+          ownerId: userId,
           name: parsed.name,
           purpose: parsed.purpose,
           description: parsed.description,
@@ -177,12 +180,13 @@ export async function updateTreatment(formData: FormData) {
 
     const processorIds = processorIdsFrom(formData);
 
-    await assertProcessors(workspaceId, processorIds);
+    await assertProcessors({ workspaceId, ownerId: userId }, processorIds);
 
     const existing = await prisma.privacyTreatment.findFirst({
       where: {
         id: parsed.id,
         workspaceId,
+        ownerId: userId,
       },
       select: {
         id: true,
@@ -198,6 +202,7 @@ export async function updateTreatment(formData: FormData) {
         where: {
           id: parsed.id,
           workspaceId,
+          ownerId: userId,
         },
         data: {
           name: parsed.name,
@@ -259,6 +264,7 @@ export async function archiveTreatment(formData: FormData) {
       where: {
         id,
         workspaceId,
+        ownerId: userId,
       },
       data: {
         archivedAt: new Date(),
@@ -290,6 +296,7 @@ export async function createProcessor(formData: FormData) {
     const processor = await prisma.privacyProcessor.create({
       data: {
         workspaceId,
+        ownerId: userId,
         name: parsed.name,
         service: parsed.service,
         category: parsed.category,
@@ -349,6 +356,7 @@ export async function updateProcessor(
         where: {
           id,
           workspaceId,
+          ownerId: userId,
         },
         data,
       });
@@ -385,6 +393,7 @@ export async function archiveProcessor(formData: FormData) {
         where: {
           id,
           workspaceId,
+          ownerId: userId,
         },
         data: {
           archivedAt: new Date(),
@@ -421,7 +430,7 @@ export async function createPrivacyRequest(formData: FormData) {
     );
 
     const contactId = await assertContact(
-      workspaceId,
+      { workspaceId, ownerId: userId },
       parsed.contactId || undefined,
     );
 
@@ -432,6 +441,7 @@ export async function createPrivacyRequest(formData: FormData) {
     const request = await prisma.privacyRequest.create({
       data: {
         workspaceId,
+        ownerId: userId,
         contactId,
         requesterName: parsed.requesterName,
         requesterEmail: parsed.requesterEmail || undefined,
@@ -468,7 +478,7 @@ export async function updatePrivacyRequest(formData: FormData) {
     );
 
     const contactId = await assertContact(
-      workspaceId,
+      { workspaceId, ownerId: userId },
       parsed.contactId || undefined,
     );
 
@@ -480,6 +490,7 @@ export async function updatePrivacyRequest(formData: FormData) {
       where: {
         id: parsed.id,
         workspaceId,
+        ownerId: userId,
       },
       data: {
         contactId,
@@ -521,6 +532,7 @@ export async function createIncident(formData: FormData) {
     const incident = await prisma.privacyIncident.create({
       data: {
         workspaceId,
+        ownerId: userId,
         title: parsed.title,
         discoveredAt: parsed.discoveredAt,
         occurredAt: parsed.occurredAt,
@@ -569,6 +581,7 @@ export async function updateIncident(formData: FormData) {
       where: {
         id: parsed.id,
         workspaceId,
+        ownerId: userId,
       },
       data: {
         title: parsed.title,

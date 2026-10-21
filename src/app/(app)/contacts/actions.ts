@@ -76,7 +76,7 @@ export async function createContact(
     const organizationId = parsed.data.organizationId ?? null;
     if (organizationId) {
       const org = await prisma.organization.findFirst({
-        where: { id: organizationId, workspaceId, archivedAt: null },
+        where: { id: organizationId, workspaceId, ownerId: userId, archivedAt: null },
         select: { id: true, name: true },
       });
       if (!org) {
@@ -96,6 +96,7 @@ export async function createContact(
       const contact = await prisma.contact.create({
         data: {
           workspaceId,
+          ownerId: userId,
           // `firstName`/`lastName` sont non nuls en base depuis la V0.1 : une
           // identité peut reposer sur l'email ou l'organisation seuls, d'où la
           // chaîne vide plutôt qu'un `NULL`.
@@ -154,7 +155,7 @@ export async function updateContact(
     // Lecture bornée au workspace : un identifiant valide appartenant à quelqu'un
     // d'autre est indiscernable d'un identifiant inexistant.
     const existing = await prisma.contact.findFirst({
-      where: { id, workspaceId },
+      where: { id, workspaceId, ownerId: userId },
       select: { id: true, photoKey: true },
     });
 
@@ -167,7 +168,7 @@ export async function updateContact(
     let resolvedOrgName = fields.organizationName;
     if (organizationId) {
       const org = await prisma.organization.findFirst({
-        where: { id: organizationId, workspaceId, archivedAt: null },
+        where: { id: organizationId, workspaceId, ownerId: userId, archivedAt: null },
         select: { id: true, name: true },
       });
       if (!org) {
@@ -275,7 +276,7 @@ async function setArchivedAt(
   // `updateMany` plutôt que `update` : le `where` porte le workspace, donc une
   // ligne d'un autre espace n'est pas trouvée au lieu d'être modifiée.
   const { count } = await prisma.contact.updateMany({
-    where: { id: parsed.data.id, workspaceId },
+    where: { id: parsed.data.id, workspaceId, ownerId: userId },
     data: { archivedAt },
   });
 

@@ -1229,7 +1229,8 @@ export async function listTrash(actor: Actor): Promise<TrashItem[]> {
       id: row.id,
       title: row.title,
       deletedAt: row.deletedAt!.toISOString(),
-      deletedBy: row.deletedBy ? row.deletedBy.displayName?.trim() || row.deletedBy.email : null,
+      // Adresse d'autrui jamais exposée (décision b) : nom, sinon libellé neutre.
+      deletedBy: row.deletedBy ? row.deletedBy.displayName?.trim() || (row.deletedById === actor.id ? row.deletedBy.email : "Membre de l'espace") : null,
       parentTitle: row.parent?.title ?? null,
       projects,
       subtaskCount,

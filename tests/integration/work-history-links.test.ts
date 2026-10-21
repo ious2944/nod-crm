@@ -24,7 +24,7 @@ import { setTestHook } from "@/lib/tasks/test-hooks";
 import type { ActionResult } from "@/lib/tasks/types";
 import { getTaskDetail } from "@/lib/tasks/work-queries";
 
-import { addUserToWorkspace, createWorkspaceWithUser, formData, resetDatabase, signIn, type TestUser } from "./fixtures";
+import { addUserToWorkspace, createWorkspaceWithUser, formData, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
 import { interleave } from "./interleave";
 
 /**
@@ -48,9 +48,15 @@ describe("historique, commentaires, temps réel et liens", () => {
     alice = await createWorkspaceWithUser("history-links");
     bob = await addUserToWorkspace(alice.workspaceId, "Bob");
     carol = await addUserToWorkspace(alice.workspaceId, "Carol");
+    // Lot A (décision b) : les personnes du scénario partagent un projet « Équipe », donc l'annuaire.
+    await shareDirectory(alice, bob, carol);
     await signIn(alice);
     P = ok(await createProjectAction({ name: "Privé", visibility: "PRIVATE" }));
-    W = ok(await createProjectAction({ name: "Public" }));
+    // Lot A (décision f) : plus de projet ouvert à l'espace ; W est partagé
+    // avec Bob et Carol en éditeurs.
+    W = ok(await createProjectAction({ name: "Partagé" }));
+    ok(await setProjectMemberAction(W, bob.userId, "EDITOR"));
+    ok(await setProjectMemberAction(W, carol.userId, "EDITOR"));
   });
   afterEach(() => setTestHook(null));
 

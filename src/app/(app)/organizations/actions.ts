@@ -57,6 +57,7 @@ export async function createOrganization(
     const org = await prisma.organization.create({
       data: {
         workspaceId,
+        ownerId: userId,
         name: parsed.data.name,
         website: parsed.data.website,
         phone: parsed.data.phone,
@@ -105,7 +106,7 @@ export async function updateOrganization(
     // Lecture bornée au workspace : un identifiant appartenant à quelqu'un
     // d'autre est indiscernable d'un identifiant inexistant.
     const existing = await prisma.organization.findFirst({
-      where: { id, workspaceId },
+      where: { id, workspaceId, ownerId: userId },
       select: { id: true },
     });
 
@@ -128,7 +129,7 @@ export async function updateOrganization(
         },
       }),
       prisma.contact.updateMany({
-        where: { organizationId: existing.id, workspaceId },
+        where: { organizationId: existing.id, workspaceId, ownerId: userId },
         data: { organizationName: fields.name },
       }),
     ]);
@@ -182,7 +183,7 @@ async function setArchivedAt(
   // updateMany avec workspaceId dans le WHERE : si l'id appartient à un autre
   // workspace, 0 lignes sont mises à jour — aucune erreur, aucune divulgation.
   const result = await prisma.organization.updateMany({
-    where: { id: parsed.data, workspaceId },
+    where: { id: parsed.data, workspaceId, ownerId: userId },
     data: { archivedAt },
   });
 

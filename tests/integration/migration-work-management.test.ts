@@ -28,6 +28,12 @@ const HARDENING = "20261014090000_work_management_hardening";
 const RECONCILE = "20261014091000_work_management_legacy_reconcile";
 const PROJECT_TRASH = "20261014092000_project_trash";
 const PROJECT_TRASH_FK = "20261014093000_project_trash_constraints";
+/**
+ * Permissions V1, lot A : ces migrations exigent un backfill entre elles
+ * (`scripts/backfill-owner.mjs`) et refusent de s'appliquer sur des données
+ * non attribuées. Les scénarios de ce fichier, antérieurs, s'arrêtent avant.
+ */
+const PERMISSIONS_FIRST = "20261021090000_permissions_owner_additive";
 const UNESTABLISHED_RESTORE = "20261015090000_legacy_reconcile_unestablished_restore";
 const ACTIVITY_REFERENCE = "20261015091000_task_activity_reference";
 const RESTORE_EXPLICIT = "20261016090000_legacy_restore_explicit_changes";
@@ -496,7 +502,7 @@ describe("contrôle de schéma : base de référence isolée (I6)", () => {
     expect(out.out).toContain("Schéma : conforme aux");
     expect(out.out).not.toContain("en trop");
     expect(out.out).toContain(`·  ${PROJECT_TRASH_FK} — à appliquer`);
-    expect(out.out).toContain("Migrations en attente : 4");
+    expect(out.out).toContain(`Migrations en attente : ${dirs.filter((d) => d > PROJECT_TRASH).length}`);
   });
 
   it("clés omises par la garde de 092000 : signalées comme créées par 093000 en attente, sans bloquer", async () => {
@@ -588,7 +594,7 @@ describe("093000 et lignes orphelines : diagnostic préalable et reprise sans re
     expect(fixes).toHaveLength(2);
     for (const fix of fixes) await db.client.query(fix);
     await db.client.query(`UPDATE "_prisma_migrations" SET rolled_back_at = now() WHERE migration_name = $1 AND finished_at IS NULL`, [PROJECT_TRASH_FK]);
-    for (const dir of dirs.filter((d) => d >= PROJECT_TRASH_FK)) await db.apply(dir);
+    for (const dir of dirs.filter((d) => d >= PROJECT_TRASH_FK && d < PERMISSIONS_FIRST)) await db.apply(dir);
     const after = check(db.name);
     expect(after.code, after.out).toBe(0);
     expect(after.out).toContain("Schéma : conforme aux");

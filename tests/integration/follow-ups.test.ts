@@ -14,6 +14,7 @@ import {
   resetDatabase,
   signIn,
   type TestUser,
+  defaultOwnerId,
 } from "./fixtures";
 
 /**
@@ -41,7 +42,7 @@ describe("getFollowUpBoard — recherche textuelle", () => {
   ): Promise<string> {
     const followUp = await prisma.followUp.create({
       data: {
-        workspaceId,
+        workspaceId, ownerId: await defaultOwnerId(workspaceId),
         title,
         description: description ?? null,
         ballOwner: "THEM",
@@ -109,7 +110,7 @@ describe("getFollowUpBoard — recherche textuelle", () => {
     // Suivi chez moi qui correspond à la recherche
     await prisma.followUp.create({
       data: {
-        workspaceId: alice.workspaceId,
+        workspaceId: alice.workspaceId, ownerId: await defaultOwnerId(alice.workspaceId),
         title: "Contrat Acme",
         ballOwner: "ME",
         dueAt: new Date(Date.now() + 86_400_000),
@@ -118,7 +119,7 @@ describe("getFollowUpBoard — recherche textuelle", () => {
     // Suivi chez eux qui correspond à la recherche — ne doit pas apparaître
     await prisma.followUp.create({
       data: {
-        workspaceId: alice.workspaceId,
+        workspaceId: alice.workspaceId, ownerId: await defaultOwnerId(alice.workspaceId),
         title: "Rapport Acme",
         ballOwner: "THEM",
         dueAt: new Date(Date.now() + 86_400_000),
@@ -133,7 +134,7 @@ describe("getFollowUpBoard — recherche textuelle", () => {
   it("recherche dans les terminés via DB (ILIKE)", async () => {
     await prisma.followUp.create({
       data: {
-        workspaceId: alice.workspaceId,
+        workspaceId: alice.workspaceId, ownerId: await defaultOwnerId(alice.workspaceId),
         title: "Terminé Acme",
         ballOwner: "THEM",
         dueAt: new Date(Date.now() - 86_400_000),
@@ -143,7 +144,7 @@ describe("getFollowUpBoard — recherche textuelle", () => {
     });
     await prisma.followUp.create({
       data: {
-        workspaceId: alice.workspaceId,
+        workspaceId: alice.workspaceId, ownerId: await defaultOwnerId(alice.workspaceId),
         title: "Terminé Globex",
         ballOwner: "THEM",
         dueAt: new Date(Date.now() - 86_400_000),

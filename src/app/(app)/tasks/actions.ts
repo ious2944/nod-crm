@@ -74,7 +74,7 @@ export async function createTask(
       // contact **de ce workspace**, non archivé. Un formulaire resté ouvert dans
       // un onglet, ou un POST forgé, ne doit pas pouvoir franchir la frontière.
       const contact = await prisma.contact.findFirst({
-        where: { id: input.contactId, workspaceId, archivedAt: null },
+        where: { id: input.contactId, workspaceId, ownerId: userId, archivedAt: null },
         select: { id: true },
       });
 
@@ -92,7 +92,7 @@ export async function createTask(
       // Même contrôle pour le suivi lié. Rattacher une tâche au suivi d'un autre
       // workspace est impossible : la lecture ne le trouve pas.
       const followUp = await prisma.followUp.findFirst({
-        where: { id: input.followUpId, workspaceId },
+        where: { id: input.followUpId, workspaceId, ownerId: userId },
         select: { id: true },
       });
 
@@ -113,6 +113,7 @@ export async function createTask(
         where: {
           id: input.opportunityId,
           workspaceId,
+          ownerId: userId,
           status: { in: ["A_QUALIFIER", "EN_DISCUSSION", "PROPOSITION"] },
         },
         select: { id: true },
@@ -175,7 +176,7 @@ export async function updateTask(
 
     if (rawContactId) {
       const contact = await prisma.contact.findFirst({
-        where: { id: rawContactId, workspaceId, archivedAt: null },
+        where: { id: rawContactId, workspaceId, ownerId: userId, archivedAt: null },
         select: { id: true },
       });
 

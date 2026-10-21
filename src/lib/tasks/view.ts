@@ -73,7 +73,12 @@ export function toTaskView(record: TaskRecord, now: Date, timeZone: string, view
     followUpId: record.followUp?.id ?? null,
     followUpLabel: record.followUp ? followUpLinkLabel(record.followUp) : null,
     isDemo: record.isDemo,
-    assigneeName: record.assignee ? record.assignee.displayName?.trim() || record.assignee.email.split("@")[0] : null,
+    // L'adresse ne sert de nom de repli que pour soi-même : celle d'une autre
+    // personne n'est jamais exposée (décision b, lot A).
+    assigneeName: record.assignee
+      ? record.assignee.displayName?.trim() ||
+        (record.assignee.id === viewerId ? record.assignee.email.split("@")[0] : "Membre de l'espace")
+      : null,
     assignedToMe: Boolean(viewerId && record.assignee?.id === viewerId),
   };
 }

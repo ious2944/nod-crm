@@ -25,7 +25,7 @@ import { setTestHook } from "@/lib/tasks/test-hooks";
 import type { ActionResult } from "@/lib/tasks/types";
 import { getTaskDetail } from "@/lib/tasks/work-queries";
 
-import { addUserToWorkspace, createWorkspaceWithUser, resetDatabase, signIn, type TestUser } from "./fixtures";
+import { addUserToWorkspace, createWorkspaceWithUser, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
 import { interleave } from "./interleave";
 
 /**
@@ -46,12 +46,17 @@ const readable = (u: TestUser, id: string) => getTaskDetail(actorOf(u), id).then
 /** Aucune tâche active dont tous les projets sont dans la corbeille ; aucune tâche devenue libre. */
 async function assertNoExposedTask(ids: string[], outsider: TestUser) {
   for (const id of ids) {
-    const row = await prisma.task.findUnique({ where: { id }, include: { projects: { include: { project: true } } } });
+    const row = await prisma.task.findUnique({
+      where: { id },
+      include: { projects: { include: { project: { include: { members: { select: { userId: true } } } } } } },
+    });
     if (!row || row.deletedAt) continue;
     const active = row.projects.filter((m) => !m.project.deletedAt);
     expect({ id, onlyTrashed: row.projects.length > 0 && active.length === 0 }).toEqual({ id, onlyTrashed: false });
     if (row.projects.length === 0 && !row.parentId) throw new Error(`La tâche ${id} est devenue libre.`);
-    if (active.every((m) => m.project.visibility === "PRIVATE")) expect(await readable(outsider, id)).toBe(false);
+    // Lot A : seuls le propriétaire et les membres d'un projet actif la lisent.
+    const insider = active.some((m) => m.project.ownerId === outsider.userId || m.project.members.some((x) => x.userId === outsider.userId));
+    if (!insider) expect(await readable(outsider, id)).toBe(false);
   }
 }
 
@@ -74,9 +79,15 @@ describe("retraits, suppressions et purges sans élargissement de visibilité", 
     alice = await createWorkspaceWithUser("trash-integrity");
     bob = await addUserToWorkspace(alice.workspaceId, "Bob");
     carol = await addUserToWorkspace(alice.workspaceId, "Carol");
+    // Lot A (décision b) : les personnes du scénario partagent un projet « Équipe », donc l'annuaire.
+    await shareDirectory(alice, bob, carol);
     await signIn(alice);
     P = ok(await createProjectAction({ name: "Privé", visibility: "PRIVATE" }));
-    Q = ok(await createProjectAction({ name: "Public" }));
+    // Lot A (décision f) : plus de projet ouvert à l'espace ; Q est partagé
+    // avec Bob et Carol en éditeurs (ce qu'ils avaient sur un projet « espace »).
+    Q = ok(await createProjectAction({ name: "Partagé" }));
+    ok(await setProjectMemberAction(Q, bob.userId, "EDITOR"));
+    ok(await setProjectMemberAction(Q, carol.userId, "EDITOR"));
   });
   afterEach(() => setTestHook(null));
 
@@ -114,14 +125,22 @@ describe("retraits, suppressions et purges sans élargissement de visibilité", 
     expect(await readable(carol, t.id)).toBe(false);
   });
 
-  it("retirer une tâche de son seul projet privé est refusé ; d'un projet public, elle devient libre", async () => {
-    const priv = ok(await createTaskAction({ title: "Privée", projectId: P }));
+  it("retirer une tâche de son seul projet : refusé si, libre, elle s'ouvrait à quelqu'un ; sinon elle devient libre", async () => {
+    // Lot A : une tâche libre n'est visible que de son créateur, de son
+    // responsable et de ses collaborateurs. Bob, responsable mais non membre
+    // de P, ne la voit pas aujourd'hui : la retirer de P la lui ouvrirait.
+    const priv = ok(await createTaskAction({ title: "Privée", projectId: P, assigneeId: bob.userId }));
+    expect(await readable(bob, priv.id)).toBe(false);
     expect(await removeTaskFromProjectAction(priv.id, P)).toMatchObject({ ok: false, code: "VALIDATION" });
-    expect(await readable(carol, priv.id)).toBe(false);
+    expect(await readable(bob, priv.id)).toBe(false);
 
-    const pub = ok(await createTaskAction({ title: "Publique", projectId: Q }));
-    ok(await removeTaskFromProjectAction(pub.id, Q));
-    expect(await readable(carol, pub.id)).toBe(true);
+    // Sans personne à qui l'ouvrir, le retrait passe : elle devient libre,
+    // visible de sa seule créatrice (elle sort de la vue des membres de Q).
+    const shared = ok(await createTaskAction({ title: "Partagée", projectId: Q }));
+    expect(await readable(carol, shared.id)).toBe(true);
+    ok(await removeTaskFromProjectAction(shared.id, Q));
+    expect(await readable(alice, shared.id)).toBe(true);
+    expect(await readable(carol, shared.id)).toBe(false);
   });
 
   it("une sous-tâche convertie en tâche garde les projets de sa parente", async () => {

@@ -36,6 +36,7 @@ import {
   resetDatabase,
   signIn,
   type TestUser,
+  defaultOwnerId,
 } from "./fixtures";
 
 /**
@@ -140,11 +141,11 @@ describe("point de contrôle central : isolation A/B par module", () => {
 
   it("RGPD : viser un traitement ou un sous-traitant d'Alice n'a aucun effet (réponse inchangée)", async () => {
     const treatmentA = await prisma.privacyTreatment.create({
-      data: { workspaceId: alice.workspaceId, name: "Traitement d'Alice", purpose: "Prospection" },
+      data: { workspaceId: alice.workspaceId, ownerId: await defaultOwnerId(alice.workspaceId), name: "Traitement d'Alice", purpose: "Prospection" },
       select: { id: true },
     });
     const processorA = await prisma.privacyProcessor.create({
-      data: { workspaceId: alice.workspaceId, name: "CloudCo", service: "Hébergement" },
+      data: { workspaceId: alice.workspaceId, ownerId: await defaultOwnerId(alice.workspaceId), name: "CloudCo", service: "Hébergement" },
       select: { id: true },
     });
     await signIn(bob);

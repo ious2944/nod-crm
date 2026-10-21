@@ -3,7 +3,8 @@ import "server-only";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth/dal";
-import { getWorkspaceIdForPage } from "@/lib/workspace";
+import { crmReadableWhere } from "@/lib/authz/crm-access";
+import { getActorForPage } from "@/lib/workspace";
 
 import type { Prisma } from "@/generated/prisma/client";
 import type { TaskScope } from "@/lib/cockpit/filters";
@@ -192,12 +193,12 @@ const FOLLOW_UP_PICKER_LIMIT = 8;
 export async function searchFollowUpOptions(
   search: string,
 ): Promise<FollowUpPickerOption[]> {
-  const workspaceId = await getWorkspaceIdForPage();
+  const owned = crmReadableWhere(await getActorForPage());
   const term = search.trim();
 
   const records = await prisma.followUp.findMany({
     where: {
-      workspaceId,
+      ...owned,
       status: "OPEN",
       ...(term ? { title: { contains: term, mode: "insensitive" as const } } : {}),
     },

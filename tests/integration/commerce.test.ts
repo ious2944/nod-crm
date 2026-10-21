@@ -287,6 +287,8 @@ describe("commerce — CRUD", () => {
     await prisma.task.create({
       data: {
         workspaceId: alice.workspaceId,
+        // Lot A : une tâche libre n'est visible que de son créateur, responsable ou collaborateur.
+        createdById: alice.userId,
         opportunityId: oppId,
         title: "Tâche liée",
         dueAt: new Date(),

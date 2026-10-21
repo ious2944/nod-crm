@@ -35,7 +35,7 @@ import {
   searchTasks,
 } from "@/lib/tasks/work-queries";
 
-import { addUserToWorkspace, createContactRecord, createWorkspaceWithUser, dropCookie, resetDatabase, signIn, type TestUser } from "./fixtures";
+import { addUserToWorkspace, createContactRecord, createWorkspaceWithUser, dropCookie, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
 
 /**
  * Corbeille des projets : suppression logique, permissions conservées,
@@ -56,7 +56,7 @@ async function purgeConfirmed(projectId: string) {
 
 describe("suppression et restauration des projets", () => {
   let alice: TestUser, bob: TestUser, carol: TestUser, eve: TestUser;
-  let P: string, W: string, sectionId: string, contactId: string, field: string;
+  let P: string, W: string, team: string, sectionId: string, contactId: string, field: string;
   let exclusive: string, sub: string, earlierSub: string, earlier: string, shared: string;
 
   const upload = async (taskId: string) => {
@@ -84,6 +84,8 @@ describe("suppression et restauration des projets", () => {
     bob = await addUserToWorkspace(alice.workspaceId, "Bob");
     carol = await addUserToWorkspace(alice.workspaceId, "Carol");
     eve = await addUserToWorkspace(alice.workspaceId, "Eve");
+    // Lot A (décision b) : les personnes du scénario partagent un projet « Équipe », donc l'annuaire.
+    team = await shareDirectory(alice, bob, carol);
     await signIn(alice);
     P = ok(await createProjectAction({ name: "Projet privé", visibility: "PRIVATE" }));
     W = ok(await createProjectAction({ name: "Projet ouvert" }));
@@ -110,8 +112,9 @@ describe("suppression et restauration des projets", () => {
     const result = ok(await deleteProjectAction(P));
     expect(result).toEqual({ deletedTasks: 1, keptTasks: 1 });
 
-    expect((await listProjects(actorOf(alice))).map((p) => p.id)).toEqual([W]);
-    expect((await getWorkContext(actorOf(alice))).projects.map((p) => p.id)).toEqual([W]);
+    // (« Équipe » : le projet vide qui met les personnes dans l'annuaire, lot A.)
+    expect((await listProjects(actorOf(alice))).map((p) => p.id).filter((id) => id !== team)).toEqual([W]);
+    expect((await getWorkContext(actorOf(alice))).projects.map((p) => p.id).filter((id) => id !== team)).toEqual([W]);
     expect((await getWorkContext(actorOf(alice))).fields.map((f) => f.id)).not.toContain(field);
     await expect(getProjectBundle(actorOf(alice), P)).rejects.toThrow();
 
@@ -120,7 +123,9 @@ describe("suppression et restauration des projets", () => {
       await expect(getTaskDetail(actorOf(user), exclusive), user.email).rejects.toThrow();
       await expect(getTaskDetail(actorOf(user), sub)).rejects.toThrow();
       expect((await searchTasks(actorOf(user), { search: "privée", completion: "all" })).map((t) => t.id)).toEqual([]);
-      expect((await getLinkedWork(actorOf(user), "contact", contactId)).tasks).toEqual([]);
+      // Lot A : la fiche CRM n'appartient qu'à Alice ; pour les autres, elle n'existe pas.
+      if (user === alice) expect((await getLinkedWork(actorOf(user), "contact", contactId)).tasks).toEqual([]);
+      else await expect(getLinkedWork(actorOf(user), "contact", contactId)).rejects.toMatchObject({ code: "NOT_FOUND" });
       // Corbeille des tâches : ni la tâche du projet, ni celle supprimée avant
       // (son seul projet est dans la corbeille : elle n'est pas « libre »).
       expect((await listTrash(actorOf(user))).map((t) => t.id)).toEqual([]);
@@ -198,8 +203,13 @@ describe("suppression et restauration des projets", () => {
     expect(bundle.tasks.find((t) => t.id === exclusive)!.custom[field]).toBe("Lot 7");
     // Les suppressions individuelles restent dans la corbeille des tâches, restaurables.
     expect((await listTrash(actorOf(alice))).map((t) => t.title).sort()).toEqual(["Sous-tâche supprimée avant", "Supprimée avant"]);
+    // Carol, éditrice de P, retrouve la sous-tâche. Bob, responsable mais non
+    // membre de P, ne voit plus la tâche (lot A : un responsable n'y accède
+    // que par un projet lisible).
+    await signIn(carol);
+    expect((await getTaskDetail(actorOf(carol), exclusive)).subtasks.map((s) => s.id)).toEqual([sub]);
     await signIn(bob);
-    expect((await getTaskDetail(actorOf(bob), exclusive)).subtasks.map((s) => s.id)).toEqual([sub]);
+    await expect(getTaskDetail(actorOf(bob), exclusive)).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("suppression définitive : action distincte, n'efface pas une tâche liée à un autre projet conservé", async () => {
