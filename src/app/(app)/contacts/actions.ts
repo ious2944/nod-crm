@@ -18,7 +18,8 @@ import {
   updateContactSchema,
 } from "@/lib/contacts/schemas";
 import { prisma } from "@/lib/prisma";
-import { getActorForAction, getWorkspaceIdForAction } from "@/lib/workspace";
+import { runCrmAction } from "@/lib/authz/run-crm-action";
+import type { Actor } from "@/lib/tasks/access";
 
 /**
  * Mutations du module Contacts.
@@ -47,201 +48,201 @@ export async function createContact(
   _previous: ContactFormState,
   formData: FormData,
 ): Promise<ContactFormState> {
-  const { id: userId, workspaceId } = await getActorForAction();
+  return runCrmAction("crm.contact.create", async ({ id: userId, workspaceId }) => {
+    const parsed = createContactSchema.safeParse(Object.fromEntries(formData));
 
-  const parsed = createContactSchema.safeParse(Object.fromEntries(formData));
-
-  if (!parsed.success) {
-    return {
-      status: "error",
-      message: "Le formulaire est incomplet.",
-      fieldErrors: collectFieldErrors(parsed.error.issues),
-    };
-  }
-
-  const upload = await storePhotoUpload(formData.get("photo"));
-  if (upload.status === "rejected") {
-    return {
-      status: "error",
-      message: upload.message,
-      fieldErrors: { photo: upload.message },
-    };
-  }
-
-  const photo = upload.status === "stored" ? upload.photo : null;
-
-  // Vérification de cohérence workspace pour organization_id (V0.5).
-  // Une clé étrangère composite (id, workspace_id) imposerait cela côté SQL,
-  // mais elle interdirait le SET NULL à la suppression. On valide applicativement.
-  const organizationId = parsed.data.organizationId ?? null;
-  if (organizationId) {
-    const org = await prisma.organization.findFirst({
-      where: { id: organizationId, workspaceId, archivedAt: null },
-      select: { id: true, name: true },
-    });
-    if (!org) {
+    if (!parsed.success) {
       return {
         status: "error",
-        message: "Organisation introuvable ou archivée.",
-        fieldErrors: { organizationId: "Organisation introuvable ou archivée." },
+        message: "Le formulaire est incomplet.",
+        fieldErrors: collectFieldErrors(parsed.error.issues),
       };
     }
-    // Sync du nom texte pour la rétrocompatibilité.
-    if (!parsed.data.organizationName) {
-      parsed.data.organizationName = org.name;
+
+    const upload = await storePhotoUpload(formData.get("photo"));
+    if (upload.status === "rejected") {
+      return {
+        status: "error",
+        message: upload.message,
+        fieldErrors: { photo: upload.message },
+      };
     }
-  }
 
-  try {
-    const contact = await prisma.contact.create({
-      data: {
+    const photo = upload.status === "stored" ? upload.photo : null;
+
+    // Vérification de cohérence workspace pour organization_id (V0.5).
+    // Une clé étrangère composite (id, workspace_id) imposerait cela côté SQL,
+    // mais elle interdirait le SET NULL à la suppression. On valide applicativement.
+    const organizationId = parsed.data.organizationId ?? null;
+    if (organizationId) {
+      const org = await prisma.organization.findFirst({
+        where: { id: organizationId, workspaceId, archivedAt: null },
+        select: { id: true, name: true },
+      });
+      if (!org) {
+        return {
+          status: "error",
+          message: "Organisation introuvable ou archivée.",
+          fieldErrors: { organizationId: "Organisation introuvable ou archivée." },
+        };
+      }
+      // Sync du nom texte pour la rétrocompatibilité.
+      if (!parsed.data.organizationName) {
+        parsed.data.organizationName = org.name;
+      }
+    }
+
+    try {
+      const contact = await prisma.contact.create({
+        data: {
+          workspaceId,
+          // `firstName`/`lastName` sont non nuls en base depuis la V0.1 : une
+          // identité peut reposer sur l'email ou l'organisation seuls, d'où la
+          // chaîne vide plutôt qu'un `NULL`.
+          firstName: parsed.data.firstName ?? "",
+          lastName: parsed.data.lastName ?? "",
+          email: parsed.data.email,
+          phone: parsed.data.phone,
+          jobTitle: parsed.data.jobTitle,
+          organizationName: parsed.data.organizationName,
+          organizationId,
+          notes: parsed.data.notes,
+          photoKey: photo?.key ?? null,
+          photoMimeType: photo?.mimeType ?? null,
+        },
+        select: { id: true },
+      });
+
+      await recordAudit({
         workspaceId,
-        // `firstName`/`lastName` sont non nuls en base depuis la V0.1 : une
-        // identité peut reposer sur l'email ou l'organisation seuls, d'où la
-        // chaîne vide plutôt qu'un `NULL`.
-        firstName: parsed.data.firstName ?? "",
-        lastName: parsed.data.lastName ?? "",
-        email: parsed.data.email,
-        phone: parsed.data.phone,
-        jobTitle: parsed.data.jobTitle,
-        organizationName: parsed.data.organizationName,
-        organizationId,
-        notes: parsed.data.notes,
-        photoKey: photo?.key ?? null,
-        photoMimeType: photo?.mimeType ?? null,
-      },
-      select: { id: true },
-    });
+        userId,
+        action: "CREATE",
+        entityType: AUDIT_ENTITY_TYPES.CONTACT,
+        entityId: contact.id,
+      });
 
-    await recordAudit({
-      workspaceId,
-      userId,
-      action: "CREATE",
-      entityType: AUDIT_ENTITY_TYPES.CONTACT,
-      entityId: contact.id,
-    });
+      revalidatePath("/contacts");
+      revalidatePath("/follow-ups");
 
-    revalidatePath("/contacts");
-    revalidatePath("/follow-ups");
-
-    return { status: "success", message: "Contact créé.", contactId: contact.id };
-  } catch (error) {
-    // Le fichier a été écrit avant la ligne : si l'insertion échoue, il ne doit
-    // pas rester dans le magasin d'objets.
-    await discardPhoto(photo?.key);
-    throw error;
-  }
+      return { status: "success", message: "Contact créé.", contactId: contact.id };
+    } catch (error) {
+      // Le fichier a été écrit avant la ligne : si l'insertion échoue, il ne doit
+      // pas rester dans le magasin d'objets.
+      await discardPhoto(photo?.key);
+      throw error;
+    }
+  });
 }
 
 export async function updateContact(
   _previous: ContactFormState,
   formData: FormData,
 ): Promise<ContactFormState> {
-  const { id: userId, workspaceId } = await getActorForAction();
+  return runCrmAction("crm.contact.update", async ({ id: userId, workspaceId }) => {
+    const parsed = updateContactSchema.safeParse(Object.fromEntries(formData));
 
-  const parsed = updateContactSchema.safeParse(Object.fromEntries(formData));
-
-  if (!parsed.success) {
-    return {
-      status: "error",
-      message: "Le formulaire est incomplet.",
-      fieldErrors: collectFieldErrors(parsed.error.issues),
-    };
-  }
-
-  const { id, removePhoto, ...fields } = parsed.data;
-
-  // Lecture bornée au workspace : un identifiant valide appartenant à quelqu'un
-  // d'autre est indiscernable d'un identifiant inexistant.
-  const existing = await prisma.contact.findFirst({
-    where: { id, workspaceId },
-    select: { id: true, photoKey: true },
-  });
-
-  if (!existing) {
-    return { status: "error", message: "Ce contact n'existe pas." };
-  }
-
-  // Vérification de cohérence workspace pour organization_id (V0.5).
-  const organizationId = fields.organizationId ?? null;
-  let resolvedOrgName = fields.organizationName;
-  if (organizationId) {
-    const org = await prisma.organization.findFirst({
-      where: { id: organizationId, workspaceId, archivedAt: null },
-      select: { id: true, name: true },
-    });
-    if (!org) {
+    if (!parsed.success) {
       return {
         status: "error",
-        message: "Organisation introuvable ou archivée.",
-        fieldErrors: { organizationId: "Organisation introuvable ou archivée." },
+        message: "Le formulaire est incomplet.",
+        fieldErrors: collectFieldErrors(parsed.error.issues),
       };
     }
-    if (!resolvedOrgName) {
-      resolvedOrgName = org.name;
-    }
-  }
 
-  const upload = await storePhotoUpload(formData.get("photo"));
-  if (upload.status === "rejected") {
-    return {
-      status: "error",
-      message: upload.message,
-      fieldErrors: { photo: upload.message },
-    };
-  }
+    const { id, removePhoto, ...fields } = parsed.data;
 
-  const photo = upload.status === "stored" ? upload.photo : null;
-  const clearsPhoto = removePhoto && !photo;
-
-  try {
-    await prisma.contact.update({
-      where: { id: existing.id },
-      data: {
-        firstName: fields.firstName ?? "",
-        lastName: fields.lastName ?? "",
-        email: fields.email,
-        phone: fields.phone,
-        jobTitle: fields.jobTitle,
-        organizationName: resolvedOrgName,
-        organizationId,
-        notes: fields.notes,
-        // Trois cas : nouvelle photo, retrait explicite, ou on n'y touche pas.
-        ...(photo
-          ? { photoKey: photo.key, photoMimeType: photo.mimeType }
-          : clearsPhoto
-            ? { photoKey: null, photoMimeType: null }
-            : {}),
-      },
+    // Lecture bornée au workspace : un identifiant valide appartenant à quelqu'un
+    // d'autre est indiscernable d'un identifiant inexistant.
+    const existing = await prisma.contact.findFirst({
+      where: { id, workspaceId },
+      select: { id: true, photoKey: true },
     });
-  } catch (error) {
-    await discardPhoto(photo?.key);
-    throw error;
-  }
 
-  await recordAudit({
-    workspaceId,
-    userId,
-    action: "UPDATE",
-    entityType: AUDIT_ENTITY_TYPES.CONTACT,
-    entityId: existing.id,
+    if (!existing) {
+      return { status: "error", message: "Ce contact n'existe pas." };
+    }
+
+    // Vérification de cohérence workspace pour organization_id (V0.5).
+    const organizationId = fields.organizationId ?? null;
+    let resolvedOrgName = fields.organizationName;
+    if (organizationId) {
+      const org = await prisma.organization.findFirst({
+        where: { id: organizationId, workspaceId, archivedAt: null },
+        select: { id: true, name: true },
+      });
+      if (!org) {
+        return {
+          status: "error",
+          message: "Organisation introuvable ou archivée.",
+          fieldErrors: { organizationId: "Organisation introuvable ou archivée." },
+        };
+      }
+      if (!resolvedOrgName) {
+        resolvedOrgName = org.name;
+      }
+    }
+
+    const upload = await storePhotoUpload(formData.get("photo"));
+    if (upload.status === "rejected") {
+      return {
+        status: "error",
+        message: upload.message,
+        fieldErrors: { photo: upload.message },
+      };
+    }
+
+    const photo = upload.status === "stored" ? upload.photo : null;
+    const clearsPhoto = removePhoto && !photo;
+
+    try {
+      await prisma.contact.update({
+        where: { id: existing.id },
+        data: {
+          firstName: fields.firstName ?? "",
+          lastName: fields.lastName ?? "",
+          email: fields.email,
+          phone: fields.phone,
+          jobTitle: fields.jobTitle,
+          organizationName: resolvedOrgName,
+          organizationId,
+          notes: fields.notes,
+          // Trois cas : nouvelle photo, retrait explicite, ou on n'y touche pas.
+          ...(photo
+            ? { photoKey: photo.key, photoMimeType: photo.mimeType }
+            : clearsPhoto
+              ? { photoKey: null, photoMimeType: null }
+              : {}),
+        },
+      });
+    } catch (error) {
+      await discardPhoto(photo?.key);
+      throw error;
+    }
+
+    await recordAudit({
+      workspaceId,
+      userId,
+      action: "UPDATE",
+      entityType: AUDIT_ENTITY_TYPES.CONTACT,
+      entityId: existing.id,
+    });
+
+    // L'ancien fichier ne part qu'une fois la base à jour : dans l'autre ordre,
+    // un échec d'écriture laisserait une fiche pointant sur un objet effacé.
+    if (photo || clearsPhoto) {
+      await discardPhoto(existing.photoKey);
+    }
+
+    revalidatePath("/contacts");
+    revalidatePath(`/contacts/${existing.id}`);
+    revalidatePath("/follow-ups");
+    revalidatePath("/organizations");
+    if (organizationId) {
+      revalidatePath(`/organizations/${organizationId}`);
+    }
+
+    return { status: "success", message: "Contact mis à jour.", contactId: existing.id };
   });
-
-  // L'ancien fichier ne part qu'une fois la base à jour : dans l'autre ordre,
-  // un échec d'écriture laisserait une fiche pointant sur un objet effacé.
-  if (photo || clearsPhoto) {
-    await discardPhoto(existing.photoKey);
-  }
-
-  revalidatePath("/contacts");
-  revalidatePath(`/contacts/${existing.id}`);
-  revalidatePath("/follow-ups");
-  revalidatePath("/organizations");
-  if (organizationId) {
-    revalidatePath(`/organizations/${organizationId}`);
-  }
-
-  return { status: "success", message: "Contact mis à jour.", contactId: existing.id };
 }
 
 /**
@@ -252,21 +253,20 @@ export async function updateContact(
  * listes et des sélecteurs.
  */
 export async function archiveContact(formData: FormData): Promise<void> {
-  await setArchivedAt(formData, new Date(), "ARCHIVE");
+  return runCrmAction("crm.contact.archive", (actor) => setArchivedAt(actor, formData, new Date(), "ARCHIVE"));
 }
 
 /** Retour en arrière : un archivage doit pouvoir se défaire. */
 export async function restoreContact(formData: FormData): Promise<void> {
-  await setArchivedAt(formData, null, "RESTORE");
+  return runCrmAction("crm.contact.archive", (actor) => setArchivedAt(actor, formData, null, "RESTORE"));
 }
 
 async function setArchivedAt(
+  { id: userId, workspaceId }: Actor,
   formData: FormData,
   archivedAt: Date | null,
   action: "ARCHIVE" | "RESTORE",
 ): Promise<void> {
-  const { id: userId, workspaceId } = await getActorForAction();
-
   const parsed = contactIdSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     throw new Error("Contact introuvable.");
@@ -309,10 +309,10 @@ async function setArchivedAt(
  * l'ensemble des contacts.
  */
 export async function findContacts(search: string): Promise<ContactPickerOption[]> {
-  await getWorkspaceIdForAction();
+  return runCrmAction("crm.contact.read", async () => {
+    const parsed = contactSearchSchema.safeParse(search);
+    if (!parsed.success) return [];
 
-  const parsed = contactSearchSchema.safeParse(search);
-  if (!parsed.success) return [];
-
-  return searchContactOptions(parsed.data);
+    return searchContactOptions(parsed.data);
+  });
 }

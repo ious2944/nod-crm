@@ -13,7 +13,7 @@ import {
   type ImportOutcome,
   type PreviewResult,
 } from "@/lib/contacts/import/service";
-import { getActorForAction } from "@/lib/workspace";
+import { runCrmAction } from "@/lib/authz/run-crm-action";
 
 /**
  * Import CSV Outlook, en deux temps : aperçu (aucune écriture), puis import.
@@ -38,42 +38,42 @@ function logFailure(step: string, error: unknown): void {
 }
 
 export async function previewContactImport(formData: FormData): Promise<PreviewResult> {
-  const { workspaceId } = await getActorForAction();
+  return runCrmAction("crm.contact.import", async ({ workspaceId }) => {
+    const upload = await readUpload(formData.get("file"));
+    if (!upload.ok) return upload;
 
-  const upload = await readUpload(formData.get("file"));
-  if (!upload.ok) return upload;
-
-  try {
-    return await previewImport(workspaceId, upload.bytes);
-  } catch (error) {
-    logFailure("aperçu", error);
-    return { ok: false, error: "Le fichier n'a pas pu être analysé. Réessaie dans un instant." };
-  }
+    try {
+      return await previewImport(workspaceId, upload.bytes);
+    } catch (error) {
+      logFailure("aperçu", error);
+      return { ok: false, error: "Le fichier n'a pas pu être analysé. Réessaie dans un instant." };
+    }
+  });
 }
 
 export async function importContacts(formData: FormData): Promise<ImportOutcome> {
-  const actor = await getActorForAction();
+  return runCrmAction("crm.contact.import", async (actor) => {
+    const mode = modeSchema.safeParse(formData.get("mode"));
+    if (!mode.success) return { ok: false, error: "Choisis quoi faire des contacts déjà présents." };
 
-  const mode = modeSchema.safeParse(formData.get("mode"));
-  if (!mode.success) return { ok: false, error: "Choisis quoi faire des contacts déjà présents." };
+    const include = includeSchema.safeParse(formData.getAll("include"));
+    if (!include.success) return { ok: false, error: "Sélection de lignes invalide." };
 
-  const include = includeSchema.safeParse(formData.getAll("include"));
-  if (!include.success) return { ok: false, error: "Sélection de lignes invalide." };
+    const upload = await readUpload(formData.get("file"));
+    if (!upload.ok) return upload;
 
-  const upload = await readUpload(formData.get("file"));
-  if (!upload.ok) return upload;
+    let outcome: ImportOutcome;
+    try {
+      outcome = await runImport(actor, upload.bytes, mode.data, new Set(include.data));
+    } catch (error) {
+      logFailure("écriture", error);
+      return { ok: false, error: FAILURE };
+    }
 
-  let outcome: ImportOutcome;
-  try {
-    outcome = await runImport(actor, upload.bytes, mode.data, new Set(include.data));
-  } catch (error) {
-    logFailure("écriture", error);
-    return { ok: false, error: FAILURE };
-  }
-
-  if (outcome.ok) {
-    revalidatePath("/contacts");
-    revalidatePath("/organizations");
-  }
-  return outcome;
+    if (outcome.ok) {
+      revalidatePath("/contacts");
+      revalidatePath("/organizations");
+    }
+    return outcome;
+  });
 }

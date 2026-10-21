@@ -22,7 +22,7 @@ import {
   taskActionSchema,
   updateTaskSchema,
 } from "@/lib/tasks/schemas";
-import { getActorForAction, getWorkspaceIdForAction } from "@/lib/workspace";
+import { runCrmAction } from "@/lib/authz/run-crm-action";
 
 /** Revalide les pages Commerce quand une tâche est liée à une opportunité. */
 function revalidateCommerceIfLinked(opportunityId: string | null): void {
@@ -49,101 +49,101 @@ export async function createTask(
   _previous: CreateTaskState,
   formData: FormData,
 ): Promise<CreateTaskState> {
-  // Authentification d'abord : une action appelée sans session est rejetée
-  // avant même de regarder le contenu du formulaire.
-  const { id: userId, workspaceId } = await getActorForAction();
+  return runCrmAction("task.create", async ({ id: userId, workspaceId }) => {
+    // Authentification d'abord : une action appelée sans session est rejetée
+    // avant même de regarder le contenu du formulaire.
+    const parsed = createTaskSchema.safeParse(Object.fromEntries(formData));
 
-  const parsed = createTaskSchema.safeParse(Object.fromEntries(formData));
-
-  if (!parsed.success) {
-    const fieldErrors: Record<string, string> = {};
-    for (const issue of parsed.error.issues) {
-      const key = String(issue.path[0] ?? "form");
-      fieldErrors[key] ??= issue.message;
+    if (!parsed.success) {
+      const fieldErrors: Record<string, string> = {};
+      for (const issue of parsed.error.issues) {
+        const key = String(issue.path[0] ?? "form");
+        fieldErrors[key] ??= issue.message;
+      }
+      return { status: "error", message: "Le formulaire est incomplet.", fieldErrors };
     }
-    return { status: "error", message: "Le formulaire est incomplet.", fieldErrors };
-  }
 
-  const input = parsed.data;
+    const input = parsed.data;
 
-  let contactId: string | null = null;
-  let followUpId: string | null = null;
-  let opportunityId: string | null = null;
+    let contactId: string | null = null;
+    let followUpId: string | null = null;
+    let opportunityId: string | null = null;
 
-  if (input.contactId) {
-    // L'identifiant vient du client : on revérifie qu'il désigne bien un
-    // contact **de ce workspace**, non archivé. Un formulaire resté ouvert dans
-    // un onglet, ou un POST forgé, ne doit pas pouvoir franchir la frontière.
-    const contact = await prisma.contact.findFirst({
-      where: { id: input.contactId, workspaceId, archivedAt: null },
-      select: { id: true },
+    if (input.contactId) {
+      // L'identifiant vient du client : on revérifie qu'il désigne bien un
+      // contact **de ce workspace**, non archivé. Un formulaire resté ouvert dans
+      // un onglet, ou un POST forgé, ne doit pas pouvoir franchir la frontière.
+      const contact = await prisma.contact.findFirst({
+        where: { id: input.contactId, workspaceId, archivedAt: null },
+        select: { id: true },
+      });
+
+      if (!contact) {
+        return {
+          status: "error",
+          message: "Ce contact n'existe pas ou a été archivé.",
+          fieldErrors: { contactId: "Contact introuvable." },
+        };
+      }
+      contactId = contact.id;
+    }
+
+    if (input.followUpId) {
+      // Même contrôle pour le suivi lié. Rattacher une tâche au suivi d'un autre
+      // workspace est impossible : la lecture ne le trouve pas.
+      const followUp = await prisma.followUp.findFirst({
+        where: { id: input.followUpId, workspaceId },
+        select: { id: true },
+      });
+
+      if (!followUp) {
+        return {
+          status: "error",
+          message: "Ce suivi n'existe pas.",
+          fieldErrors: { followUpId: "Suivi introuvable." },
+        };
+      }
+      followUpId = followUp.id;
+    }
+
+    if (input.opportunityId) {
+      // Même contrôle pour l'opportunité liée. Seules les opportunités ouvertes
+      // et du workspace courant sont valides.
+      const opportunity = await prisma.opportunity.findFirst({
+        where: {
+          id: input.opportunityId,
+          workspaceId,
+          status: { in: ["A_QUALIFIER", "EN_DISCUSSION", "PROPOSITION"] },
+        },
+        select: { id: true },
+      });
+
+      if (!opportunity) {
+        return {
+          status: "error",
+          message: "Cette opportunité n'existe pas ou est clôturée.",
+          fieldErrors: { opportunityId: "Opportunité introuvable." },
+        };
+      }
+      opportunityId = opportunity.id;
+    }
+
+    // Même service que le module de gestion de travail : responsable, abonnés,
+    // historique, audit et temps réel sont gérés au même endroit.
+    await service.createTask(service.userContext({ id: userId, workspaceId }), {
+      title: input.title,
+      description: input.notes,
+      dueDate: input.dueDate,
+      contactId,
+      followUpId,
+      opportunityId,
+      assigneeId: userId,
     });
 
-    if (!contact) {
-      return {
-        status: "error",
-        message: "Ce contact n'existe pas ou a été archivé.",
-        fieldErrors: { contactId: "Contact introuvable." },
-      };
-    }
-    contactId = contact.id;
-  }
-
-  if (input.followUpId) {
-    // Même contrôle pour le suivi lié. Rattacher une tâche au suivi d'un autre
-    // workspace est impossible : la lecture ne le trouve pas.
-    const followUp = await prisma.followUp.findFirst({
-      where: { id: input.followUpId, workspaceId },
-      select: { id: true },
-    });
-
-    if (!followUp) {
-      return {
-        status: "error",
-        message: "Ce suivi n'existe pas.",
-        fieldErrors: { followUpId: "Suivi introuvable." },
-      };
-    }
-    followUpId = followUp.id;
-  }
-
-  if (input.opportunityId) {
-    // Même contrôle pour l'opportunité liée. Seules les opportunités ouvertes
-    // et du workspace courant sont valides.
-    const opportunity = await prisma.opportunity.findFirst({
-      where: {
-        id: input.opportunityId,
-        workspaceId,
-        status: { in: ["A_QUALIFIER", "EN_DISCUSSION", "PROPOSITION"] },
-      },
-      select: { id: true },
-    });
-
-    if (!opportunity) {
-      return {
-        status: "error",
-        message: "Cette opportunité n'existe pas ou est clôturée.",
-        fieldErrors: { opportunityId: "Opportunité introuvable." },
-      };
-    }
-    opportunityId = opportunity.id;
-  }
-
-  // Même service que le module de gestion de travail : responsable, abonnés,
-  // historique, audit et temps réel sont gérés au même endroit.
-  await service.createTask(service.userContext({ id: userId, workspaceId }), {
-    title: input.title,
-    description: input.notes,
-    dueDate: input.dueDate,
-    contactId,
-    followUpId,
-    opportunityId,
-    assigneeId: userId,
+    revalidateTaskPages();
+    revalidateCommerceIfLinked(opportunityId);
+    return { status: "success", message: "Tâche créée." };
   });
-
-  revalidateTaskPages();
-  revalidateCommerceIfLinked(opportunityId);
-  return { status: "success", message: "Tâche créée." };
 }
 
 /**
@@ -157,52 +157,52 @@ export async function updateTask(
   _previous: EditTaskState,
   formData: FormData,
 ): Promise<EditTaskState> {
-  const { id: userId, workspaceId } = await getActorForAction();
+  return runCrmAction("task.edit", async ({ id: userId, workspaceId }) => {
+    const parsed = updateTaskSchema.safeParse(Object.fromEntries(formData));
 
-  const parsed = updateTaskSchema.safeParse(Object.fromEntries(formData));
-
-  if (!parsed.success) {
-    const fieldErrors: Record<string, string> = {};
-    for (const issue of parsed.error.issues) {
-      const key = String(issue.path[0] ?? "form");
-      fieldErrors[key] ??= issue.message;
+    if (!parsed.success) {
+      const fieldErrors: Record<string, string> = {};
+      for (const issue of parsed.error.issues) {
+        const key = String(issue.path[0] ?? "form");
+        fieldErrors[key] ??= issue.message;
+      }
+      return { status: "error", message: "Le formulaire est incomplet.", fieldErrors };
     }
-    return { status: "error", message: "Le formulaire est incomplet.", fieldErrors };
-  }
 
-  const { id, title, dueDate, notes, contactId: rawContactId } = parsed.data;
+    const { id, title, dueDate, notes, contactId: rawContactId } = parsed.data;
 
-  let contactId: string | null = null;
+    let contactId: string | null = null;
 
-  if (rawContactId) {
-    const contact = await prisma.contact.findFirst({
-      where: { id: rawContactId, workspaceId, archivedAt: null },
-      select: { id: true },
-    });
+    if (rawContactId) {
+      const contact = await prisma.contact.findFirst({
+        where: { id: rawContactId, workspaceId, archivedAt: null },
+        select: { id: true },
+      });
 
-    if (!contact) {
-      return {
-        status: "error",
-        message: "Ce contact n'existe pas ou a été archivé.",
-        fieldErrors: { contactId: "Contact introuvable." },
-      };
+      if (!contact) {
+        return {
+          status: "error",
+          message: "Ce contact n'existe pas ou a été archivé.",
+          fieldErrors: { contactId: "Contact introuvable." },
+        };
+      }
+      contactId = contact.id;
     }
-    contactId = contact.id;
-  }
 
-  try {
-    await service.updateTaskFields(service.userContext({ id: userId, workspaceId }), id, {
-      title,
-      description: notes,
-      dueDate,
-      contactId,
-    });
-  } catch {
-    return { status: "error", message: "Tâche introuvable." };
-  }
+    try {
+      await service.updateTaskFields(service.userContext({ id: userId, workspaceId }), id, {
+        title,
+        description: notes,
+        dueDate,
+        contactId,
+      });
+    } catch {
+      return { status: "error", message: "Tâche introuvable." };
+    }
 
-  revalidateTaskPages();
-  return { status: "success", message: "Tâche mise à jour." };
+    revalidateTaskPages();
+    return { status: "success", message: "Tâche mise à jour." };
+  });
 }
 
 /**
@@ -213,71 +213,71 @@ export async function updateTask(
  * un suivi ont chacun leur état, et c'est le principe même de la V0.4.
  */
 export async function applyTaskAction(formData: FormData): Promise<void> {
-  const { id: userId, workspaceId } = await getActorForAction();
+  return runCrmAction("task.edit", async ({ id: userId, workspaceId }) => {
+    const parsed = taskActionSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) {
+      throw new Error("Action invalide.");
+    }
 
-  const parsed = taskActionSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    throw new Error("Action invalide.");
-  }
+    const { id, intent, days } = parsed.data;
 
-  const { id, intent, days } = parsed.data;
+    // Bornée aux tâches visibles : une tâche inaccessible répond exactement
+    // comme une tâche inexistante (aucune information sur son état).
+    const task = await prisma.task.findFirst({
+      where: { AND: [visibleTaskWhere({ id: userId, workspaceId }), { id }] },
+      select: { id: true, dueAt: true, completedAt: true, status: true, opportunityId: true, lastActiveStatus: true },
+    });
 
-  // Bornée aux tâches visibles : une tâche inaccessible répond exactement
-  // comme une tâche inexistante (aucune information sur son état).
-  const task = await prisma.task.findFirst({
-    where: { AND: [visibleTaskWhere({ id: userId, workspaceId }), { id }] },
-    select: { id: true, dueAt: true, completedAt: true, status: true, opportunityId: true, lastActiveStatus: true },
+    if (!task) {
+      throw new Error("Tâche introuvable.");
+    }
+
+    const completed = task.completedAt !== null;
+    // Deux états, donc trois transitions légitimes seulement. Une action rapide
+    // est un point d'entrée public : ce que l'interface ne propose pas, l'action
+    // doit le refuser explicitement.
+    const allowed =
+      (intent === "complete" && !completed) ||
+      (intent === "reopen" && completed) ||
+      (intent === "snooze" && !completed);
+
+    if (!allowed) {
+      throw new TaskConflictError();
+    }
+
+    const now = new Date();
+
+    // Un report part de la date la plus tardive entre aujourd'hui et l'échéance :
+    // reporter une tâche en retard de 10 jours doit donner « demain », pas
+    // « il y a 9 jours ». Sans échéance, on part d'aujourd'hui.
+    const base = task.dueAt && task.dueAt > now ? task.dueAt : now;
+
+    const patch =
+      intent === "complete"
+        ? { status: "DONE" as const }
+        : intent === "reopen"
+          ? // Rouvrir revient au dernier statut actif (« En cours », « En attente »…).
+            { status: task.lastActiveStatus ?? ("TODO" as const) }
+          : { dueDate: dayKey(shiftDueDate(base, days ?? 1, APP_TIME_ZONE), APP_TIME_ZONE) };
+
+    // Écriture conditionnelle : la valeur lue juste avant sert de base. Deux
+    // clics simultanés lisent le même état ; le second voit la valeur changée
+    // et échoue en conflit au lieu de s'appliquer deux fois.
+    const base_ =
+      intent === "snooze"
+        ? { dueDate: task.dueAt ? dayKey(task.dueAt, APP_TIME_ZONE) : null }
+        : { status: task.status };
+    try {
+      await service.updateTaskFields(service.userContext({ id: userId, workspaceId }), id, patch, { base: base_ });
+    } catch (error) {
+      // Droits : même réponse qu'une tâche inexistante, ou le refus explicite.
+      if (error instanceof TaskAccessError) throw new Error(error.code === "NOT_FOUND" ? "Tâche introuvable." : error.message);
+      throw new TaskConflictError();
+    }
+
+    revalidateTaskPages();
+    revalidateCommerceIfLinked(task.opportunityId);
   });
-
-  if (!task) {
-    throw new Error("Tâche introuvable.");
-  }
-
-  const completed = task.completedAt !== null;
-  // Deux états, donc trois transitions légitimes seulement. Une action rapide
-  // est un point d'entrée public : ce que l'interface ne propose pas, l'action
-  // doit le refuser explicitement.
-  const allowed =
-    (intent === "complete" && !completed) ||
-    (intent === "reopen" && completed) ||
-    (intent === "snooze" && !completed);
-
-  if (!allowed) {
-    throw new TaskConflictError();
-  }
-
-  const now = new Date();
-
-  // Un report part de la date la plus tardive entre aujourd'hui et l'échéance :
-  // reporter une tâche en retard de 10 jours doit donner « demain », pas
-  // « il y a 9 jours ». Sans échéance, on part d'aujourd'hui.
-  const base = task.dueAt && task.dueAt > now ? task.dueAt : now;
-
-  const patch =
-    intent === "complete"
-      ? { status: "DONE" as const }
-      : intent === "reopen"
-        ? // Rouvrir revient au dernier statut actif (« En cours », « En attente »…).
-          { status: task.lastActiveStatus ?? ("TODO" as const) }
-        : { dueDate: dayKey(shiftDueDate(base, days ?? 1, APP_TIME_ZONE), APP_TIME_ZONE) };
-
-  // Écriture conditionnelle : la valeur lue juste avant sert de base. Deux
-  // clics simultanés lisent le même état ; le second voit la valeur changée
-  // et échoue en conflit au lieu de s'appliquer deux fois.
-  const base_ =
-    intent === "snooze"
-      ? { dueDate: task.dueAt ? dayKey(task.dueAt, APP_TIME_ZONE) : null }
-      : { status: task.status };
-  try {
-    await service.updateTaskFields(service.userContext({ id: userId, workspaceId }), id, patch, { base: base_ });
-  } catch (error) {
-    // Droits : même réponse qu'une tâche inexistante, ou le refus explicite.
-    if (error instanceof TaskAccessError) throw new Error(error.code === "NOT_FOUND" ? "Tâche introuvable." : error.message);
-    throw new TaskConflictError();
-  }
-
-  revalidateTaskPages();
-  revalidateCommerceIfLinked(task.opportunityId);
 }
 
 /**
@@ -288,10 +288,10 @@ export async function applyTaskAction(formData: FormData): Promise<void> {
  * `findContacts` pour le formulaire Follow-Up.
  */
 export async function findFollowUps(search: string): Promise<FollowUpPickerOption[]> {
-  await getWorkspaceIdForAction();
+  return runCrmAction("crm.followup.read", async () => {
+    const parsed = followUpSearchSchema.safeParse(search);
+    if (!parsed.success) return [];
 
-  const parsed = followUpSearchSchema.safeParse(search);
-  if (!parsed.success) return [];
-
-  return searchFollowUpOptions(parsed.data);
+    return searchFollowUpOptions(parsed.data);
+  });
 }

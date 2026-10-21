@@ -17,7 +17,8 @@ import {
 import { recordAudit } from "@/lib/audit/log";
 import { AUDIT_ENTITY_TYPES } from "@/lib/audit/types";
 import { prisma } from "@/lib/prisma";
-import { getActorForAction, getWorkspaceIdForAction } from "@/lib/workspace";
+import { runCrmAction } from "@/lib/authz/run-crm-action";
+import type { Actor } from "@/lib/tasks/access";
 
 /**
  * Mutations du module Organisations.
@@ -42,114 +43,114 @@ export async function createOrganization(
   _previous: OrganizationFormState,
   formData: FormData,
 ): Promise<OrganizationFormState> {
-  const { id: userId, workspaceId } = await getActorForAction();
+  return runCrmAction("crm.organization.create", async ({ id: userId, workspaceId }) => {
+    const parsed = createOrganizationSchema.safeParse(Object.fromEntries(formData));
 
-  const parsed = createOrganizationSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) {
+      return {
+        status: "error",
+        message: "Le formulaire est incomplet.",
+        fieldErrors: collectFieldErrors(parsed.error.issues),
+      };
+    }
 
-  if (!parsed.success) {
-    return {
-      status: "error",
-      message: "Le formulaire est incomplet.",
-      fieldErrors: collectFieldErrors(parsed.error.issues),
-    };
-  }
+    const org = await prisma.organization.create({
+      data: {
+        workspaceId,
+        name: parsed.data.name,
+        website: parsed.data.website,
+        phone: parsed.data.phone,
+        email: parsed.data.email,
+        notes: parsed.data.notes,
+      },
+      select: { id: true },
+    });
 
-  const org = await prisma.organization.create({
-    data: {
+    await recordAudit({
       workspaceId,
-      name: parsed.data.name,
-      website: parsed.data.website,
-      phone: parsed.data.phone,
-      email: parsed.data.email,
-      notes: parsed.data.notes,
-    },
-    select: { id: true },
+      userId,
+      action: "CREATE",
+      entityType: AUDIT_ENTITY_TYPES.ORGANIZATION,
+      entityId: org.id,
+    });
+
+    revalidatePath("/organizations");
+    revalidatePath("/contacts");
+
+    return {
+      status: "success",
+      message: "Organisation créée.",
+      organizationId: org.id,
+    };
   });
-
-  await recordAudit({
-    workspaceId,
-    userId,
-    action: "CREATE",
-    entityType: AUDIT_ENTITY_TYPES.ORGANIZATION,
-    entityId: org.id,
-  });
-
-  revalidatePath("/organizations");
-  revalidatePath("/contacts");
-
-  return {
-    status: "success",
-    message: "Organisation créée.",
-    organizationId: org.id,
-  };
 }
 
 export async function updateOrganization(
   _previous: OrganizationFormState,
   formData: FormData,
 ): Promise<OrganizationFormState> {
-  const { id: userId, workspaceId } = await getActorForAction();
+  return runCrmAction("crm.organization.update", async ({ id: userId, workspaceId }) => {
+    const parsed = updateOrganizationSchema.safeParse(Object.fromEntries(formData));
 
-  const parsed = updateOrganizationSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) {
+      return {
+        status: "error",
+        message: "Le formulaire est incomplet.",
+        fieldErrors: collectFieldErrors(parsed.error.issues),
+      };
+    }
 
-  if (!parsed.success) {
+    const { id, ...fields } = parsed.data;
+
+    // Lecture bornée au workspace : un identifiant appartenant à quelqu'un
+    // d'autre est indiscernable d'un identifiant inexistant.
+    const existing = await prisma.organization.findFirst({
+      where: { id, workspaceId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return { status: "error", message: "Cette organisation n'existe pas." };
+    }
+
+    // Sync du nom dans les contacts liés : si le nom change, on met à jour
+    // `organization_name` en miroir pour conserver la cohérence d'affichage
+    // sur les contacts.
+    await prisma.$transaction([
+      prisma.organization.update({
+        where: { id: existing.id },
+        data: {
+          name: fields.name,
+          website: fields.website,
+          phone: fields.phone,
+          email: fields.email,
+          notes: fields.notes,
+        },
+      }),
+      prisma.contact.updateMany({
+        where: { organizationId: existing.id, workspaceId },
+        data: { organizationName: fields.name },
+      }),
+    ]);
+
+    await recordAudit({
+      workspaceId,
+      userId,
+      action: "UPDATE",
+      entityType: AUDIT_ENTITY_TYPES.ORGANIZATION,
+      entityId: existing.id,
+    });
+
+    revalidatePath("/organizations");
+    revalidatePath(`/organizations/${existing.id}`);
+    revalidatePath("/contacts");
+
     return {
-      status: "error",
-      message: "Le formulaire est incomplet.",
-      fieldErrors: collectFieldErrors(parsed.error.issues),
+      status: "success",
+      message: "Organisation mise à jour.",
+      organizationId: existing.id,
     };
-  }
-
-  const { id, ...fields } = parsed.data;
-
-  // Lecture bornée au workspace : un identifiant appartenant à quelqu'un
-  // d'autre est indiscernable d'un identifiant inexistant.
-  const existing = await prisma.organization.findFirst({
-    where: { id, workspaceId },
-    select: { id: true },
   });
-
-  if (!existing) {
-    return { status: "error", message: "Cette organisation n'existe pas." };
-  }
-
-  // Sync du nom dans les contacts liés : si le nom change, on met à jour
-  // `organization_name` en miroir pour conserver la cohérence d'affichage
-  // sur les contacts.
-  await prisma.$transaction([
-    prisma.organization.update({
-      where: { id: existing.id },
-      data: {
-        name: fields.name,
-        website: fields.website,
-        phone: fields.phone,
-        email: fields.email,
-        notes: fields.notes,
-      },
-    }),
-    prisma.contact.updateMany({
-      where: { organizationId: existing.id, workspaceId },
-      data: { organizationName: fields.name },
-    }),
-  ]);
-
-  await recordAudit({
-    workspaceId,
-    userId,
-    action: "UPDATE",
-    entityType: AUDIT_ENTITY_TYPES.ORGANIZATION,
-    entityId: existing.id,
-  });
-
-  revalidatePath("/organizations");
-  revalidatePath(`/organizations/${existing.id}`);
-  revalidatePath("/contacts");
-
-  return {
-    status: "success",
-    message: "Organisation mise à jour.",
-    organizationId: existing.id,
-  };
 }
 
 /**
@@ -159,21 +160,20 @@ export async function updateOrganization(
  * archivée disparaît de la liste et du sélecteur, mais le lien FK reste.
  */
 export async function archiveOrganization(formData: FormData): Promise<void> {
-  await setArchivedAt(formData, new Date(), "ARCHIVE");
+  return runCrmAction("crm.organization.archive", (actor) => setArchivedAt(actor, formData, new Date(), "ARCHIVE"));
 }
 
 /** Restauration : un archivage doit pouvoir se défaire. */
 export async function restoreOrganization(formData: FormData): Promise<void> {
-  await setArchivedAt(formData, null, "RESTORE");
+  return runCrmAction("crm.organization.archive", (actor) => setArchivedAt(actor, formData, null, "RESTORE"));
 }
 
 async function setArchivedAt(
+  { id: userId, workspaceId }: Actor,
   formData: FormData,
   archivedAt: Date | null,
   action: "ARCHIVE" | "RESTORE",
 ): Promise<void> {
-  const { id: userId, workspaceId } = await getActorForAction();
-
   const parsed = organizationIdSchema.safeParse(formData.get("id"));
   if (!parsed.success) {
     throw new Error("Organisation introuvable.");
@@ -209,10 +209,10 @@ async function setArchivedAt(
 export async function findOrganizations(
   search: string,
 ): Promise<OrganizationPickerOption[]> {
-  await getWorkspaceIdForAction();
+  return runCrmAction("crm.organization.read", async () => {
+    const parsed = organizationSearchSchema.safeParse(search);
+    if (!parsed.success) return [];
 
-  const parsed = organizationSearchSchema.safeParse(search);
-  if (!parsed.success) return [];
-
-  return searchOrganizationOptions(parsed.data);
+    return searchOrganizationOptions(parsed.data);
+  });
 }

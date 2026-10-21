@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
 import { privacyIdSchema } from "@/lib/privacy/schemas";
-import { getWorkspaceIdForAction } from "@/lib/workspace";
+import { runCrmAction } from "@/lib/authz/run-crm-action";
 
 function refresh(...paths: string[]) {
   revalidatePath("/rgpd");
@@ -12,21 +12,23 @@ function refresh(...paths: string[]) {
 }
 
 export async function restoreTreatment(formData: FormData) {
-  const workspaceId = await getWorkspaceIdForAction();
-  const id = privacyIdSchema.parse(formData.get("id"));
-  await prisma.privacyTreatment.updateMany({
-    where: { id, workspaceId },
-    data: { archivedAt: null, status: "REVIEW" },
+  return runCrmAction("privacy.treatment.archive", async ({ workspaceId }) => {
+    const id = privacyIdSchema.parse(formData.get("id"));
+    await prisma.privacyTreatment.updateMany({
+      where: { id, workspaceId },
+      data: { archivedAt: null, status: "REVIEW" },
+    });
+    refresh("/rgpd/treatments");
   });
-  refresh("/rgpd/treatments");
 }
 
 export async function restoreProcessor(formData: FormData) {
-  const workspaceId = await getWorkspaceIdForAction();
-  const id = privacyIdSchema.parse(formData.get("id"));
-  await prisma.privacyProcessor.updateMany({
-    where: { id, workspaceId },
-    data: { archivedAt: null },
+  return runCrmAction("privacy.processor.archive", async ({ workspaceId }) => {
+    const id = privacyIdSchema.parse(formData.get("id"));
+    await prisma.privacyProcessor.updateMany({
+      where: { id, workspaceId },
+      data: { archivedAt: null },
+    });
+    refresh("/rgpd/processors", "/rgpd/treatments");
   });
-  refresh("/rgpd/processors", "/rgpd/treatments");
 }

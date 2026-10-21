@@ -21,7 +21,7 @@ import type { OpportunityPickerOption } from "@/lib/commerce/domain";
 import { recordAudit } from "@/lib/audit/log";
 import { AUDIT_ENTITY_TYPES } from "@/lib/audit/types";
 import { prisma } from "@/lib/prisma";
-import { getActorForAction, getWorkspaceIdForAction } from "@/lib/workspace";
+import { runCrmAction } from "@/lib/authz/run-crm-action";
 
 /**
  * Pages du module Commerce à invalider après chaque mutation.
@@ -46,81 +46,81 @@ export async function createOpportunity(
   _previous: CreateOpportunityState,
   formData: FormData,
 ): Promise<CreateOpportunityState> {
-  const { id: userId, workspaceId } = await getActorForAction();
+  return runCrmAction("crm.opportunity.create", async ({ id: userId, workspaceId }) => {
+    const parsed = createOpportunitySchema.safeParse(Object.fromEntries(formData));
 
-  const parsed = createOpportunitySchema.safeParse(Object.fromEntries(formData));
-
-  if (!parsed.success) {
-    const fieldErrors: Record<string, string> = {};
-    for (const issue of parsed.error.issues) {
-      const key = String(issue.path[0] ?? "form");
-      fieldErrors[key] ??= issue.message;
+    if (!parsed.success) {
+      const fieldErrors: Record<string, string> = {};
+      for (const issue of parsed.error.issues) {
+        const key = String(issue.path[0] ?? "form");
+        fieldErrors[key] ??= issue.message;
+      }
+      return { status: "error", message: "Le formulaire est incomplet.", fieldErrors };
     }
-    return { status: "error", message: "Le formulaire est incomplet.", fieldErrors };
-  }
 
-  const input = parsed.data;
+    const input = parsed.data;
 
-  // L'organisation est obligatoire ; on vérifie qu'elle appartient au workspace.
-  const organization = await prisma.organization.findFirst({
-    where: { id: input.organizationId, workspaceId, archivedAt: null },
-    select: { id: true },
-  });
-
-  if (!organization) {
-    return {
-      status: "error",
-      message: "Cette organisation n'existe pas ou a été archivée.",
-      fieldErrors: { organizationId: "Organisation introuvable." },
-    };
-  }
-
-  let contactId: string | null = null;
-
-  if (input.contactId) {
-    const contact = await prisma.contact.findFirst({
-      where: { id: input.contactId, workspaceId, archivedAt: null },
+    // L'organisation est obligatoire ; on vérifie qu'elle appartient au workspace.
+    const organization = await prisma.organization.findFirst({
+      where: { id: input.organizationId, workspaceId, archivedAt: null },
       select: { id: true },
     });
 
-    if (!contact) {
+    if (!organization) {
       return {
         status: "error",
-        message: "Ce contact n'existe pas ou a été archivé.",
-        fieldErrors: { contactId: "Contact introuvable." },
+        message: "Cette organisation n'existe pas ou a été archivée.",
+        fieldErrors: { organizationId: "Organisation introuvable." },
       };
     }
-    contactId = contact.id;
-  }
 
-  const expectedCloseAt = input.expectedCloseDate
-    ? startOfDay(input.expectedCloseDate, APP_TIME_ZONE)
-    : null;
+    let contactId: string | null = null;
 
-  const opportunity = await prisma.opportunity.create({
-    data: {
+    if (input.contactId) {
+      const contact = await prisma.contact.findFirst({
+        where: { id: input.contactId, workspaceId, archivedAt: null },
+        select: { id: true },
+      });
+
+      if (!contact) {
+        return {
+          status: "error",
+          message: "Ce contact n'existe pas ou a été archivé.",
+          fieldErrors: { contactId: "Contact introuvable." },
+        };
+      }
+      contactId = contact.id;
+    }
+
+    const expectedCloseAt = input.expectedCloseDate
+      ? startOfDay(input.expectedCloseDate, APP_TIME_ZONE)
+      : null;
+
+    const opportunity = await prisma.opportunity.create({
+      data: {
+        workspaceId,
+        organizationId: organization.id,
+        contactId,
+        name: input.name,
+        status: input.status,
+        estimatedAmount: input.estimatedAmount,
+        expectedCloseAt,
+        notes: input.notes,
+      },
+      select: { id: true },
+    });
+
+    await recordAudit({
       workspaceId,
-      organizationId: organization.id,
-      contactId,
-      name: input.name,
-      status: input.status,
-      estimatedAmount: input.estimatedAmount,
-      expectedCloseAt,
-      notes: input.notes,
-    },
-    select: { id: true },
-  });
+      userId,
+      action: "CREATE",
+      entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
+      entityId: opportunity.id,
+    });
 
-  await recordAudit({
-    workspaceId,
-    userId,
-    action: "CREATE",
-    entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
-    entityId: opportunity.id,
+    revalidateCommerceList();
+    return { status: "success", message: "Opportunité créée." };
   });
-
-  revalidateCommerceList();
-  return { status: "success", message: "Opportunité créée." };
 }
 
 // ─── Mise à jour ────────────────────────────────────────────────────────────
@@ -129,94 +129,94 @@ export async function updateOpportunity(
   _previous: UpdateOpportunityState,
   formData: FormData,
 ): Promise<UpdateOpportunityState> {
-  const { id: userId, workspaceId } = await getActorForAction();
+  return runCrmAction("crm.opportunity.update", async ({ id: userId, workspaceId }) => {
+    const parsed = updateOpportunitySchema.safeParse(Object.fromEntries(formData));
 
-  const parsed = updateOpportunitySchema.safeParse(Object.fromEntries(formData));
-
-  if (!parsed.success) {
-    const fieldErrors: Record<string, string> = {};
-    for (const issue of parsed.error.issues) {
-      const key = String(issue.path[0] ?? "form");
-      fieldErrors[key] ??= issue.message;
+    if (!parsed.success) {
+      const fieldErrors: Record<string, string> = {};
+      for (const issue of parsed.error.issues) {
+        const key = String(issue.path[0] ?? "form");
+        fieldErrors[key] ??= issue.message;
+      }
+      return { status: "error", message: "Le formulaire est incomplet.", fieldErrors };
     }
-    return { status: "error", message: "Le formulaire est incomplet.", fieldErrors };
-  }
 
-  const input = parsed.data;
+    const input = parsed.data;
 
-  // Vérification d'appartenance au workspace, anti–mass-assignment.
-  const existing = await prisma.opportunity.findFirst({
-    where: { id: input.id, workspaceId },
-    select: { id: true },
-  });
-
-  if (!existing) {
-    return {
-      status: "error",
-      message: "Cette opportunité est introuvable.",
-      fieldErrors: { id: "Opportunité introuvable." },
-    };
-  }
-
-  // Vérification de l'organisation.
-  const organization = await prisma.organization.findFirst({
-    where: { id: input.organizationId, workspaceId, archivedAt: null },
-    select: { id: true },
-  });
-
-  if (!organization) {
-    return {
-      status: "error",
-      message: "Cette organisation n'existe pas ou a été archivée.",
-      fieldErrors: { organizationId: "Organisation introuvable." },
-    };
-  }
-
-  let contactId: string | null = null;
-
-  if (input.contactId) {
-    const contact = await prisma.contact.findFirst({
-      where: { id: input.contactId, workspaceId, archivedAt: null },
+    // Vérification d'appartenance au workspace, anti–mass-assignment.
+    const existing = await prisma.opportunity.findFirst({
+      where: { id: input.id, workspaceId },
       select: { id: true },
     });
 
-    if (!contact) {
+    if (!existing) {
       return {
         status: "error",
-        message: "Ce contact n'existe pas ou a été archivé.",
-        fieldErrors: { contactId: "Contact introuvable." },
+        message: "Cette opportunité est introuvable.",
+        fieldErrors: { id: "Opportunité introuvable." },
       };
     }
-    contactId = contact.id;
-  }
 
-  const expectedCloseAt = input.expectedCloseDate
-    ? startOfDay(input.expectedCloseDate, APP_TIME_ZONE)
-    : null;
+    // Vérification de l'organisation.
+    const organization = await prisma.organization.findFirst({
+      where: { id: input.organizationId, workspaceId, archivedAt: null },
+      select: { id: true },
+    });
 
-  await prisma.opportunity.update({
-    where: { id: input.id },
-    data: {
-      organizationId: organization.id,
-      contactId,
-      name: input.name,
-      estimatedAmount: input.estimatedAmount,
-      expectedCloseAt,
-      notes: input.notes,
-    },
+    if (!organization) {
+      return {
+        status: "error",
+        message: "Cette organisation n'existe pas ou a été archivée.",
+        fieldErrors: { organizationId: "Organisation introuvable." },
+      };
+    }
+
+    let contactId: string | null = null;
+
+    if (input.contactId) {
+      const contact = await prisma.contact.findFirst({
+        where: { id: input.contactId, workspaceId, archivedAt: null },
+        select: { id: true },
+      });
+
+      if (!contact) {
+        return {
+          status: "error",
+          message: "Ce contact n'existe pas ou a été archivé.",
+          fieldErrors: { contactId: "Contact introuvable." },
+        };
+      }
+      contactId = contact.id;
+    }
+
+    const expectedCloseAt = input.expectedCloseDate
+      ? startOfDay(input.expectedCloseDate, APP_TIME_ZONE)
+      : null;
+
+    await prisma.opportunity.update({
+      where: { id: input.id },
+      data: {
+        organizationId: organization.id,
+        contactId,
+        name: input.name,
+        estimatedAmount: input.estimatedAmount,
+        expectedCloseAt,
+        notes: input.notes,
+      },
+    });
+
+    await recordAudit({
+      workspaceId,
+      userId,
+      action: "UPDATE",
+      entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
+      entityId: input.id,
+    });
+
+    revalidateCommerceList();
+    revalidateOpportunityDetail(input.id);
+    return { status: "success", message: "Opportunité mise à jour." };
   });
-
-  await recordAudit({
-    workspaceId,
-    userId,
-    action: "UPDATE",
-    entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
-    entityId: input.id,
-  });
-
-  revalidateCommerceList();
-  revalidateOpportunityDetail(input.id);
-  return { status: "success", message: "Opportunité mise à jour." };
 }
 
 // ─── Changement de statut ───────────────────────────────────────────────────
@@ -227,63 +227,63 @@ export async function updateOpportunity(
  * sans passer par un état ouvert.
  */
 export async function changeOpportunityStatus(formData: FormData): Promise<void> {
-  const { id: userId, workspaceId } = await getActorForAction();
+  return runCrmAction("crm.opportunity.update", async ({ id: userId, workspaceId }) => {
+    const parsed = changeStatusSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) {
+      throw new Error("Données invalides.");
+    }
 
-  const parsed = changeStatusSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    throw new Error("Données invalides.");
-  }
+    const { id, status: newStatus } = parsed.data;
 
-  const { id, status: newStatus } = parsed.data;
+    const opportunity = await prisma.opportunity.findFirst({
+      where: { id, workspaceId },
+      select: { id: true, status: true },
+    });
 
-  const opportunity = await prisma.opportunity.findFirst({
-    where: { id, workspaceId },
-    select: { id: true, status: true },
+    if (!opportunity) {
+      throw new Error("Opportunité introuvable.");
+    }
+
+    // Guard idempotent : si le statut demandé est déjà le statut actuel,
+    // on sort immédiatement sans erreur et sans écriture inutile en base.
+    // Protège contre les soumissions en double ou les états UI périmés.
+    if (opportunity.status === newStatus) {
+      return;
+    }
+
+    if (!isTransitionAllowed(opportunity.status, newStatus)) {
+      throw new OpportunityConflictError();
+    }
+
+    const now = new Date();
+
+    // `closedAt` : horodatage de la clôture effective. On le pose à la première
+    // transition vers un statut terminal, et on l'efface si l'affaire est rouverte.
+    const closedAt = isOpenStatus(newStatus)
+      ? null
+      : isOpenStatus(opportunity.status)
+        ? now // fermeture
+        : undefined; // déjà clos → on ne touche pas à la date
+
+    await prisma.opportunity.update({
+      where: { id },
+      data: {
+        status: newStatus,
+        ...(closedAt !== undefined ? { closedAt } : {}),
+      },
+    });
+
+    await recordAudit({
+      workspaceId,
+      userId,
+      action: "UPDATE",
+      entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
+      entityId: id,
+    });
+
+    revalidateCommerceList();
+    revalidateOpportunityDetail(id);
   });
-
-  if (!opportunity) {
-    throw new Error("Opportunité introuvable.");
-  }
-
-  // Guard idempotent : si le statut demandé est déjà le statut actuel,
-  // on sort immédiatement sans erreur et sans écriture inutile en base.
-  // Protège contre les soumissions en double ou les états UI périmés.
-  if (opportunity.status === newStatus) {
-    return;
-  }
-
-  if (!isTransitionAllowed(opportunity.status, newStatus)) {
-    throw new OpportunityConflictError();
-  }
-
-  const now = new Date();
-
-  // `closedAt` : horodatage de la clôture effective. On le pose à la première
-  // transition vers un statut terminal, et on l'efface si l'affaire est rouverte.
-  const closedAt = isOpenStatus(newStatus)
-    ? null
-    : isOpenStatus(opportunity.status)
-      ? now // fermeture
-      : undefined; // déjà clos → on ne touche pas à la date
-
-  await prisma.opportunity.update({
-    where: { id },
-    data: {
-      status: newStatus,
-      ...(closedAt !== undefined ? { closedAt } : {}),
-    },
-  });
-
-  await recordAudit({
-    workspaceId,
-    userId,
-    action: "UPDATE",
-    entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
-    entityId: id,
-  });
-
-  revalidateCommerceList();
-  revalidateOpportunityDetail(id);
 }
 
 // ─── Suppression ────────────────────────────────────────────────────────────
@@ -297,34 +297,34 @@ export async function changeOpportunityStatus(formData: FormData): Promise<void>
  * actions ou des relances.
  */
 export async function deleteOpportunity(formData: FormData): Promise<void> {
-  const { id: userId, workspaceId } = await getActorForAction();
+  return runCrmAction("crm.opportunity.delete", async ({ id: userId, workspaceId }) => {
+    const id = formData.get("id");
+    if (typeof id !== "string" || !id) {
+      throw new Error("Identifiant manquant.");
+    }
 
-  const id = formData.get("id");
-  if (typeof id !== "string" || !id) {
-    throw new Error("Identifiant manquant.");
-  }
+    const opportunity = await prisma.opportunity.findFirst({
+      where: { id, workspaceId },
+      select: { id: true },
+    });
 
-  const opportunity = await prisma.opportunity.findFirst({
-    where: { id, workspaceId },
-    select: { id: true },
+    if (!opportunity) {
+      throw new Error("Opportunité introuvable.");
+    }
+
+    await prisma.opportunity.delete({ where: { id } });
+
+    await recordAudit({
+      workspaceId,
+      userId,
+      action: "DELETE",
+      entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
+      entityId: id,
+    });
+
+    revalidateCommerceList();
+    revalidateOpportunityDetail(id);
   });
-
-  if (!opportunity) {
-    throw new Error("Opportunité introuvable.");
-  }
-
-  await prisma.opportunity.delete({ where: { id } });
-
-  await recordAudit({
-    workspaceId,
-    userId,
-    action: "DELETE",
-    entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
-    entityId: id,
-  });
-
-  revalidateCommerceList();
-  revalidateOpportunityDetail(id);
 }
 
 // ─── Sélecteur ─────────────────────────────────────────────────────────────
@@ -337,10 +337,10 @@ export async function deleteOpportunity(formData: FormData): Promise<void> {
 export async function findOpportunities(
   search: string,
 ): Promise<OpportunityPickerOption[]> {
-  await getWorkspaceIdForAction();
+  return runCrmAction("crm.opportunity.read", async () => {
+    const parsed = opportunitySearchSchema.safeParse(search);
+    if (!parsed.success) return [];
 
-  const parsed = opportunitySearchSchema.safeParse(search);
-  if (!parsed.success) return [];
-
-  return searchOpportunityOptions(parsed.data);
+    return searchOpportunityOptions(parsed.data);
+  });
 }
