@@ -120,7 +120,11 @@ async function checkGuards(client, { workspace, owner, e2eUsers }) {
         others.map((u) => `  - ${u.email}`).join("\n"),
     );
   }
-  return { ownerId: me.id, slug: ws.rows[0].slug };
+  const excluded = users.rows
+    .filter((u) => e2eUsers.includes(u.email))
+    .map((u) => ({ email: u.email, isActive: u.is_active }));
+  const inactive = users.rows.filter((u) => !u.is_active).map((u) => u.email);
+  return { ownerId: me.id, slug: ws.rows[0].slug, excluded, inactive };
 }
 
 async function count(client, sql, params) {
@@ -138,7 +142,7 @@ export async function backfill(client, options) {
   try {
     await client.query("SELECT pg_advisory_xact_lock(hashtext('backfill-owner:' || $1))", [options.workspace]);
     // Revérifié sous verrou : rien ne doit changer entre le contrôle et l'écriture.
-    const { ownerId, slug } = await checkGuards(client, options);
+    const { ownerId, slug, excluded, inactive } = await checkGuards(client, options);
     const w = options.workspace;
     const attribution = report["Attribution"];
 
@@ -210,7 +214,7 @@ export async function backfill(client, options) {
       [w, ownerId],
     );
 
-    report.meta = { workspace: `${slug} (${w})`, owner: options.owner, dryRun: options.dryRun };
+    report.meta = { workspace: `${slug} (${w})`, owner: options.owner, dryRun: options.dryRun, excluded, inactive };
     await client.query(options.dryRun ? "ROLLBACK" : "COMMIT");
     return report;
   } catch (error) {
@@ -224,6 +228,14 @@ export function formatReport(report) {
     `Espace       : ${report.meta.workspace}`,
     `Propriétaire : ${report.meta.owner}`,
     `Mode         : ${report.meta.dryRun ? "DRY-RUN — rien n'a été enregistré (ROLLBACK)" : "exécution — transaction validée (COMMIT)"}`,
+    "",
+    "Comptes exclus du garde-fou (--e2e-user) — à vérifier avant toute exécution réelle",
+    ...(report.meta.excluded.length
+      ? report.meta.excluded.map((u) => `  ${u.email.padEnd(40)}  isActive=${u.isActive}`)
+      : ["  (aucun)"]),
+    "",
+    "Comptes désactivés de l'espace (ignorés par le garde-fou)",
+    ...(report.meta.inactive.length ? report.meta.inactive.map((email) => `  ${email}`) : ["  (aucun)"]),
   ];
   for (const [section, rows] of Object.entries(report)) {
     if (section === "meta") continue;
