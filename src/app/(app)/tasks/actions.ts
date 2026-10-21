@@ -49,9 +49,9 @@ export async function createTask(
   _previous: CreateTaskState,
   formData: FormData,
 ): Promise<CreateTaskState> {
+  // Authentification d'abord (`runCrmAction`) : une action appelée sans
+  // session est rejetée avant même de regarder le contenu du formulaire.
   return runCrmAction("task.create", async ({ id: userId, workspaceId }) => {
-    // Authentification d'abord : une action appelée sans session est rejetée
-    // avant même de regarder le contenu du formulaire.
     const parsed = createTaskSchema.safeParse(Object.fromEntries(formData));
 
     if (!parsed.success) {

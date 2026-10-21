@@ -18,7 +18,7 @@ tout le CRM, le registre RGPD, les tâches libres et les projets `WORKSPACE`.
 
 | Sujet | État actuel |
 |---|---|
-| Rôle d'espace | Aucun. Le seul rôle est `ProjectRole` (OWNER / EDITOR / COMMENTER) (`prisma/schema.prisma:87`). |
+| Rôle d'espace | Aucun. Le seul rôle est `ProjectRole` (OWNER / EDITOR / COMMENTER) (`prisma/schema.prisma:86`). |
 | Utilisateur ↔ espace | Un utilisateur a **un seul** espace (`User.workspaceId`, clé étrangère indexée, non unique : un espace a plusieurs utilisateurs). `User.email` est unique **globalement** : une adresse ne peut exister que dans un seul tenant. |
 | Création de comptes | `scripts/admin.mjs` (`create-workspace`, `create-user`, `reset-password`, `disable-user`) ; `scripts/create-e2e-user.ts` pour les tests e2e. |
 | Résolution de l'acteur | Actions : `getActorForAction` (`src/lib/workspace.ts`) → `requireActor` (`src/lib/auth/dal.ts`) → `readSession` (`src/lib/auth/session.ts`). Routes (`withActor`) et pages (`getPageActor`) passent directement par `getCurrentUser` / `requireUser` de la DAL. Le flux SSE et la photo de contact aussi. |
@@ -188,7 +188,7 @@ forme, d'où le helper transparent.
 | `restoreTaskAction` | Task (corbeille) | `task.restore` | `evaluateTrashAccess.canRestore` |
 | `purgeTaskAction` | Task (corbeille) | `task.purge` | `evaluateTrashAccess.canPurge` |
 | `duplicateTaskAction` | Task | `task.manage` | `requireTaskManage` |
-| `moveTaskAction` | Task, TaskProject | `task.manage` | `requireTaskManage` + `requireProjectContentEdit` (cible) |
+| `moveTaskAction` | Task, TaskProject | `task.manage` | `requireTaskRead`, `requireProjectContentEdit` (cible), puis `requireTaskManage` si la tâche n'est pas déjà dans ce projet (sinon `canManage` est acquis par l'édition du projet) |
 | `addTaskToProjectAction` | TaskProject | `task.manage` | idem |
 | `removeTaskFromProjectAction` | TaskProject | `task.manage` | idem |
 | `moveSubtaskAction` | Task | `task.edit` | `requireTaskEdit` |
@@ -200,10 +200,10 @@ forme, d'où le helper transparent.
 | `setFollowerAction` | TaskFollower | `task.read` | soi-même en abonné : lecture ; sinon `requireTaskManage` |
 | `addTimeEntryAction` | TaskTimeEntry | `task.edit` | `requireTaskEdit` |
 | `deleteTimeEntryAction` | TaskTimeEntry | `task.read` | sa saisie : lecture ; celle d'autrui : `requireTaskEdit` |
-| `addCommentAction` | Comment | `task.comment` | lecture de la tâche / du projet |
-| `editCommentAction` | Comment | `task.comment.own` | auteur + accès actuel |
+| `addCommentAction` | Comment | `task.comment` | `requireTaskRead` + `canComment` |
+| `editCommentAction` | Comment | `task.comment.own` | auteur + accès actuel (tâche ou point d'avancement) |
 | `deleteCommentAction` | Comment | `task.comment.own` | idem |
-| `toggleReactionAction` | CommentReaction | `task.comment` | lecture |
+| `toggleReactionAction` | CommentReaction | `task.comment` | lecture de la tâche, ou du projet pour un commentaire de point d'avancement (au lot B : `project.read` dans ce cas) |
 | `bulkUpdateAction` | Task × n | `task.edit` | `requireTaskEdit` par tâche |
 | `bulkPatchAction` | Task × n | `task.edit` | idem |
 | `bulkDeleteAction` | Task × n | `task.manage` | `requireTaskManage` par tâche |
@@ -337,7 +337,7 @@ par espace avant migration).
 | `Contact` | aucun | `AuditLog` (`Contact`, `CREATE`) ; imports CSV (`ContactImport`, sans `entityId`) et seed → référence |
 | `Opportunity` | aucun | `AuditLog` (`Opportunity`, `CREATE`), sinon référence |
 | `FollowUp` | aucun | `AuditLog` (`FollowUp`, `CREATE`), sinon référence |
-| `PrivacyTreatment`, `PrivacyProcessor`, `PrivacyRequest`, `PrivacyIncident` | aucun (`owner` est un **texte libre**, à ne pas confondre) | selon la décision **e** : `AuditLog`, sinon référence |
+| `PrivacyTreatment`, `PrivacyProcessor`, `PrivacyRequest`, `PrivacyIncident` | aucun (`owner` de Treatment, Request et Incident est un **texte libre**, à ne pas confondre) | selon la décision **e** : `AuditLog`, sinon référence |
 | `Task` (tâches libres) | `createdById` | `createdById`, sinon référence. Pas de nouveau champ nécessaire si la règle s'exprime sur `createdById` / `assigneeId` / collaborateurs (recommandé) |
 | `Project` | `ownerId` existe déjà, `createdById` | aucun nouveau champ ; combler `ownerId` nul par `createdById`, sinon référence |
 | `Tag`, `CustomField`, `TaskTemplate`, `AutomationRule`, `TaskForm` | `createdById` sur `TaskTemplate` et `AutomationRule` seulement | uniquement si la décision **a** les rend personnels ; `Tag` est `@@unique([workspaceId, name])`, contrainte à revoir dans ce cas |
@@ -467,3 +467,20 @@ existant sans autre lien perd la tâche après migration (rare, à journaliser).
 
 Les `where: { id, workspaceId }` et les contrôles des services sont inchangés :
 le lot 0 ajoute un point de contrôle, il n'en retire aucun.
+
+**Ce que le lot 0 garantit, et ce qu'il ne garantit pas encore.** Les trois
+appels de production (`runCrmAction`, `runAction`, `withActor`) appellent
+`authorize` **sans ressource** : il ne peut refuser qu'un acteur incomplet, ce
+qu'une session ne produit jamais. Les capacités sont donc, à ce stade, des
+étiquettes figées et vérifiées (la table du test d'inventaire reprend la
+colonne « Capacité » du §3) ; la branche avec ressource n'est exercée que par
+`authorize.test.ts`. Elle devient active au lot A (`checkRecord`) et au lot B
+(services). Le test d'inventaire impose aussi : helper importé de son module,
+exactement deux arguments (capacité littérale, fonction), pas de `finally`, un
+`catch` sans appel, aucune directive `"use server"` inline, aucune méthode
+d'écriture ré-exportée dans une route ; il parcourt tout `src/`.
+
+Limites connues, assumées au lot 0 : `withActor` prend la capacité en second
+argument optionnel (une route d'écriture qui l'oublie compile ; seul le test la
+rattrape) ; rien n'interdit techniquement à une route `GET` d'écrire (aucune ne
+le fait aujourd'hui).

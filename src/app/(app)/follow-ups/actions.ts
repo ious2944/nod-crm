@@ -48,9 +48,9 @@ export async function createFollowUp(
   _previous: CreateFollowUpState,
   formData: FormData,
 ): Promise<CreateFollowUpState> {
+  // Authentification d'abord (`runCrmAction`) : une action appelée sans
+  // session est rejetée avant même de regarder le contenu du formulaire.
   return runCrmAction("crm.followup.create", async ({ id: userId, workspaceId }) => {
-    // Authentification d'abord : une action appelée sans session est rejetée
-    // avant même de regarder le contenu du formulaire.
     const parsed = createFollowUpSchema.safeParse(Object.fromEntries(formData));
 
     if (!parsed.success) {

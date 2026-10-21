@@ -54,12 +54,18 @@ export const CAPABILITY_RULES = {
   // ─── Tâches ──────────────────────────────────────────────────────────────
   /** Créer une tâche (libre, ou dans un projet modifiable — vérifié par le service). */
   "task.create": { scope: "record" },
+  /** Lire ; aussi s'abonner soi-même et supprimer sa propre saisie de temps (le service exige plus pour autrui). */
   "task.read": { scope: "task", right: "canRead" },
+  /**
+   * Commenter, réagir. Une réaction peut viser le commentaire d'un **point
+   * d'avancement** (portée projet, `canReadProject`) : au lot B, l'appelant
+   * passera alors `project.read` avec la ressource projet, pas `task.comment`.
+   */
   "task.comment": { scope: "task", right: "canComment" },
   "task.edit": { scope: "task", right: "canEdit" },
-  /** Structure et partage : supprimer, dupliquer, déplacer, réaffecter, abonner. */
+  /** Structure et partage : supprimer, dupliquer, déplacer, réaffecter, abonner **d'autres** personnes. */
   "task.manage": { scope: "task", right: "canManage" },
-  /** Modifier ou supprimer **son** commentaire (qualité d'auteur vérifiée par le service). */
+  /** Modifier ou supprimer **son** commentaire, de tâche ou de point d'avancement (auteur + accès actuel : service). */
   "task.comment.own": { scope: "record" },
   "task.restore": { scope: "task-trash", right: "canRestore" },
   "task.purge": { scope: "task-trash", right: "canPurge" },
