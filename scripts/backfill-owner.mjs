@@ -173,7 +173,8 @@ export async function backfill(client, options) {
         `INSERT INTO project_members (project_id, user_id, workspace_id, role)
          SELECT p.id, $2, p.workspace_id, 'EDITOR' FROM projects p
          WHERE p.workspace_id = $1 AND p.visibility = 'WORKSPACE'
-           AND COALESCE(p.owner_id, p.created_by_id) IS DISTINCT FROM $2
+           -- Propriétaire après backfill : owner_id, sinon created_by_id, sinon lui (même règle que plus bas).
+           AND COALESCE(p.owner_id, p.created_by_id, $2) IS DISTINCT FROM $2
            AND NOT EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.user_id = $2)`,
         [w, ownerId],
       )
