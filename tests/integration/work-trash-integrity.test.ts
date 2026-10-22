@@ -25,7 +25,7 @@ import { setTestHook } from "@/lib/tasks/test-hooks";
 import type { ActionResult } from "@/lib/tasks/types";
 import { getTaskDetail } from "@/lib/tasks/work-queries";
 
-import { addUserToWorkspace, createWorkspaceWithUser, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
+import { addUserToWorkspace, assignOutsideProject, createWorkspaceWithUser, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
 import { interleave } from "./interleave";
 
 /**
@@ -129,7 +129,9 @@ describe("retraits, suppressions et purges sans élargissement de visibilité", 
     // Lot A : une tâche libre n'est visible que de son créateur, de son
     // responsable et de ses collaborateurs. Bob, responsable mais non membre
     // de P, ne la voit pas aujourd'hui : la retirer de P la lui ouvrirait.
-    const priv = ok(await createTaskAction({ title: "Privée", projectId: P, assigneeId: bob.userId }));
+    const priv = ok(await createTaskAction({ title: "Privée", projectId: P }));
+    // Lot B : l'API ne nomme plus responsable un non-membre ; l'état hérité est posé en base.
+    await assignOutsideProject(priv.id, bob.userId);
     expect(await readable(bob, priv.id)).toBe(false);
     expect(await removeTaskFromProjectAction(priv.id, P)).toMatchObject({ ok: false, code: "VALIDATION" });
     expect(await readable(bob, priv.id)).toBe(false);
@@ -193,7 +195,8 @@ describe("retraits, suppressions et purges sans élargissement de visibilité", 
 
   it("données héritées : une tâche active liée seulement à un projet de la corbeille reste protégée et l'aperçu correspond au résultat", async () => {
     // État que pouvait produire c580137 (retrait sans contrôle) : simulé en base.
-    const t = ok(await createTaskAction({ title: "Héritée", projectId: P, assigneeId: bob.userId }));
+    const t = ok(await createTaskAction({ title: "Héritée", projectId: P }));
+    await assignOutsideProject(t.id, bob.userId);
     const kept = ok(await createTaskAction({ title: "Encore dans Q", projectId: P }));
     ok(await addTaskToProjectAction(kept.id, Q, null));
     await prisma.project.update({ where: { id: P }, data: { deletedAt: new Date(), deletedById: alice.userId } });

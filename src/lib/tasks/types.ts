@@ -119,6 +119,7 @@ export interface TaskItem {
   hasDescription: boolean;
   /** Début de la description en texte brut (recherche locale, aperçus). */
   excerpt: string;
+  /** Fiches CRM liées : `null` aussi quand la fiche appartient à une autre personne (lot B). */
   contactId: string | null;
   organizationId: string | null;
   opportunityId: string | null;
@@ -174,15 +175,29 @@ export interface CrmRef {
   label: string;
 }
 
+/**
+ * Lien vers une fiche CRM que l'acteur ne lit pas (lot B) : la fiche
+ * appartient à une autre personne. Ni identifiant ni nom ; le lien existe et
+ * ne peut être ni modifié ni retiré par l'acteur.
+ */
+export interface HiddenCrmRef {
+  hidden: true;
+}
+
+export type CrmLink = CrmRef | HiddenCrmRef;
+
+export const isHiddenCrm = (link: CrmLink | null | undefined): link is HiddenCrmRef =>
+  Boolean(link && "hidden" in link);
+
 export interface ProjectDetail extends ProjectSummary {
   description: string | null;
   startDate: string | null;
   dueDate: string | null;
   members: ProjectMemberItem[];
   customFieldIds: string[];
-  contact: CrmRef | null;
-  organization: CrmRef | null;
-  opportunity: CrmRef | null;
+  contact: CrmLink | null;
+  organization: CrmLink | null;
+  opportunity: CrmLink | null;
   createdAt: string;
   version: number;
 }
@@ -285,10 +300,10 @@ export interface TaskDetail {
   activity: ActivityItem[];
   timeEntries: TimeEntryItem[];
   projects: TaskProjectRef[];
-  contact: CrmRef | null;
-  organization: CrmRef | null;
-  opportunity: CrmRef | null;
-  followUp: CrmRef | null;
+  contact: CrmLink | null;
+  organization: CrmLink | null;
+  opportunity: CrmLink | null;
+  followUp: CrmLink | null;
   canComment: boolean;
   /** Occurrence suivante déjà générée par la récurrence, le cas échéant. */
   recurrenceNextId: string | null;

@@ -47,7 +47,9 @@ user acting maliciously beyond what they are allowed to see. Since Permissions
 V1 lot A, a workspace is no longer "everyone sees everything": CRM and GDPR
 records are private to their owner, projects to their owner and members, free
 tasks to their creator, assignee and collaborators — see
-[`permissions-v1.md`](permissions-v1.md) §9.
+[`permissions-v1.md`](permissions-v1.md) §9. Since lot B, a shared project
+never reveals the CRM records linked to it to members who do not own them
+(§10).
 
 ## 2. Authentication
 

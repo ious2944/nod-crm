@@ -7,7 +7,7 @@ import { useState } from "react";
 import { commentStatusUpdateAction } from "@/app/(app)/tasks/work-actions";
 import { VISIBILITY_LABELS } from "@/lib/tasks/constants";
 import { relativeTime, shortDate } from "@/lib/tasks/format";
-import type { StatusUpdateItem, TaskItem } from "@/lib/tasks/types";
+import { isHiddenCrm, type StatusUpdateItem, type TaskItem } from "@/lib/tasks/types";
 
 import { computeStats } from "@/lib/tasks/project-stats";
 import { useToday } from "./pickers";
@@ -113,9 +113,13 @@ export function OverviewView({
                 <div className="flex items-center justify-between gap-2">
                   <dt className="text-muted">Organisation</dt>
                   <dd>
-                    <NextLink href={`/organizations/${project.organization.id}`} className="text-accent hover:underline">
-                      {project.organization.label}
-                    </NextLink>
+                    {isHiddenCrm(project.organization) ? (
+                      <span className="italic text-muted" title="Cette fiche appartient à une autre personne.">fiche non accessible</span>
+                    ) : (
+                      <NextLink href={`/organizations/${project.organization.id}`} className="text-accent hover:underline">
+                        {project.organization.label}
+                      </NextLink>
+                    )}
                   </dd>
                 </div>
               )}
@@ -123,9 +127,13 @@ export function OverviewView({
                 <div className="flex items-center justify-between gap-2">
                   <dt className="text-muted">Contact</dt>
                   <dd>
-                    <NextLink href={`/contacts/${project.contact.id}`} className="text-accent hover:underline">
-                      {project.contact.label}
-                    </NextLink>
+                    {isHiddenCrm(project.contact) ? (
+                      <span className="italic text-muted" title="Cette fiche appartient à une autre personne.">fiche non accessible</span>
+                    ) : (
+                      <NextLink href={`/contacts/${project.contact.id}`} className="text-accent hover:underline">
+                        {project.contact.label}
+                      </NextLink>
+                    )}
                   </dd>
                 </div>
               )}
@@ -133,9 +141,13 @@ export function OverviewView({
                 <div className="flex items-center justify-between gap-2">
                   <dt className="text-muted">Opportunité</dt>
                   <dd>
-                    <NextLink href={`/commerce/${project.opportunity.id}`} className="text-accent hover:underline">
-                      {project.opportunity.label}
-                    </NextLink>
+                    {isHiddenCrm(project.opportunity) ? (
+                      <span className="italic text-muted" title="Cette fiche appartient à une autre personne.">fiche non accessible</span>
+                    ) : (
+                      <NextLink href={`/commerce/${project.opportunity.id}`} className="text-accent hover:underline">
+                        {project.opportunity.label}
+                      </NextLink>
+                    )}
                   </dd>
                 </div>
               )}

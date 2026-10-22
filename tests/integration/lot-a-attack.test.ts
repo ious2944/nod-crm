@@ -117,69 +117,74 @@ beforeAll(async () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// FUITE CONNUE, RÉSERVÉE AU LOT B — le masquage des liens CRM dans un projet
-// partagé (règle 4, docs/permissions-v1.md §9.6) est hors du périmètre du lot A :
-// un co-membre lit encore, par les liens d'une tâche ou d'un projet, le nom et
-// l'identifiant des fiches CRM de la propriétaire. Aucun accès direct (voir
-// plus bas). Tant que le lot B n'est pas livré, aucun projet n'est partagé
-// avec un partenaire (avertissement du cadrage).
-//
-// Tests de CARACTÉRISATION : ils affirment la fuite telle qu'elle est, champ
-// par champ. Le jour où le lot B corrige un champ, l'assertion correspondante
-// échoue — il faut alors la remplacer par l'assertion inverse (masqué), pas
-// supprimer le test. Une erreur sans rapport (amorçage cassé) fait aussi échouer.
+// LIENS CRM D'UN PROJET PARTAGÉ — fuite du lot A, corrigée au lot B (règle 4,
+// docs/permissions-v1.md §10). Ces 5 tests étaient des tests de
+// caractérisation qui affirmaient la fuite champ par champ ; ils sont inversés
+// et prouvent désormais son absence : un co-membre ne reçoit ni l'identifiant
+// ni le nom d'une fiche CRM d'Alice, seulement « fiche non accessible ».
+// Contre-épreuve faite en réintroduisant la fuite : les 5 échouent.
 // ───────────────────────────────────────────────────────────────────────────
 
-describe("fuite connue (lot B) : liens CRM visibles d'un co-membre", () => {
-  it("getTaskDetail expose contact, opportunité et suivi d'Alice au co-membre éditeur", async () => {
+const SECRETS = [C_NAME, O_NAME, OPP_NAME, FU_NAME, "SECRETCONTACT2", "secret@client.test"];
+const expectNoCrm = (value: unknown) => {
+  const text = JSON.stringify(value);
+  for (const secret of SECRETS) expect(text).not.toContain(secret);
+  for (const key of ["contact", "org", "opp", "followUp"]) expect(text).not.toContain(id[key]);
+};
+
+describe("liens CRM d'un projet partagé : masqués pour un co-membre (lot B)", () => {
+  it("getTaskDetail ne donne au co-membre éditeur ni contact, ni opportunité, ni suivi d'Alice", async () => {
     await signIn(bob);
     const detail = await getTaskDetail(actorOf(bob), id.taskP);
-    expect(detail.contact?.id).toBe(id.contact);
-    expect(JSON.stringify(detail.contact)).toContain(C_NAME);
-    expect(detail.opportunity?.id).toBe(id.opp);
-    expect(JSON.stringify(detail.opportunity)).toContain(OPP_NAME);
-    expect(detail.followUp?.id).toBe(id.followUp);
-    expect(JSON.stringify(detail.followUp)).toContain(FU_NAME);
-    expect(detail.task.contactId).toBe(id.contact);
-    expect(detail.task.opportunityId).toBe(id.opp);
+    expect(detail.contact).toEqual({ hidden: true });
+    expect(detail.opportunity).toEqual({ hidden: true });
+    expect(detail.followUp).toEqual({ hidden: true });
+    expect(detail.task.contactId).toBeNull();
+    expect(detail.task.opportunityId).toBeNull();
+    expect(detail.task.followUpId).toBeNull();
+    expectNoCrm(detail);
   });
 
-  it("getTaskDetail expose le même contact à la commentatrice", async () => {
+  it("getTaskDetail ne donne pas non plus le contact à la commentatrice", async () => {
     await signIn(carol);
     const detail = await getTaskDetail(actorOf(carol), id.taskP);
-    expect(detail.contact?.id).toBe(id.contact);
-    expect(JSON.stringify(detail.contact)).toContain(C_NAME);
+    expect(detail.contact).toEqual({ hidden: true });
+    expectNoCrm(detail);
   });
 
-  it("getProjectDetail expose contact, organisation et opportunité d'Alice au co-membre", async () => {
+  it("getProjectDetail masque contact, organisation et opportunité d'Alice au co-membre", async () => {
     await signIn(bob);
     const d = await getProjectDetail(actorOf(bob), id.P);
-    expect(d.contact?.id).toBe(id.contact);
-    expect(JSON.stringify(d.contact)).toContain(C_NAME);
-    expect(d.organization?.id).toBe(id.org);
-    expect(JSON.stringify(d.organization)).toContain(O_NAME);
-    expect(d.opportunity?.id).toBe(id.opp);
-    expect(JSON.stringify(d.opportunity)).toContain(OPP_NAME);
+    expect(d.contact).toEqual({ hidden: true });
+    expect(d.organization).toEqual({ hidden: true });
+    expect(d.opportunity).toEqual({ hidden: true });
+    expectNoCrm(d);
   });
 
-  it("getProjectBundle (TaskItem) expose les identifiants des fiches liées", async () => {
+  it("getProjectBundle (TaskItem) ne transmet pas les identifiants des fiches liées", async () => {
     await signIn(bob);
     const bundle = await getProjectBundle(actorOf(bob), id.P);
     const taskP = bundle.tasks.find((t) => t.id === id.taskP)!;
-    expect(taskP.contactId).toBe(id.contact);
-    expect(taskP.opportunityId).toBe(id.opp);
-    expect(taskP.followUpId).toBe(id.followUp);
+    expect(taskP.contactId).toBeNull();
+    expect(taskP.organizationId).toBeNull();
+    expect(taskP.opportunityId).toBeNull();
+    expect(taskP.followUpId).toBeNull();
+    expectNoCrm(bundle);
   });
 
-  it("l'historique d'une tâche partagée nomme les contacts d'Alice", async () => {
-    // Alice change le contact lié : la ligne « Contact » garde les deux noms en clair.
+  it("l'historique d'une tâche partagée ne nomme pas les contacts d'Alice", async () => {
+    // Alice change le contact lié : la ligne « Contact » garde les deux noms,
+    // montrés à elle seule (autrice de la ligne).
     await signIn(alice);
-    const other = await createContactRecord(alice.workspaceId, { firstName: "Autre", lastName: "SECRETCONTACT2" });
-    ok(await work.updateTaskAction(id.taskP, { contactId: other }));
+    id.contact2 = await createContactRecord(alice.workspaceId, { firstName: "Autre", lastName: "SECRETCONTACT2" });
+    ok(await work.updateTaskAction(id.taskP, { contactId: id.contact2 }));
     await signIn(bob);
-    const history = JSON.stringify((await getTaskDetail(actorOf(bob), id.taskP)).activity);
-    expect(history).toContain(C_NAME);
-    expect(history).toContain("SECRETCONTACT2");
+    const activity = (await getTaskDetail(actorOf(bob), id.taskP)).activity;
+    const line = activity.find((a) => a.field === "Contact");
+    expect(line).toBeDefined();
+    expect(line!.oldValue).toBeNull();
+    expect(line!.newValue).toBeNull();
+    expectNoCrm(activity);
   });
 });
 

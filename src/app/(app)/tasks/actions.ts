@@ -190,14 +190,27 @@ export async function updateTask(
       contactId = contact.id;
     }
 
+    // Lot B : le formulaire n'affiche pas un contact qui appartient à une
+    // autre personne (tâche d'un projet partagé) et le renvoie donc vide. Ce
+    // vide ne vaut pas retrait : le lien est laissé tel quel.
+    const keepHiddenContact =
+      contactId === null &&
+      (await prisma.task.count({
+        where: { id, workspaceId, contactId: { not: null }, NOT: { contact: { ownerId: userId } } },
+      })) > 0;
+
     try {
       await service.updateTaskFields(service.userContext({ id: userId, workspaceId }), id, {
         title,
         description: notes,
         dueDate,
-        contactId,
+        ...(keepHiddenContact ? {} : { contactId }),
       });
-    } catch {
+    } catch (error) {
+      // Tâche lisible, mais contact d'une autre personne (lot B) : le dire.
+      if (error instanceof TaskAccessError && error.code === "FORBIDDEN") {
+        return { status: "error", message: error.message };
+      }
       return { status: "error", message: "Tâche introuvable." };
     }
 

@@ -30,7 +30,7 @@ import {
   searchTasks,
 } from "@/lib/tasks/work-queries";
 
-import { addUserToWorkspace, createContactRecord, createWorkspaceWithUser, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
+import { addUserToWorkspace, assignOutsideProject, createContactRecord, createWorkspaceWithUser, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
 
 /**
  * Politique d'accès appliquée, rôle par rôle (voir `docs/tasks.md`) :
@@ -88,7 +88,9 @@ describe("permissions par rôle et tâches privées", () => {
     ok(await setProjectMemberAction(P, dan.userId, "EDITOR"));
     contactId = await createContactRecord(alice.workspaceId, { firstName: "Camille", lastName: "Client" });
 
-    assigned = ok(await createTaskAction({ title: "Tâche de Bob", projectId: P, sectionId: pSections[0], assigneeId: bob.userId, contactId, description: "Détails confidentiels du lancement" })).id;
+    assigned = ok(await createTaskAction({ title: "Tâche de Bob", projectId: P, sectionId: pSections[0], contactId, description: "Détails confidentiels du lancement" })).id;
+    // Lot B : l'API ne nomme plus responsable un non-membre ; l'état hérité est posé en base.
+    await assignOutsideProject(assigned, bob.userId);
     other = ok(await createTaskAction({ title: "Autre tâche de P", projectId: P, contactId, description: "Budget interne" })).id;
     sub = ok(await createTaskAction({ title: "Sous-tâche", parentId: assigned })).id;
     shared = ok(await createTaskAction({ title: "Tâche partagée P+Q", projectId: P })).id;

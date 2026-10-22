@@ -257,3 +257,18 @@ export async function shareDirectory(owner: TestUser, ...others: TestUser[]): Pr
   });
   return project.id;
 }
+
+/**
+ * Responsable **non membre** du projet de la tâche, posé en base. Depuis le
+ * lot B, l'API refuse de nommer responsable une personne qui ne lit pas le
+ * projet ; l'état existe pourtant encore (affectation antérieure au lot B,
+ * membre retiré du projet depuis, tâche déplacée) et les scénarios qui le
+ * testent l'installent ainsi. Avec la notification d'affectation qu'aurait
+ * envoyée l'API.
+ */
+export async function assignOutsideProject(taskId: string, assigneeId: string): Promise<void> {
+  const task = await prisma.task.update({ where: { id: taskId }, data: { assigneeId }, select: { workspaceId: true, title: true } });
+  await prisma.notification.create({
+    data: { workspaceId: task.workspaceId, userId: assigneeId, type: "ASSIGNED", title: `Nouvelle tâche affectée : ${task.title}`, taskId },
+  });
+}

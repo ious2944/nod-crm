@@ -12,7 +12,7 @@ import { prisma } from "@/lib/prisma";
 import type { ActionResult } from "@/lib/tasks/types";
 import { getProjectSettings, getTaskDetail } from "@/lib/tasks/work-queries";
 
-import { addUserToWorkspace, createWorkspaceWithUser, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
+import { addUserToWorkspace, assignOutsideProject, createWorkspaceWithUser, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
 
 /**
  * Règles d'automatisation et droits (revue c580137, constat B1).
@@ -158,7 +158,9 @@ describe("règles d'automatisation : droits de la personne qui les enregistre", 
     await signIn(bob);
     ok(await saveRuleAction(null, null, rule([{ kind: "set_assignee", userId: bob.userId }], "PRIORITY_CHANGED")));
     await signIn(alice);
-    const task = ok(await createTaskAction({ title: "Affectée à Carol", projectId: P, assigneeId: carol.userId }));
+    const task = ok(await createTaskAction({ title: "Affectée à Carol", projectId: P }));
+    // Lot B : l'API ne nomme plus responsable un non-membre ; l'état hérité est posé en base.
+    await assignOutsideProject(task.id, carol.userId);
     ok(await updateTaskAction(task.id, { priority: "URGENT" }));
     expect((await prisma.task.findUniqueOrThrow({ where: { id: task.id } })).assigneeId).toBe(carol.userId);
   });
