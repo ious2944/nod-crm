@@ -117,71 +117,69 @@ beforeAll(async () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// FUITES CONFIRMÉES, RÉSERVÉES AU LOT B — le masquage des liens CRM dans un
-// projet partagé (règle 4, docs §9.5) est hors du périmètre du lot A : un
-// co-membre lit encore, par les liens d'une tâche ou d'un projet, le nom et
+// FUITE CONNUE, RÉSERVÉE AU LOT B — le masquage des liens CRM dans un projet
+// partagé (règle 4, docs/permissions-v1.md §9.6) est hors du périmètre du lot A :
+// un co-membre lit encore, par les liens d'une tâche ou d'un projet, le nom et
 // l'identifiant des fiches CRM de la propriétaire. Aucun accès direct (voir
 // plus bas). Tant que le lot B n'est pas livré, aucun projet n'est partagé
 // avec un partenaire (avertissement du cadrage).
 //
-// `it.fails` : la suite reste verte tant que la fuite existe, et ce bloc
-// ÉCHOUE dès que le lot B la corrige — il faut alors retirer `.fails`.
+// Tests de CARACTÉRISATION : ils affirment la fuite telle qu'elle est, champ
+// par champ. Le jour où le lot B corrige un champ, l'assertion correspondante
+// échoue — il faut alors la remplacer par l'assertion inverse (masqué), pas
+// supprimer le test. Une erreur sans rapport (amorçage cassé) fait aussi échouer.
 // ───────────────────────────────────────────────────────────────────────────
 
-describe("liens CRM exposés à un co-membre", () => {
-  it.fails("FUITE (lot B) : getTaskDetail révèle contact/opportunité/suivi d'Alice au co-membre éditeur", async () => {
+describe("fuite connue (lot B) : liens CRM visibles d'un co-membre", () => {
+  it("getTaskDetail expose contact, opportunité et suivi d'Alice au co-membre éditeur", async () => {
     await signIn(bob);
     const detail = await getTaskDetail(actorOf(bob), id.taskP);
-    const blob = JSON.stringify(detail);
-    expect(blob).not.toContain(C_NAME);
-    expect(blob).not.toContain(OPP_NAME);
-    expect(blob).not.toContain(FU_NAME);
-    expect(detail.contact).toBeNull();
-    expect(detail.opportunity).toBeNull();
-    expect(detail.followUp).toBeNull();
-    // L'identifiant même ne doit pas filtrer (la fiche n'est pas lisible).
-    expect(detail.task.contactId).toBeNull();
-    expect(detail.task.opportunityId).toBeNull();
+    expect(detail.contact?.id).toBe(id.contact);
+    expect(JSON.stringify(detail.contact)).toContain(C_NAME);
+    expect(detail.opportunity?.id).toBe(id.opp);
+    expect(JSON.stringify(detail.opportunity)).toContain(OPP_NAME);
+    expect(detail.followUp?.id).toBe(id.followUp);
+    expect(JSON.stringify(detail.followUp)).toContain(FU_NAME);
+    expect(detail.task.contactId).toBe(id.contact);
+    expect(detail.task.opportunityId).toBe(id.opp);
   });
 
-  it.fails("FUITE (lot B) : getTaskDetail révèle les mêmes liens au commentateur", async () => {
+  it("getTaskDetail expose le même contact à la commentatrice", async () => {
     await signIn(carol);
     const detail = await getTaskDetail(actorOf(carol), id.taskP);
-    expect(JSON.stringify(detail)).not.toContain(C_NAME);
-    expect(detail.contact).toBeNull();
+    expect(detail.contact?.id).toBe(id.contact);
+    expect(JSON.stringify(detail.contact)).toContain(C_NAME);
   });
 
-  it.fails("FUITE (lot B) : getProjectDetail révèle contact/organisation/opportunité d'Alice au co-membre", async () => {
+  it("getProjectDetail expose contact, organisation et opportunité d'Alice au co-membre", async () => {
     await signIn(bob);
     const d = await getProjectDetail(actorOf(bob), id.P);
-    const blob = JSON.stringify(d);
-    expect(blob).not.toContain(C_NAME);
-    expect(blob).not.toContain(O_NAME);
-    expect(blob).not.toContain(OPP_NAME);
-    expect(d.contact).toBeNull();
-    expect(d.organization).toBeNull();
-    expect(d.opportunity).toBeNull();
+    expect(d.contact?.id).toBe(id.contact);
+    expect(JSON.stringify(d.contact)).toContain(C_NAME);
+    expect(d.organization?.id).toBe(id.org);
+    expect(JSON.stringify(d.organization)).toContain(O_NAME);
+    expect(d.opportunity?.id).toBe(id.opp);
+    expect(JSON.stringify(d.opportunity)).toContain(OPP_NAME);
   });
 
-  it.fails("FUITE (lot B) : getProjectBundle (et les TaskItem) exposent les liens CRM", async () => {
+  it("getProjectBundle (TaskItem) expose les identifiants des fiches liées", async () => {
     await signIn(bob);
     const bundle = await getProjectBundle(actorOf(bob), id.P);
     const taskP = bundle.tasks.find((t) => t.id === id.taskP)!;
-    expect(taskP.contactId).toBeNull();
-    expect(taskP.opportunityId).toBeNull();
-    expect(JSON.stringify(bundle)).not.toContain(C_NAME);
+    expect(taskP.contactId).toBe(id.contact);
+    expect(taskP.opportunityId).toBe(id.opp);
+    expect(taskP.followUpId).toBe(id.followUp);
   });
 
-  it.fails("FUITE (lot B) : l'historique d'une tâche partagée nomme le contact d'Alice", async () => {
-    // Alice modifie le contact lié : la ligne d'historique garde le nom en clair.
+  it("l'historique d'une tâche partagée nomme les contacts d'Alice", async () => {
+    // Alice change le contact lié : la ligne « Contact » garde les deux noms en clair.
     await signIn(alice);
     const other = await createContactRecord(alice.workspaceId, { firstName: "Autre", lastName: "SECRETCONTACT2" });
     ok(await work.updateTaskAction(id.taskP, { contactId: other }));
     await signIn(bob);
-    const detail = await getTaskDetail(actorOf(bob), id.taskP);
-    const history = JSON.stringify(detail.activity);
-    expect(history).not.toContain(C_NAME);
-    expect(history).not.toContain("SECRETCONTACT2");
+    const history = JSON.stringify((await getTaskDetail(actorOf(bob), id.taskP)).activity);
+    expect(history).toContain(C_NAME);
+    expect(history).toContain("SECRETCONTACT2");
   });
 });
 

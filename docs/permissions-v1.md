@@ -572,17 +572,27 @@ avant le déploiement final.
 #### Procédure VPS, pas à pas
 
 Depuis le répertoire du dépôt sur le serveur, en `sudo` comme pour les
-sauvegardes. Les références : `D1 = d0c2829` (migration 1 seule, code
-inchangé), `FINAL` = la version du lot A à déployer (tête de la branche une fois
-fusionnée).
+sauvegardes. Références (toutes deux restent dans l'historique de la branche
+principale, même avec une fusion par squash) :
+
+- `AVANT = 3c83e86` — la branche principale juste avant le lot A ;
+- `FINAL` — le commit de fusion du lot A sur la branche principale (le noter,
+  ou poser une étiquette, par exemple `git tag permissions-v1-lot-a <commit>`).
+
+Le **déploiement 1** est le code `AVANT` augmenté du seul répertoire de la
+migration 1, pris dans `FINAL` : `prisma migrate deploy` ne lit que les
+fichiers de migration, et l'ancien code ignore les colonnes ajoutées. Le
+backfill ne tourne **qu'application arrêtée** : le code d'avant lit un projet
+`PRIVATE` comme « membres seulement », et un projet attribué par le backfill
+sans adhésion y disparaîtrait jusqu'au déploiement final.
 
 1. **Sauvegarde vérifiée** (base et photos) :
    ```bash
    sudo ./deploy/backup/nod-crm-backup.sh
    sudo ./deploy/backup/nod-crm-restore.sh --verify
    ```
-   Conserver le nom de l'archive : c'est le point de retour arrière.
-2. **Repérer l'espace et la propriétaire** :
+   Noter le nom de l'archive : c'est le point de retour arrière.
+2. **Repérer les espaces et leur propriétaire** :
    ```bash
    docker compose exec app node scripts/admin.mjs list-workspaces
    docker compose exec app node scripts/admin.mjs list-users
@@ -590,34 +600,37 @@ fusionnée).
    Désactiver (`admin.mjs disable-user`) tout compte actif qui n'est ni la
    propriétaire ni un compte de test e2e — sinon le backfill refuse. Un compte
    e2e se désigne avec `--e2e-user`, un par un, et doit avoir une adresse en
-   `.test`.
+   `.test`. Un espace **sans aucun utilisateur actif** ne peut pas être
+   attribué : réactiver son utilisateur le temps du backfill, ou supprimer
+   l'espace s'il est abandonné — la migration 2 refuse tant qu'il reste une
+   ligne non attribuée, quel que soit l'espace.
 3. **Déploiement 1 — migration 1** (code inchangé) :
    ```bash
-   git fetch && git checkout d0c2829
+   git fetch && git checkout 3c83e86
+   git checkout FINAL -- prisma/migrations/20261021090000_permissions_owner_additive
    docker compose up -d --build
    docker compose logs migrate | tail   # « All migrations have been successfully applied »
    ```
-4. **Préparer l'image finale sans la démarrer** et faire un dry-run :
+4. **Image finale construite, sans la démarrer**, et **dry-run** (lecture
+   seule, application en ligne) pour chaque espace :
    ```bash
    git checkout FINAL
    docker compose build app
    docker compose run --rm --no-deps app node scripts/backfill-owner.mjs \
      --workspace <id> --owner <email> [--e2e-user e2e@nod-crm.test] --dry-run
    ```
-   Vérifier **la liste des comptes exclus** (e-mail, `isActive`) et les
-   comptes par table, en particulier la section « Accès perdus ».
-   `--no-deps` évite de lancer le service `migrate` (qui appliquerait la
-   migration 2 trop tôt).
-5. **Backfill** (application encore en ligne) : même commande sans `--dry-run`.
-6. **Maintenance** : arrêter l'application, puis **relancer le backfill**
-   (idempotent : il ne rattrape que les créations faites depuis l'étape 5) :
+   Vérifier **la liste des comptes exclus** (e-mail, `isActive`), les comptes
+   par table, et les sections « gain » (projets sans propriétaire ni créateur)
+   et « Accès perdus ». `--no-deps` évite de lancer le service `migrate`, qui
+   appliquerait la migration 2 trop tôt.
+5. **Maintenance, backfill** — une seule interruption pour tous les espaces :
    ```bash
    docker compose stop app
    docker compose run --rm --no-deps app node scripts/backfill-owner.mjs \
-     --workspace <id> --owner <email> [--e2e-user …]
+     --workspace <id> --owner <email> [--e2e-user …]        # pour chaque espace
    ```
-   Répéter les étapes 4 à 6 pour chaque espace.
-7. **Déploiement final** — migration 2 et code du lot A :
+   Le script est idempotent : le relancer ne fait que rattraper ce qui reste.
+6. **Déploiement final** — migration 2 et code du lot A :
    ```bash
    docker compose up -d
    docker compose logs migrate | tail
@@ -627,17 +640,19 @@ fusionnée).
    docker compose run --rm --no-deps app npx prisma migrate resolve \
      --rolled-back 20261021100000_permissions_owner_required
    ```
-   puis relancer l'étape 6 pour l'espace nommé, et refaire l'étape 7.
-8. **Contrôle** : se connecter en propriétaire ; vérifier projets, tâches,
+   relancer l'étape 5 pour l'espace nommé (`docker compose stop app` d'abord
+   si l'application a démarré), puis refaire l'étape 6.
+7. **Contrôle** : se connecter en propriétaire ; vérifier projets, tâches,
    fiches et notifications ; `GET /api/health`.
 
 #### Retour arrière
 
 - **Après l'étape 3 seulement** : rien à faire, la migration 1 est additive et
-  l'ancien code l'ignore. Pour revenir au code d'avant : `git checkout 3c83e86
-  && docker compose up -d --build`.
-- **Après l'étape 7** : l'ancien code ne peut plus écrire (colonne NOT NULL).
-  Le retour se fait par la sauvegarde de l'étape 1 :
+  l'ancien code l'ignore.
+- **À partir de l'étape 5** (backfill fait, que l'étape 6 ait eu lieu ou non) :
+  l'ancien code verrait des projets `PRIVATE` sans adhésion, et ne peut plus
+  écrire une fois la migration 2 appliquée. Le retour se fait par la sauvegarde
+  de l'étape 1 :
   ```bash
   git checkout 3c83e86
   docker compose build app
@@ -656,7 +671,7 @@ fusionnée).
 | `tests/snapshot/run-owner-snapshot.sh` (`npm run test:owner-snapshot`, base jetable) | Non-régression de la propriétaire : instantané avec le **code d'avant le lot A** puis après migration 1 → refus de la migration 2 → backfill (dry-run, exécution, relance idempotente) → migration 2. Seules des différences attendues et justifiées : visibilité `PRIVATE`, adhésion `EDITOR` ajoutée, collaboratrice ajoutée, règles dormantes désactivées, projet orphelin attribué (gestion), annuaire réduit (b). C'est ce test qui a trouvé le défaut de comparaison NULL du backfill. |
 | `tests/integration/lot-a-backfill.test.ts` | dry-run sans écriture, idempotence, relance après des créations faites entre deux déploiements (la migration 2 refuse puis passe), refus d'un second utilisateur actif, comptes e2e (domaine, appartenance, liste avec `isActive`). |
 | `tests/integration/lot-a-rules.test.ts` | (a), (f), (g), liaisons CRM d'autrui refusées partout, formulaire sans Édition, automatisation sans effet sur les données d'un tiers, membres existants qui gardent exactement leurs droits. |
-| `tests/integration/lot-a-attack.test.ts` | Tests d'attaque (phase 2) : un nouvel utilisateur, un co-membre éditeur et une commentatrice cherchent à atteindre les données de la propriétaire (ids devinés, recherche, export, SSE, notifications, annuaire, liaisons, formulaires, automatisations, sous-tâches, dépendances, pièces jointes, photo, import, modèles, corbeille, oracle d'erreur). 21 verts ; 5 `it.fails` démontrent la seule fuite restante, réservée au lot B (§9.5) — ils échoueront dès sa correction. |
+| `tests/integration/lot-a-attack.test.ts` | Tests d'attaque (phase 2) : un nouvel utilisateur, un co-membre éditeur et une commentatrice cherchent à atteindre les données de la propriétaire (ids devinés, recherche, export, SSE, notifications, annuaire, liaisons, formulaires, automatisations, sous-tâches, dépendances, pièces jointes, photo, import, modèles, corbeille, oracle d'erreur). 21 sans fuite ; 5 tests de **caractérisation** affirment, champ par champ, la seule fuite restante, réservée au lot B (§9.6) — chacun échouera dès que le lot B corrigera le champ qu'il vise. |
 | `tests/integration/authz-isolation.test.ts`, `tests/unit/authz-inventory.test.ts` | lot 0, toujours verts (table des capacités inchangée). |
 
 **Tests existants adaptés** (chacun parce qu'il figeait la règle d'avant) :
@@ -681,7 +696,24 @@ fusionnée).
   scénario 093000 s'arrête avant les migrations du lot A ;
 - cockpit : la tâche libre d'une collègue n'est plus visible.
 
-### 9.5 Ce qui reste pour le lot B
+### 9.5 Points d'attention
+
+- `Project.ownerId` reste nullable (`ON DELETE SET NULL`) : le backfill le
+  renseigne partout, et un projet dont le propriétaire serait supprimé reste
+  géré via `createdById` (`isProjectOwner`). Les utilisateurs se désactivent,
+  ils ne se suppriment pas.
+- Une étiquette ou un champ dont le créateur est supprimé (`created_by_id`
+  NULL) n'est plus modifiable par personne : même remarque.
+- Les modèles de tâche **de projet** suivent l'Édition du projet (lecture de
+  la décision (a), qui vise les modèles d'espace).
+- Les actions CRM et RGPD écrivent `ownerId: userId` à côté de `workspaceId`
+  dans chaque `where` : c'est la même règle que `crmReadableWhere`, gardée en
+  ligne pour ne pas réécrire ces actions (lot 0 : pas de refactor) ; les
+  lectures, elles, passent toutes par `crmReadableWhere`.
+- `MutationContext.trusted` n'est plus utilisé depuis que `submitForm` exige
+  l'Édition ; à retirer avec le lot B s'il ne retrouve pas d'usage.
+
+### 9.6 Ce qui reste pour le lot B
 
 - Interface de partage : recherche d'une personne par e-mail exact (le
   sélecteur ne propose plus que l'annuaire) ; `setProjectMember` accepte déjà
@@ -696,8 +728,14 @@ fusionnée).
   projets d'une tâche multi-projets, sous-tâches et dépendances hors projet
   (« tâche non accessible »), valeurs figées de l'historique (`TaskActivity`,
   dont les noms et adresses en texte libre) et des notifications.
+  Autres lectures qui nomment une fiche CRM liée à une tâche partagée : la
+  liste historique des tâches (`TASK_INCLUDE`, `src/lib/tasks/queries.ts`),
+  `/today` et `getActionableTasks`, les libellés figés par `fieldLabel`
+  (`src/lib/tasks/service.ts`).
 - Règle des saisies de temps (décision c) et du responsable en Lecture
-  (décision d).
+  (décision d). Lié : une personne peut être nommée responsable d'une tâche de
+  projet qu'elle ne lit pas (elle est dans l'annuaire de l'acteur, pas membre
+  du projet) — à restreindre aux lecteurs du projet avec la décision (d).
 - Réactions et commentaires des points d'avancement : capacité de portée
   projet (`project.read` avec ressource), au lieu de `task.comment`.
 - Affecter une tâche libre à un co-membre la lui partage : à trancher avec le

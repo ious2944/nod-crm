@@ -8,7 +8,10 @@
 -- et un modèle) et un compte de test e2e. Cas délicats couverts : projet
 -- « espace » d'une autre personne, projet hérité sans propriétaire, tâche libre
 -- sans créateur, tâche libre d'une autre personne dont elle n'est qu'abonnée,
--- règle et modèle sans auteur ou d'un auteur inactif.
+-- règle et modèle sans auteur ou d'un auteur inactif. Et deux cas qui ne se
+-- préservent pas sans changer les droits, que le dry-run doit chiffrer : une
+-- sous-tâche qu'elle ne voyait que par elle-même (racine dans un projet privé
+-- dont elle n'est pas membre), et un projet privé orphelin qui lui revient.
 
 \set ws '''a0000000-0000-4000-8000-000000000001'''
 \set owner '''a0000000-0000-4000-8000-000000000010'''
@@ -46,7 +49,10 @@ INSERT INTO projects (id, workspace_id, name, owner_id, created_by_id, visibilit
   ('a0000000-0000-4000-8000-000000000603', :ws, 'P3 privé, à elle', :owner, :owner, 'PRIVATE', false, now()),
   ('a0000000-0000-4000-8000-000000000604', :ws, 'P4 privé, commentatrice', :ex, :ex, 'PRIVATE', false, now()),
   ('a0000000-0000-4000-8000-000000000605', :ws, 'P5 hérité sans propriétaire', NULL, NULL, 'WORKSPACE', false, now()),
-  ('a0000000-0000-4000-8000-000000000606', :ws, 'Modèle', :owner, :owner, 'WORKSPACE', true, now());
+  ('a0000000-0000-4000-8000-000000000606', :ws, 'Modèle', :owner, :owner, 'WORKSPACE', true, now()),
+  -- Cas non préservables, que le dry-run doit signaler :
+  ('a0000000-0000-4000-8000-000000000607', :ws, 'P7 privé de l''ancienne', :ex, :ex, 'PRIVATE', false, now()),
+  ('a0000000-0000-4000-8000-000000000608', :ws, 'P8 privé orphelin', NULL, NULL, 'PRIVATE', false, now());
 INSERT INTO project_members (project_id, user_id, workspace_id, role) VALUES
   ('a0000000-0000-4000-8000-000000000601', :owner, :ws, 'OWNER'),
   ('a0000000-0000-4000-8000-000000000602', :ex, :ws, 'OWNER'),
@@ -67,14 +73,17 @@ INSERT INTO tasks (id, workspace_id, title, assignee_id, created_by_id, parent_i
   ('a0000000-0000-4000-8000-000000000708', :ws, 'Libre sans créateur', NULL, NULL, NULL, now(), now()),
   ('a0000000-0000-4000-8000-000000000709', :ws, 'Libre de l''ancienne', :ex, :ex, NULL, now(), now()),
   ('a0000000-0000-4000-8000-000000000710', :ws, 'Libre suivie', NULL, :ex, NULL, now(), now()),
-  ('a0000000-0000-4000-8000-000000000711', :ws, 'Tâche du modèle', NULL, :owner, NULL, NULL, now());
+  ('a0000000-0000-4000-8000-000000000711', :ws, 'Tâche du modèle', NULL, :owner, NULL, NULL, now()),
+  ('a0000000-0000-4000-8000-000000000712', :ws, 'Racine dans P7', :ex, :ex, NULL, now(), now()),
+  ('a0000000-0000-4000-8000-000000000713', :ws, 'Sous-tâche à elle sous P7', :owner, :ex, 'a0000000-0000-4000-8000-000000000712', now(), now());
 INSERT INTO task_projects (task_id, project_id, workspace_id) VALUES
   ('a0000000-0000-4000-8000-000000000701', 'a0000000-0000-4000-8000-000000000601', :ws),
   ('a0000000-0000-4000-8000-000000000702', 'a0000000-0000-4000-8000-000000000602', :ws),
   ('a0000000-0000-4000-8000-000000000703', 'a0000000-0000-4000-8000-000000000603', :ws),
   ('a0000000-0000-4000-8000-000000000704', 'a0000000-0000-4000-8000-000000000604', :ws),
   ('a0000000-0000-4000-8000-000000000705', 'a0000000-0000-4000-8000-000000000605', :ws),
-  ('a0000000-0000-4000-8000-000000000711', 'a0000000-0000-4000-8000-000000000606', :ws);
+  ('a0000000-0000-4000-8000-000000000711', 'a0000000-0000-4000-8000-000000000606', :ws),
+  ('a0000000-0000-4000-8000-000000000712', 'a0000000-0000-4000-8000-000000000607', :ws);
 INSERT INTO task_followers (task_id, user_id, kind) VALUES ('a0000000-0000-4000-8000-000000000710', :owner, 'FOLLOWER');
 
 -- Réglages.

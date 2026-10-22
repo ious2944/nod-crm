@@ -182,6 +182,19 @@ export async function backfill(client, options) {
         [w, ownerId],
       )
     ).rowCount;
+    // Signalés avant d'être attribués : sur ces projets, elle gagne la gestion
+    // (et la lecture, pour un projet privé qu'elle ne voyait pas).
+    projects["sans propriétaire ni créateur → à elle (gain : gestion)"] = await count(
+      client,
+      `SELECT count(*) AS n FROM projects WHERE workspace_id = $1 AND owner_id IS NULL AND created_by_id IS NULL`,
+      [w],
+    );
+    projects["  dont privés qu'elle ne lisait pas (gain : lecture)"] = await count(
+      client,
+      `SELECT count(*) AS n FROM projects p WHERE p.workspace_id = $1 AND p.owner_id IS NULL AND p.created_by_id IS NULL
+         AND p.visibility = 'PRIVATE' AND NOT EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.user_id = $2)`,
+      [w, ownerId],
+    );
     projects["owner_id renseigné"] = (
       await client.query(`UPDATE projects SET owner_id = COALESCE(created_by_id, $2) WHERE workspace_id = $1 AND owner_id IS NULL`, [w, ownerId])
     ).rowCount;
@@ -217,6 +230,17 @@ export async function backfill(client, options) {
       `SELECT count(*) AS n FROM tasks r WHERE r.workspace_id = $1 AND r.parent_id IS NULL AND r.deleted_at IS NULL
          AND (r.assignee_id = $2 OR r.created_by_id = $2 OR EXISTS (SELECT 1 FROM task_followers f WHERE f.task_id = r.id AND f.user_id = $2))
          AND ${unreadableProject}`,
+      [w, ownerId],
+    );
+    // Avant le lot A, une sous-tâche était visible de son responsable, de son
+    // créateur ou de ses abonnés même si sa racine ne l'était pas ; désormais
+    // elle ne l'est que par sa racine.
+    lost["sous-tâches vues par elles-mêmes, racine non lisible"] = await count(
+      client,
+      `SELECT count(*) AS n FROM tasks s JOIN tasks r ON r.id = s.parent_id
+        WHERE s.workspace_id = $1 AND s.deleted_at IS NULL AND r.deleted_at IS NULL
+          AND (s.assignee_id = $2 OR s.created_by_id = $2 OR EXISTS (SELECT 1 FROM task_followers f WHERE f.task_id = s.id AND f.user_id = $2))
+          AND ${unreadableProject}`,
       [w, ownerId],
     );
 

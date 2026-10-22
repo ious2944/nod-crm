@@ -450,6 +450,8 @@ async function seedOwnerData(): Promise<void> {
   const owner = { workspaceId: alice.workspaceId, ownerId: alice.userId };
   ids.treatment = (await prisma.privacyTreatment.create({ data: { ...owner, name: `${MARK} Traitement`, purpose: "Prospection" } })).id;
   ids.processor = (await prisma.privacyProcessor.create({ data: { ...owner, name: `${MARK} Cloud`, service: "Hébergement" } })).id;
+  // Lien traitement ↔ sous-traitant : sans lui, l'empreinte ne verrait pas une suppression de lien (phase 3, B1).
+  await prisma.privacyTreatmentProcessor.create({ data: { workspaceId: alice.workspaceId, treatmentId: ids.treatment, processorId: ids.processor } });
   ids.request = (
     await prisma.privacyRequest.create({
       data: { ...owner, requestType: "ACCESS", status: "RECEIVED", receivedAt: new Date(), dueAt: new Date(Date.now() + 86_400_000), requesterName: `${MARK} Demandeur` },

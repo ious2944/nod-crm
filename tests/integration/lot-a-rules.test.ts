@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { createOpportunity } from "@/app/(app)/commerce/actions";
 import { createFollowUp } from "@/app/(app)/follow-ups/actions";
-import { createPrivacyRequest } from "@/app/(app)/rgpd/actions";
+import { archiveProcessor, createPrivacyRequest } from "@/app/(app)/rgpd/actions";
 import { createTask } from "@/app/(app)/tasks/actions";
 import {
   createProjectAction,
@@ -10,6 +10,7 @@ import {
   createTaskAction,
   deleteTagAction,
   duplicateProjectAction,
+  duplicateTaskAction,
   saveFormAction,
   saveRuleAction,
   setFollowerAction,
@@ -17,6 +18,7 @@ import {
   submitFormAction,
   updateProjectAction,
   updateTagAction,
+  updateTaskAction,
 } from "@/app/(app)/tasks/work-actions";
 import { initialCreateOpportunityState } from "@/lib/commerce/create-state";
 import { initialCreateState } from "@/lib/follow-ups/create-state";
@@ -168,6 +170,47 @@ describe("lot A — règles", () => {
     // Ses propres données : la règle s'applique.
     await signIn(bob);
     expect(await priority(ok(await createTaskAction({ title: "Libre de Bob" })).id)).toBe("URGENT");
+  });
+
+  it("archiver le sous-traitant d'autrui ne retire aucun de ses liens (phase 3, B1)", async () => {
+    const owner = { workspaceId: alice.workspaceId, ownerId: alice.userId };
+    const treatment = await prisma.privacyTreatment.create({ data: { ...owner, name: "Traitement", purpose: "x" } });
+    const processor = await prisma.privacyProcessor.create({ data: { ...owner, name: "Cloud", service: "x" } });
+    await prisma.privacyTreatmentProcessor.create({ data: { workspaceId: alice.workspaceId, treatmentId: treatment.id, processorId: processor.id } });
+    await signIn(bob);
+    await archiveProcessor(formData({ id: processor.id }));
+    expect(await prisma.privacyTreatmentProcessor.count()).toBe(1);
+    expect((await prisma.privacyProcessor.findUniqueOrThrow({ where: { id: processor.id } })).archivedAt).toBeNull();
+  });
+
+  it("une copie ne garde que les liens vers ses propres fiches CRM (phase 3, C1)", async () => {
+    const org = await createOrganizationRecord(alice.workspaceId);
+    const contact = await createContactRecord(alice.workspaceId, { organizationId: org });
+    const project = ok(await createProjectAction({ name: "Partagé", contactId: contact, organizationId: org }));
+    ok(await setProjectMemberAction(project, bob.userId, "EDITOR"));
+    ok(await setProjectMemberAction(project, carol.userId, "COMMENTER"));
+    const task = ok(await createTaskAction({ title: "Liée", projectId: project, contactId: contact }));
+
+    await signIn(bob);
+    const copy = ok(await duplicateTaskAction(task.id));
+    expect(await prisma.task.findUniqueOrThrow({ where: { id: copy.id } })).toMatchObject({ contactId: null, createdById: bob.userId });
+    await signIn(carol);
+    const projectCopy = ok(await duplicateProjectAction(project, { name: "Copie de Carol" }));
+    expect(await prisma.project.findUniqueOrThrow({ where: { id: projectCopy } })).toMatchObject({ contactId: null, organizationId: null, opportunityId: null });
+    // Sa propriétaire, elle, garde ses liens.
+    await signIn(alice);
+    const own = ok(await duplicateTaskAction(task.id));
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: own.id } })).contactId).toBe(contact);
+  });
+
+  it("l'historique ne fige jamais l'adresse d'une personne (phase 3, C2)", async () => {
+    await prisma.user.update({ where: { id: bob.userId }, data: { displayName: null } });
+    const task = ok(await createTaskAction({ title: "À affecter" }));
+    ok(await updateTaskAction(task.id, { assigneeId: bob.userId }));
+    ok(await setFollowerAction(task.id, carol.userId, "COLLABORATOR"));
+    const history = JSON.stringify(await prisma.taskActivity.findMany({ where: { taskId: task.id } }));
+    expect(history).not.toContain(bob.email);
+    expect(history).toContain("Membre de l'espace");
   });
 
   it("les membres d'un projet hérité « espace » gardent exactement leur accès quand il devient privé", async () => {

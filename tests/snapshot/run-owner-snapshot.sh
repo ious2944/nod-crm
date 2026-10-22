@@ -52,8 +52,9 @@ echo "▸ Backfill (dry-run, puis exécution, puis relance)"
 DATABASE_URL="$URL" node scripts/backfill-owner.mjs --workspace "$WORKSPACE_ID" --owner "$OWNER_EMAIL" --e2e-user e2e@nod-crm.test --dry-run | tee "$WORK/dry-run.txt"
 DATABASE_URL="$URL" node scripts/backfill-owner.mjs --workspace "$WORKSPACE_ID" --owner "$OWNER_EMAIL" --e2e-user e2e@nod-crm.test >"$WORK/run1.txt"
 DATABASE_URL="$URL" node scripts/backfill-owner.mjs --workspace "$WORKSPACE_ID" --owner "$OWNER_EMAIL" --e2e-user e2e@nod-crm.test >"$WORK/run2.txt"
-# Idempotence : la seconde exécution n'écrit rien (toutes les lignes chiffrées à 0).
-if grep -E '^\s{2}.*\s[1-9][0-9]*$' "$WORK/run2.txt" | grep -v "Accès perdus" | grep -vq "non préservables"; then
+# Idempotence : la seconde exécution n'écrit rien — toutes les lignes des
+# sections d'écriture à 0 (la section « Accès perdus » n'est qu'un comptage).
+if sed '/^Accès perdus/,$d' "$WORK/run2.txt" | grep -qE '^\s{2}.*\s[1-9][0-9]*$'; then
   echo "✗ La seconde exécution du backfill a écrit :" && cat "$WORK/run2.txt" && exit 1
 fi
 diff <(grep -v "^Mode" "$WORK/dry-run.txt") <(grep -v "^Mode" "$WORK/run1.txt") >/dev/null || { echo "✗ Le dry-run n'annonce pas ce qu'a fait l'exécution."; exit 1; }
@@ -62,13 +63,18 @@ DATABASE_URL="$URL" npx prisma migrate deploy >/dev/null
 TEST_DATABASE_URL="$URL" SNAPSHOT_OUT="$WORK/apres.json" npx vitest run --config tests/snapshot/vitest.snapshot.config.mts >/dev/null
 
 echo "▸ Comparaison"
-node - "$WORK/avant.json" "$WORK/apres.json" <<'NODE'
+node - "$WORK/avant.json" "$WORK/apres.json" "$WORK/dry-run.txt" <<'NODE'
 const fs = require("node:fs");
-const [before, after] = process.argv.slice(2).map((f) => JSON.parse(fs.readFileSync(f, "utf8")));
+const [before, after] = process.argv.slice(2, 4).map((f) => JSON.parse(fs.readFileSync(f, "utf8")));
+const dryRun = fs.readFileSync(process.argv[4], "utf8");
+/** Une perte ou un gain non préservable n'est admis que si le dry-run l'a chiffré. */
+const announced = (label, n) => new RegExp(`${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+${n}\\b`).test(dryRun);
 
 // Différences attendues, chacune justifiée (docs/permissions-v1.md, § Lot A).
 const P2 = "a0000000-0000-4000-8000-000000000602";
 const P5 = "a0000000-0000-4000-8000-000000000605";
+const P8 = "a0000000-0000-4000-8000-000000000608";
+const LOST_SUBTASK = "a0000000-0000-4000-8000-000000000713";
 const OWNER = "a0000000-0000-4000-8000-000000000010";
 const projectAt = (path) => before.projects[Number(/^projects\[(\d+)\]/.exec(path)?.[1])]?.id;
 const ALLOWED = [
@@ -87,6 +93,24 @@ const ALLOWED = [
   // Tâches libres d'une autre personne : elle en devient collaboratrice (mêmes droits, et désormais l'accès).
   [/^taskDetails\.[^.]+\.followers/, `collaboratrice ajoutée (${OWNER}) sur les tâches libres d'une autre personne`],
 ];
+
+// Non préservables : admis seulement si le dry-run les a chiffrés, et retirés
+// de la comparaison au plus juste (une seule tâche, un seul projet).
+const fail = (message) => { console.log(`✗ ${message}`); process.exit(1); };
+if (!announced("sous-tâches vues par elles-mêmes, racine non lisible", 1)) fail("le dry-run n'a pas annoncé la sous-tâche perdue");
+if (!announced("  dont privés qu'elle ne lisait pas (gain : lecture)", 1)) fail("le dry-run n'a pas annoncé le projet privé orphelin");
+if (!before.myTasks.includes(LOST_SUBTASK) || after.myTasks.includes(LOST_SUBTASK)) fail("la sous-tâche perdue n'a pas le comportement annoncé");
+if (before.projects.some((p) => p.id === P8) || !after.projects.some((p) => p.id === P8)) fail("le projet orphelin n'a pas le comportement annoncé");
+console.log("  attendu   sous-tâche vue par elle-même sous une racine non lisible : perdue (annoncée par le dry-run)");
+console.log("  attendu   projet privé orphelin : attribué à la propriétaire (annoncé par le dry-run)");
+for (const key of ["myTasks"]) before[key] = before[key].filter((id) => id !== LOST_SUBTASK);
+before.crm.actionableTasks = before.crm.actionableTasks.filter((id) => id !== LOST_SUBTASK);
+before.tasks = before.tasks.filter((t) => t.id !== LOST_SUBTASK);
+delete before.taskDetails[LOST_SUBTASK];
+before.crm.today -= 1;
+after.projects = after.projects.filter((p) => p.id !== P8);
+delete after.bundles[P8];
+delete after.settings[P8];
 
 const diffs = [];
 (function walk(a, b, path) {

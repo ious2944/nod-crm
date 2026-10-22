@@ -227,6 +227,7 @@ export async function updateTreatment(formData: FormData) {
         where: {
           workspaceId,
           treatmentId: parsed.id,
+          treatment: { ownerId: userId },
         },
       });
 
@@ -400,10 +401,13 @@ export async function archiveProcessor(formData: FormData) {
         },
       }),
 
+      // Liens retirés seulement si le sous-traitant est le sien (lot A) : sinon
+      // le `updateMany` ne touche rien, et ceci ne doit rien toucher non plus.
       prisma.privacyTreatmentProcessor.deleteMany({
         where: {
           workspaceId,
           processorId: id,
+          processor: { ownerId: userId },
         },
       }),
     ]);

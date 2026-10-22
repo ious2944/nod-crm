@@ -240,6 +240,28 @@ async function assertUserInWorkspace(actor: Actor, userId: string | null | undef
   if (!user) throw new TaskValidationError("Cet utilisateur n'existe pas dans votre espace.");
 }
 
+/**
+ * Liens CRM d'une copie (duplication de tâche ou de projet) : seuls ceux qui
+ * visent une fiche de l'acteur sont conservés (lot A, « on ne lie qu'à ses
+ * propres fiches ») ; les autres deviennent vides, sans rien révéler.
+ */
+export async function keepOwnedCrmLinks<L extends { contactId?: string | null; organizationId?: string | null; opportunityId?: string | null; followUpId?: string | null }>(
+  actor: Actor,
+  links: L,
+  db: Db = prisma,
+): Promise<L> {
+  const owned = crmReadableWhere(actor);
+  const keep = async (id: string | null | undefined, find: (id: string) => Promise<{ id: string } | null>) =>
+    id ? ((await find(id)) ? id : null) : (id ?? null);
+  return {
+    ...links,
+    ...("contactId" in links ? { contactId: await keep(links.contactId, (id) => db.contact.findFirst({ where: { id, ...owned }, select: { id: true } })) } : {}),
+    ...("organizationId" in links ? { organizationId: await keep(links.organizationId, (id) => db.organization.findFirst({ where: { id, ...owned }, select: { id: true } })) } : {}),
+    ...("opportunityId" in links ? { opportunityId: await keep(links.opportunityId, (id) => db.opportunity.findFirst({ where: { id, ...owned }, select: { id: true } })) } : {}),
+    ...("followUpId" in links ? { followUpId: await keep(links.followUpId, (id) => db.followUp.findFirst({ where: { id, ...owned }, select: { id: true } })) } : {}),
+  };
+}
+
 export async function assertCrmLinks(
   actor: Actor,
   links: {
@@ -287,10 +309,15 @@ export async function assertCrmLinks(
   await Promise.all(checks);
 }
 
+/**
+ * Nom figé dans l'historique. Jamais l'adresse : l'historique est lu par
+ * toutes les personnes qui voient la tâche, pas seulement par l'annuaire de
+ * la personne nommée (décision b).
+ */
 async function userLabel(userId: string | null): Promise<string | null> {
   if (!userId) return null;
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { displayName: true, email: true } });
-  return user ? user.displayName?.trim() || user.email : null;
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { displayName: true } });
+  return user ? user.displayName?.trim() || "Membre de l'espace" : null;
 }
 
 const dueInstant = (key: string | null | undefined) => (key ? startOfDay(key, APP_TIME_ZONE) : null);
@@ -1366,10 +1393,11 @@ export async function duplicateTask(
         approvalStatus: source.isApproval ? "PENDING" : null,
         recurrence: source.recurrence ?? Prisma.DbNull,
         estimatedMinutes: source.estimatedMinutes,
-        contactId: source.contactId,
-        organizationId: source.organizationId,
-        opportunityId: source.opportunityId,
-        followUpId: source.followUpId,
+        ...(await keepOwnedCrmLinks(
+          ctx.actor,
+          { contactId: source.contactId, organizationId: source.organizationId, opportunityId: source.opportunityId, followUpId: source.followUpId },
+          tx,
+        )),
         tags: { create: source.tags.map((t) => ({ tagId: t.tagId })) },
         customValues: {
           create: values.map((v) => ({

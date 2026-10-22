@@ -31,7 +31,7 @@ import {
 } from "./inputs";
 import { notify } from "./notify";
 import { publishChange } from "./realtime";
-import { assertCrmLinks } from "./service";
+import { assertCrmLinks, keepOwnedCrmLinks } from "./service";
 import { lockTasks, structureTransaction } from "./structure";
 import { checkpoint } from "./test-hooks";
 import type { ProjectRole } from "./types";
@@ -464,9 +464,8 @@ export async function duplicateProject(
         dueAt: full.dueAt,
         visibility: "PRIVATE",
         isTemplate: options.asTemplate ?? false,
-        contactId: full.contactId,
-        organizationId: full.organizationId,
-        opportunityId: full.opportunityId,
+        // Copie : seuls les liens vers les fiches CRM de qui duplique sont gardés.
+        ...(await keepOwnedCrmLinks(actor, { contactId: full.contactId, organizationId: full.organizationId, opportunityId: full.opportunityId }, tx)),
         members: { create: [{ userId: actor.id, workspaceId: actor.workspaceId, role: "OWNER" }] },
       },
       select: { id: true },
