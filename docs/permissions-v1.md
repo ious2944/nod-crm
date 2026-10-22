@@ -572,14 +572,13 @@ avant le déploiement final.
 #### Procédure VPS, pas à pas
 
 Depuis le répertoire du dépôt sur le serveur, en `sudo` comme pour les
-sauvegardes. Références (toutes deux restent dans l'historique de la branche
-principale, même avec une fusion par squash) :
+sauvegardes. Références :
 
-- `AVANT = 3c83e86` — la branche principale juste avant le lot A ;
-- `FINAL` — le commit de fusion du lot A sur la branche principale (le noter,
-  ou poser une étiquette, par exemple `git tag permissions-v1-lot-a <commit>`).
+- `pre-lot-a` — étiquette posée sur `3c83e86`, la branche principale juste
+  avant le lot A : point de retour stable, indépendant de la fusion ;
+- `FINAL` — le commit de fusion du lot A sur la branche principale.
 
-Le **déploiement 1** est le code `AVANT` augmenté du seul répertoire de la
+Le **déploiement 1** est le code `pre-lot-a` augmenté du seul répertoire de la
 migration 1, pris dans `FINAL` : `prisma migrate deploy` ne lit que les
 fichiers de migration, et l'ancien code ignore les colonnes ajoutées. Le
 backfill ne tourne **qu'application arrêtée** : le code d'avant lit un projet
@@ -591,7 +590,8 @@ sans adhésion y disparaîtrait jusqu'au déploiement final.
    sudo ./deploy/backup/nod-crm-backup.sh
    sudo ./deploy/backup/nod-crm-restore.sh --verify
    ```
-   Noter le nom de l'archive : c'est le point de retour arrière.
+   Elle couvre les photos et l'état d'avant toute migration (filet de sécurité
+   si le déploiement 1 lui-même échoue).
 2. **Repérer les espaces et leur propriétaire** :
    ```bash
    docker compose exec app node scripts/admin.mjs list-workspaces
@@ -606,7 +606,7 @@ sans adhésion y disparaîtrait jusqu'au déploiement final.
    ligne non attribuée, quel que soit l'espace.
 3. **Déploiement 1 — migration 1** (code inchangé) :
    ```bash
-   git fetch && git checkout 3c83e86
+   git fetch --tags origin && git checkout pre-lot-a
    git checkout FINAL -- prisma/migrations/20261021090000_permissions_owner_additive
    docker compose up -d --build
    docker compose logs migrate | tail   # « All migrations have been successfully applied »
@@ -623,13 +623,23 @@ sans adhésion y disparaîtrait jusqu'au déploiement final.
    par table, et les sections « gain » (projets sans propriétaire ni créateur)
    et « Accès perdus ». `--no-deps` évite de lancer le service `migrate`, qui
    appliquerait la migration 2 trop tôt.
-5. **Maintenance, backfill** — une seule interruption pour tous les espaces :
+5. **Maintenance, seconde sauvegarde, backfill** — une seule interruption pour
+   tous les espaces :
    ```bash
    docker compose stop app
+   sudo NOD_CRM_SKIP_UPLOADS=1 ./deploy/backup/nod-crm-backup.sh
+   sudo ./deploy/backup/nod-crm-restore.sh --verify
    docker compose run --rm --no-deps app node scripts/backfill-owner.mjs \
      --workspace <id> --owner <email> [--e2e-user …]        # pour chaque espace
    ```
-   Le script est idempotent : le relancer ne fait que rattraper ce qui reste.
+   **Noter le nom de l'archive de cette seconde sauvegarde : c'est le point de
+   retour arrière.** Prise application arrêtée, juste avant le backfill, elle
+   contient toutes les écritures faites depuis le déploiement 1, migration 1
+   appliquée. Base seule (`NOD_CRM_SKIP_UPLOADS=1`) : le script de sauvegarde
+   lit les photos dans le conteneur de l'application, qui est arrêté ; ni le
+   backfill ni la migration 2 ne touchent aux photos, et la restauration de
+   la base ne touche pas au volume des photos.
+   Le backfill est idempotent : le relancer ne fait que rattraper ce qui reste.
 6. **Déploiement final** — migration 2 et code du lot A :
    ```bash
    docker compose up -d
@@ -641,7 +651,8 @@ sans adhésion y disparaîtrait jusqu'au déploiement final.
      --rolled-back 20261021100000_permissions_owner_required
    ```
    relancer l'étape 5 pour l'espace nommé (`docker compose stop app` d'abord
-   si l'application a démarré), puis refaire l'étape 6.
+   si l'application a démarré ; inutile de refaire la seconde sauvegarde si
+   l'application n'a rien écrit entre-temps), puis refaire l'étape 6.
 7. **Contrôle** : se connecter en propriétaire ; vérifier projets, tâches,
    fiches et notifications ; `GET /api/health`.
 
@@ -651,17 +662,22 @@ sans adhésion y disparaîtrait jusqu'au déploiement final.
   l'ancien code l'ignore.
 - **À partir de l'étape 5** (backfill fait, que l'étape 6 ait eu lieu ou non) :
   l'ancien code verrait des projets `PRIVATE` sans adhésion, et ne peut plus
-  écrire une fois la migration 2 appliquée. Le retour se fait par la sauvegarde
-  de l'étape 1 :
+  écrire une fois la migration 2 appliquée. Le retour se fait par la
+  **seconde sauvegarde** (étape 5), vers le code du déploiement 1 — la base
+  restaurée a la migration 1 appliquée, le code doit donc en avoir le
+  répertoire :
   ```bash
-  git checkout 3c83e86
+  git checkout pre-lot-a
+  git checkout FINAL -- prisma/migrations/20261021090000_permissions_owner_additive
   docker compose build app
-  sudo ./deploy/backup/nod-crm-restore.sh --into-production <archive de l'étape 1> --yes-i-am-sure
+  sudo ./deploy/backup/nod-crm-restore.sh --into-production <archive de l'étape 5> --yes-i-am-sure
   docker compose up -d
   ```
-  Les écritures faites depuis l'étape 1 sont perdues ; tout le monde est
-  déconnecté. Restaurer aussi les photos si des contacts ont été ajoutés
-  depuis (voir `backup-restore.md`).
+  Seules les écritures faites après le déploiement final sont perdues (aucune
+  si l'étape 6 n'a pas démarré l'application) ; tout le monde est déconnecté.
+  La sauvegarde de l'étape 1 ne sert qu'en dernier recours (déploiement 1 en
+  échec, ou seconde sauvegarde inutilisable) : elle ramène au code
+  `pre-lot-a` seul, et perd tout ce qui a été écrit depuis l'étape 1.
 
 ### 9.4 Tests
 
