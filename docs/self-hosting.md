@@ -160,3 +160,43 @@ that volume was initialised with — PostgreSQL will not re-create the role, and
 a mismatched password means the application simply cannot connect.
 
 **Take a backup before doing this.**
+
+### Volumes created by another Compose project
+
+If the volumes were created under another Compose project name (an older
+version of this file, a different directory name), every command warns:
+
+```
+volume "nod-crm-postgres-data-prod" already exists but was created for project
+"nod-crm-prod" (expected "nod-crm"). Use `external: true` to use an existing volume
+```
+
+The warning is harmless, but it hides real ones. Declare the volumes as
+**external** — Compose then uses them as they are, never creates, relabels or
+deletes them (not even with `docker compose down -v`), and `up` fails instead of
+creating an empty database if a name is wrong. Nothing is copied or recreated.
+
+1. Back up and verify ([backup-restore.md](backup-restore.md)), then check that both volumes exist, under the
+   names set in `.env`:
+   ```bash
+   grep -E '^(POSTGRES|UPLOADS)_VOLUME_NAME=' .env
+   docker volume inspect --format '{{ .Name }} {{ index .Labels "com.docker.compose.project" }}' \
+     <postgres volume> <uploads volume>
+   ```
+   Both must be listed. If the uploads volume does not exist yet, do not go
+   further: `up` would refuse to start.
+2. Add one line to `.env`:
+   ```
+   COMPOSE_FILE=docker-compose.yml:docker-compose.adopt-volumes.yml
+   ```
+3. Check, then apply:
+   ```bash
+   docker compose config | grep -B1 -A2 'external: true'   # both volumes, right names
+   docker compose up -d                                     # no warning any more
+   docker compose ps
+   ```
+   Compose may recreate the containers (a few seconds of downtime); they mount
+   the same volumes, and the data is not touched.
+
+To undo, remove the `COMPOSE_FILE` line and run `docker compose up -d` again
+(the warning comes back, nothing else changes).

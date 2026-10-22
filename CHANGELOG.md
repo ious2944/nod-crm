@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Projects: add a member by exact e-mail address (Lecture or Édition), to
   reach an account that is not yet in one's directory (a partner).
 - Guide `docs/accueillir-un-partenaire.md`.
+- `docker-compose.adopt-volumes.yml`: declares the data volumes as `external`
+  for installations whose volumes were created by another Compose project
+  (removes the "volume already exists but was created for project …" warning
+  without touching the data). See `docs/self-hosting.md` §9.
 
 ### Changed
 
