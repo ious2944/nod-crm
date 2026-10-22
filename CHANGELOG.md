@@ -15,9 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   members see "Fiche non accessible", with neither id nor name, in task and
   project details, task lists, `/tasks`, `/today` and history lines. A hidden
   link cannot be changed or removed by someone who cannot read the record.
+- Next.js upgraded from 16.3.8 to 16.4.2 (and `eslint-config-next` to match):
+  fixes GHSA-2464-fhr4-w9xw (critical — unauthenticated remote code execution
+  in the Image Optimization API when SVG files are used) and
+  GHSA-p3m5-59mp-jv5r (denial of service in the App Router through Server
+  Actions). `sharp` stays at 0.35.5.
 
 ### Added
 
+- Contacts: import from an Outlook CSV export (new and classic Outlook), with a
+  preview step (columns, duplicates in the file and in the workspace, row-level
+  errors and warnings) and an all-or-nothing import. Existing contacts can be
+  skipped or have their empty fields filled; existing data is never overwritten.
+  Rows without an e-mail that look like an existing contact (same name and
+  organisation, or same phone number) are skipped unless ticked.
 - Projects: add a member by exact e-mail address (Lecture or Édition), to
   reach an account that is not yet in one's directory (a partner).
 - Guide `docs/accueillir-un-partenaire.md`.
@@ -29,13 +40,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - The assignee of a project task must be able to read the project.
-
-- Contacts: import from an Outlook CSV export (new and classic Outlook), with a
-  preview step (columns, duplicates in the file and in the workspace, row-level
-  errors and warnings) and an all-or-nothing import. Existing contacts can be
-  skipped or have their empty fields filled; existing data is never overwritten.
-  Rows without an e-mail that look like an existing contact (same name and
-  organisation, or same phone number) are skipped unless ticked.
 
 ## [1.0.0] - 2026-10-20
 
