@@ -2,8 +2,8 @@ import "server-only";
 
 import { APP_TIME_ZONE } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
-import { getWorkspaceIdForPage } from "@/lib/workspace";
-import { requireUser } from "@/lib/auth/dal";
+import { crmReadableWhere } from "@/lib/authz/crm-access";
+import { getActorForPage } from "@/lib/workspace";
 import { NOT_TEMPLATE_TASK, visibleTaskWhere } from "@/lib/tasks/access";
 import { filterToStatuses, type StatusFilter } from "./filters";
 import type { OpportunityPickerOption } from "./domain";
@@ -17,10 +17,11 @@ import {
 /**
  * Lectures du module Commerce.
  *
- * Invariant unique et non négociable : **le workspace vient de la session**,
- * jamais d'un paramètre. Aucune fonction de ce fichier n'accepte de
- * `workspaceId` — il n'existe donc pas de chemin par lequel une opportunité
- * d'un autre espace pourrait être lue, même par erreur de programmation.
+ * Invariant unique et non négociable : **le workspace et le propriétaire
+ * viennent de la session**, jamais d'un paramètre. Aucune fonction de ce
+ * fichier n'accepte de `workspaceId` — il n'existe donc pas de chemin par
+ * lequel l'opportunité d'un autre espace, ou d'une autre personne (lot A),
+ * pourrait être lue, même par erreur de programmation.
  *
  * La colonne `estimatedAmount` est un `Decimal` Prisma : elle est convertie
  * en `number | null` dès ici via `parseFloat()` pour que les vues React
@@ -70,10 +71,10 @@ export async function listOpportunities(
   filter: StatusFilter,
   page: number = 1,
 ): Promise<CommerceListPage> {
-  const workspaceId = await getWorkspaceIdForPage();
+  const owned = crmReadableWhere(await getActorForPage());
   const statuses = filterToStatuses(filter);
   const where = {
-    workspaceId,
+    ...owned,
     ...(statuses ? { status: { in: statuses } } : {}),
   };
 
@@ -110,18 +111,18 @@ export async function listOpportunities(
 export async function getOpportunityDetail(
   id: string,
 ): Promise<OpportunityDetail | null> {
-  const workspaceId = await getWorkspaceIdForPage();
-  const user = await requireUser();
+  const actor = await getActorForPage();
+  const owned = crmReadableWhere(actor);
 
   const record = await prisma.opportunity.findFirst({
-    where: { id, workspaceId },
+    where: { id, ...owned },
     include: {
       ...OPPORTUNITY_INCLUDE,
       tasks: {
         // V1.0 : mêmes règles que le module Tâches (projets privés, corbeille).
         where: {
           completedAt: null,
-          AND: [visibleTaskWhere({ id: user.id, workspaceId: user.workspaceId }), NOT_TEMPLATE_TASK],
+          AND: [visibleTaskWhere(actor), NOT_TEMPLATE_TASK],
         },
         orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
         select: {
@@ -133,7 +134,7 @@ export async function getOpportunityDetail(
         },
       },
       followUps: {
-        where: { status: "OPEN" },
+        where: { status: "OPEN", ...owned },
         orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
         select: {
           id: true,
@@ -166,18 +167,18 @@ export interface CommerceStats {
 }
 
 export async function getCommerceStats(): Promise<CommerceStats> {
-  const workspaceId = await getWorkspaceIdForPage();
+  const owned = crmReadableWhere(await getActorForPage());
 
   const [openCount, closedCount] = await Promise.all([
     prisma.opportunity.count({
       where: {
-        workspaceId,
+        ...owned,
         status: { in: ["A_QUALIFIER", "EN_DISCUSSION", "PROPOSITION"] },
       },
     }),
     prisma.opportunity.count({
       where: {
-        workspaceId,
+        ...owned,
         status: { in: ["GAGNEE", "PERDUE"] },
       },
     }),
@@ -196,12 +197,12 @@ export async function getCommerceStats(): Promise<CommerceStats> {
 export async function searchOpportunityOptions(
   search: string,
 ): Promise<OpportunityPickerOption[]> {
-  const workspaceId = await getWorkspaceIdForPage();
+  const owned = crmReadableWhere(await getActorForPage());
   const term = search.trim();
 
   const records = await prisma.opportunity.findMany({
     where: {
-      workspaceId,
+      ...owned,
       status: { in: ["A_QUALIFIER", "EN_DISCUSSION", "PROPOSITION"] },
       ...(term ? { name: { contains: term, mode: "insensitive" } } : {}),
     },

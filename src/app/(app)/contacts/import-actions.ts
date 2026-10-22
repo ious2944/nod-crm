@@ -38,12 +38,12 @@ function logFailure(step: string, error: unknown): void {
 }
 
 export async function previewContactImport(formData: FormData): Promise<PreviewResult> {
-  return runCrmAction("crm.contact.import", async ({ workspaceId }) => {
+  return runCrmAction("crm.contact.import", async (actor) => {
     const upload = await readUpload(formData.get("file"));
     if (!upload.ok) return upload;
 
     try {
-      return await previewImport(workspaceId, upload.bytes);
+      return await previewImport(actor, upload.bytes);
     } catch (error) {
       logFailure("aperçu", error);
       return { ok: false, error: "Le fichier n'a pas pu être analysé. Réessaie dans un instant." };

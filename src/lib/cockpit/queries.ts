@@ -3,7 +3,8 @@ import "server-only";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { addDaysToKey, dayKey, startOfDay } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
-import { getWorkspaceIdForPage } from "@/lib/workspace";
+import { crmReadableWhere } from "@/lib/authz/crm-access";
+import { getActorForPage } from "@/lib/workspace";
 import {
   compareFeed,
   compareUpcoming,
@@ -70,7 +71,7 @@ export interface CockpitData {
 }
 
 export async function getCockpit(filter: CockpitFilter): Promise<CockpitData> {
-  const workspaceId = await getWorkspaceIdForPage();
+  const owned = crmReadableWhere(await getActorForPage());
   // Un seul instant de référence pour toute la page : sans cela, deux sections
   // rendues à cheval sur minuit se contrediraient.
   const now = new Date();
@@ -92,24 +93,24 @@ export async function getCockpit(filter: CockpitFilter): Promise<CockpitData> {
   // waiting  : ballOwner === "THEM" (transversal au temps)
   const [late, today, upcoming, waiting] = await prisma.$transaction([
     prisma.followUp.count({
-      where: { workspaceId, status: "OPEN", dueAt: { lt: startOfToday } },
+      where: { ...owned, status: "OPEN", dueAt: { lt: startOfToday } },
     }),
     prisma.followUp.count({
       where: {
-        workspaceId,
+        ...owned,
         status: "OPEN",
         dueAt: { gte: startOfToday, lt: startOfTomorrow },
       },
     }),
     prisma.followUp.count({
       where: {
-        workspaceId,
+        ...owned,
         status: "OPEN",
         dueAt: { gte: startOfTomorrow, lt: startOfAfterWindow },
       },
     }),
     prisma.followUp.count({
-      where: { workspaceId, status: "OPEN", ballOwner: "THEM" },
+      where: { ...owned, status: "OPEN", ballOwner: "THEM" },
     }),
   ]);
 
@@ -119,7 +120,7 @@ export async function getCockpit(filter: CockpitFilter): Promise<CockpitData> {
   // Le tri applicatif (feedReason, idleDays via updatedAt) empêche de déléguer
   // entièrement le tri à SQL : on charge les suivis ouverts pour les trier en mémoire.
   const records = await prisma.followUp.findMany({
-    where: { workspaceId, status: "OPEN" },
+    where: { ...owned, status: "OPEN" },
     orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
     include: { contact: CONTACT_SELECTION },
   });

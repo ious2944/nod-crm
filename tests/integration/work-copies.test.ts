@@ -17,7 +17,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import type { ActionResult } from "@/lib/tasks/types";
 
-import { addUserToWorkspace, createWorkspaceWithUser, resetDatabase, signIn, type TestUser } from "./fixtures";
+import { addUserToWorkspace, createWorkspaceWithUser, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
 
 /**
  * Duplications et modèles (revue c580137 : I1, I3, I5, m8).
@@ -42,9 +42,15 @@ describe("duplications et modèles", () => {
     alice = await createWorkspaceWithUser("copies");
     bob = await addUserToWorkspace(alice.workspaceId, "Bob");
     dan = await addUserToWorkspace(alice.workspaceId, "Dan");
+    // Lot A (décision b) : les personnes du scénario partagent un projet « Équipe », donc l'annuaire.
+    await shareDirectory(alice, bob, dan);
     await signIn(alice);
     P = ok(await createProjectAction({ name: "Privé", visibility: "PRIVATE" }));
-    W = ok(await createProjectAction({ name: "Public" }));
+    // Lot A (décision f) : plus de projet ouvert à l'espace ; W est partagé
+    // avec Bob et Dan en éditeurs (ce qu'ils avaient sur un projet « espace »).
+    W = ok(await createProjectAction({ name: "Partagé" }));
+    ok(await setProjectMemberAction(W, bob.userId, "EDITOR"));
+    ok(await setProjectMemberAction(W, dan.userId, "EDITOR"));
   });
 
   const tasksOf = (projectId: string) =>

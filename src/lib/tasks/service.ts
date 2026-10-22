@@ -10,9 +10,12 @@ import { dayKey, startOfDay } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
 import { objectStore } from "@/lib/storage";
 
+import { authorize } from "@/lib/authz/authorize";
+import { crmReadableWhere } from "@/lib/authz/crm-access";
 import {
   canEditProjectContent,
   canReadProject,
+  directoryUserWhere,
   evaluateTaskAccess,
   evaluateTrashAccess,
   projectAccessSelect,
@@ -148,13 +151,31 @@ async function loadAccess(ctx: MutationContext, taskId: string, db: Db = prisma)
   return { task, permissions };
 }
 
+/**
+ * Point de contrôle central (`authorize`, capacités `task.*`) sur la tâche
+ * chargée. Un contexte de confiance (`trusted`) a déjà vérifié un droit plus
+ * étroit : il n'y repasse pas.
+ */
+function assertTaskCapability(
+  ctx: MutationContext,
+  capability: "task.read" | "task.edit" | "task.manage",
+  task: Awaited<ReturnType<typeof loadAccess>>["task"],
+  refused?: string,
+): void {
+  if (ctx.trusted) return;
+  const decision = authorize(ctx.actor, capability, { kind: "task", workspaceId: task.workspaceId, task });
+  if (!decision.allowed) throw new TaskAccessError(decision.code, decision.code === "FORBIDDEN" ? refused : undefined);
+}
+
 export async function requireTaskRead(ctx: MutationContext, taskId: string, db: Db = prisma) {
-  return loadAccess(ctx, taskId, db);
+  const result = await loadAccess(ctx, taskId, db);
+  assertTaskCapability(ctx, "task.read", result.task);
+  return result;
 }
 
 export async function requireTaskEdit(ctx: MutationContext, taskId: string, db: Db = prisma) {
   const result = await loadAccess(ctx, taskId, db);
-  if (!result.permissions.canEdit) throw new TaskAccessError("FORBIDDEN");
+  assertTaskCapability(ctx, "task.edit", result.task);
   return result;
 }
 
@@ -164,7 +185,7 @@ const MANAGE_REFUSED =
 /** Structure et partage de la tâche : voir `evaluateTaskAccess` (canManage). */
 export async function requireTaskManage(ctx: MutationContext, taskId: string, db: Db = prisma) {
   const result = await loadAccess(ctx, taskId, db);
-  if (!result.permissions.canManage) throw new TaskAccessError("FORBIDDEN", MANAGE_REFUSED);
+  assertTaskCapability(ctx, "task.manage", result.task, MANAGE_REFUSED);
   return result;
 }
 
@@ -190,7 +211,7 @@ async function requireProjectContentEdit(ctx: MutationContext, projectId: string
   // Un projet de la corbeille n'accepte rien, pas même d'une règle.
   if (!project || project.deletedAt) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
   if (!ctx.trusted) {
-    if (!canReadProject(project)) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+    if (!canReadProject(project, ctx.actor)) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
     if (!canEditProjectContent(project, ctx.actor)) {
       throw new TaskAccessError(
         "FORBIDDEN",
@@ -209,13 +230,36 @@ export async function getTaskItem(ctx: MutationContext, taskId: string): Promise
 
 // ─── Références CRM et utilisateurs ──────────────────────────────────────────
 
+/** Responsable, collaborateur, abonné : une personne active de l'annuaire de l'acteur (décision b). */
 async function assertUserInWorkspace(actor: Actor, userId: string | null | undefined) {
   if (!userId) return;
   const user = await prisma.user.findFirst({
-    where: { id: userId, workspaceId: actor.workspaceId, isActive: true },
+    where: { AND: [{ id: userId, isActive: true }, directoryUserWhere(actor)] },
     select: { id: true },
   });
   if (!user) throw new TaskValidationError("Cet utilisateur n'existe pas dans votre espace.");
+}
+
+/**
+ * Liens CRM d'une copie (duplication de tâche ou de projet) : seuls ceux qui
+ * visent une fiche de l'acteur sont conservés (lot A, « on ne lie qu'à ses
+ * propres fiches ») ; les autres deviennent vides, sans rien révéler.
+ */
+export async function keepOwnedCrmLinks<L extends { contactId?: string | null; organizationId?: string | null; opportunityId?: string | null; followUpId?: string | null }>(
+  actor: Actor,
+  links: L,
+  db: Db = prisma,
+): Promise<L> {
+  const owned = crmReadableWhere(actor);
+  const keep = async (id: string | null | undefined, find: (id: string) => Promise<{ id: string } | null>) =>
+    id ? ((await find(id)) ? id : null) : (id ?? null);
+  return {
+    ...links,
+    ...("contactId" in links ? { contactId: await keep(links.contactId, (id) => db.contact.findFirst({ where: { id, ...owned }, select: { id: true } })) } : {}),
+    ...("organizationId" in links ? { organizationId: await keep(links.organizationId, (id) => db.organization.findFirst({ where: { id, ...owned }, select: { id: true } })) } : {}),
+    ...("opportunityId" in links ? { opportunityId: await keep(links.opportunityId, (id) => db.opportunity.findFirst({ where: { id, ...owned }, select: { id: true } })) } : {}),
+    ...("followUpId" in links ? { followUpId: await keep(links.followUpId, (id) => db.followUp.findFirst({ where: { id, ...owned }, select: { id: true } })) } : {}),
+  };
 }
 
 export async function assertCrmLinks(
@@ -227,11 +271,12 @@ export async function assertCrmLinks(
     followUpId?: string | null;
   },
 ) {
-  const { workspaceId } = actor;
+  // Lot A : on ne lie qu'à ses propres fiches CRM ; celle d'autrui est introuvable.
+  const owned = crmReadableWhere(actor);
   const checks: Promise<void>[] = [];
   if (links.contactId) {
     checks.push(
-      prisma.contact.findFirst({ where: { id: links.contactId, workspaceId }, select: { id: true } }).then((r) => {
+      prisma.contact.findFirst({ where: { id: links.contactId, ...owned }, select: { id: true } }).then((r) => {
         if (!r) throw new TaskValidationError("Contact introuvable.");
       }),
     );
@@ -239,7 +284,7 @@ export async function assertCrmLinks(
   if (links.organizationId) {
     checks.push(
       prisma.organization
-        .findFirst({ where: { id: links.organizationId, workspaceId }, select: { id: true } })
+        .findFirst({ where: { id: links.organizationId, ...owned }, select: { id: true } })
         .then((r) => {
           if (!r) throw new TaskValidationError("Organisation introuvable.");
         }),
@@ -248,7 +293,7 @@ export async function assertCrmLinks(
   if (links.opportunityId) {
     checks.push(
       prisma.opportunity
-        .findFirst({ where: { id: links.opportunityId, workspaceId }, select: { id: true } })
+        .findFirst({ where: { id: links.opportunityId, ...owned }, select: { id: true } })
         .then((r) => {
           if (!r) throw new TaskValidationError("Opportunité introuvable.");
         }),
@@ -256,7 +301,7 @@ export async function assertCrmLinks(
   }
   if (links.followUpId) {
     checks.push(
-      prisma.followUp.findFirst({ where: { id: links.followUpId, workspaceId }, select: { id: true } }).then((r) => {
+      prisma.followUp.findFirst({ where: { id: links.followUpId, ...owned }, select: { id: true } }).then((r) => {
         if (!r) throw new TaskValidationError("Suivi introuvable.");
       }),
     );
@@ -264,10 +309,15 @@ export async function assertCrmLinks(
   await Promise.all(checks);
 }
 
+/**
+ * Nom figé dans l'historique. Jamais l'adresse : l'historique est lu par
+ * toutes les personnes qui voient la tâche, pas seulement par l'annuaire de
+ * la personne nommée (décision b).
+ */
 async function userLabel(userId: string | null): Promise<string | null> {
   if (!userId) return null;
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { displayName: true, email: true } });
-  return user ? user.displayName?.trim() || user.email : null;
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { displayName: true } });
+  return user ? user.displayName?.trim() || "Membre de l'espace" : null;
 }
 
 const dueInstant = (key: string | null | undefined) => (key ? startOfDay(key, APP_TIME_ZONE) : null);
@@ -388,12 +438,16 @@ export async function createTask(ctx: MutationContext, raw: CreateTaskInputV1): 
         isApproval: true,
         subtasks: true,
         tagIds: true,
+        createdById: true,
         project: { select: projectAccessSelect(actor) },
       },
     });
-    // Le modèle d'un projet n'est utilisable que par qui peut lire ce projet
-    // (même message qu'un identifiant inconnu).
-    if (!found || (found.project && !ctx.trusted && !canReadProject(found.project))) {
+    // Le modèle d'un projet n'est utilisable que par qui peut lire ce projet ;
+    // un modèle d'espace, par son auteur seul (personnel, lot A). Même message
+    // qu'un identifiant inconnu.
+    const usable =
+      found && (ctx.trusted || (found.project ? canReadProject(found.project, ctx.actor) : found.createdById === ctx.actor.id));
+    if (!found || !usable) {
       throw new TaskValidationError("Modèle introuvable.");
     }
     template = found;
@@ -1196,13 +1250,14 @@ export async function listTrash(actor: Actor): Promise<TrashItem[]> {
     const subtaskCount = await prisma.task.count({ where: { parentId: row.id, deletedAt: row.deletedAt } });
     const projects = (row.parent ?? row).projects
       .map((p) => p.project as typeof p.project & { name?: string })
-      .filter((p) => canReadProject(p))
+      .filter((p) => canReadProject(p, actor))
       .map((p) => p.name ?? "");
     items.push({
       id: row.id,
       title: row.title,
       deletedAt: row.deletedAt!.toISOString(),
-      deletedBy: row.deletedBy ? row.deletedBy.displayName?.trim() || row.deletedBy.email : null,
+      // Adresse d'autrui jamais exposée (décision b) : nom, sinon libellé neutre.
+      deletedBy: row.deletedBy ? row.deletedBy.displayName?.trim() || (row.deletedById === actor.id ? row.deletedBy.email : "Membre de l'espace") : null,
       parentTitle: row.parent?.title ?? null,
       projects,
       subtaskCount,
@@ -1303,7 +1358,7 @@ export async function duplicateTask(
         where: { taskId: source.parentId, project: { deletedAt: null } },
         select: { projectId: true, project: { select: projectAccessSelect(ctx.actor) } },
       });
-      fieldProjects = new Set(parentProjects.filter((m) => canReadProject(m.project)).map((m) => m.projectId));
+      fieldProjects = new Set(parentProjects.filter((m) => canReadProject(m.project, ctx.actor)).map((m) => m.projectId));
     }
     const values = source.customValues.filter((v) => !v.field.projectId || fieldProjects.has(v.field.projectId));
 
@@ -1338,10 +1393,11 @@ export async function duplicateTask(
         approvalStatus: source.isApproval ? "PENDING" : null,
         recurrence: source.recurrence ?? Prisma.DbNull,
         estimatedMinutes: source.estimatedMinutes,
-        contactId: source.contactId,
-        organizationId: source.organizationId,
-        opportunityId: source.opportunityId,
-        followUpId: source.followUpId,
+        ...(await keepOwnedCrmLinks(
+          ctx.actor,
+          { contactId: source.contactId, organizationId: source.organizationId, opportunityId: source.opportunityId, followUpId: source.followUpId },
+          tx,
+        )),
         tags: { create: source.tags.map((t) => ({ tagId: t.tagId })) },
         customValues: {
           create: values.map((v) => ({
@@ -1518,8 +1574,9 @@ export async function addTaskToProject(
  * Retire une tâche d'un projet. Le retrait ne doit jamais élargir sa
  * visibilité : il est refusé s'il ne lui laisserait que des projets de la
  * corbeille (elle doit les suivre, pas devenir libre à leur purge), ou si le
- * projet retiré est son seul projet et qu'il est privé (sans projet, une
- * tâche est visible de tout l'espace).
+ * projet retiré est son seul projet et que, devenue libre, elle serait
+ * visible d'une personne qui ne la voit pas aujourd'hui (une tâche libre est
+ * visible de son créateur, de son responsable et de ses collaborateurs).
  */
 export async function removeTaskFromProject(ctx: MutationContext, taskId: string, projectId: string): Promise<TaskItem> {
   await requireTaskManage(ctx, taskId);
@@ -1540,10 +1597,19 @@ export async function removeTaskFromProject(ctx: MutationContext, taskId: string
         "Ses autres projets sont dans la corbeille : retirée d'ici, elle n'aurait plus de projet actif. Supprimez-la plutôt, ou restaurez d'abord l'autre projet.",
       );
     }
-    if (rest.length === 0 && target.project.visibility === "PRIVATE") {
-      throw new TaskValidationError(
-        "C'est son seul projet, et il est privé : sans projet, la tâche serait visible de tout l'espace. Ajoutez-la d'abord à un autre projet, ou supprimez-la.",
+    if (rest.length === 0) {
+      const task = await tx.task.findUniqueOrThrow({
+        where: { id: taskId },
+        select: { assigneeId: true, createdById: true, followers: { where: { kind: "COLLABORATOR" }, select: { userId: true } } },
+      });
+      const futureReaders = [task.assigneeId, task.createdById, ...task.followers.map((f) => f.userId)].filter(
+        (id): id is string => Boolean(id),
       );
+      if (await gainsReaders(ctx.actor.workspaceId, taskId, futureReaders)) {
+        throw new TaskValidationError(
+          "C'est son seul projet : sans projet, la tâche deviendrait visible de personnes qui ne la voient pas aujourd'hui. Ajoutez-la d'abord à un autre projet, ou supprimez-la.",
+        );
+      }
     }
     await tx.taskProject.delete({ where: { taskId_projectId: { taskId, projectId } } });
     await tx.task.update({ where: { id: taskId }, data: { version: { increment: 1 } } });
@@ -1588,31 +1654,51 @@ export async function moveSubtask(
 }
 
 /**
- * Devenir la sous-tâche de `parentId` remplace les projets de la tâche par
- * ceux de sa parente. Refusé si cela l'ouvrait à des personnes qui ne la
- * voient pas aujourd'hui : tâche d'un projet privé (et d'aucun projet ouvert
- * à l'espace) sous une parente qui n'est pas dans les mêmes projets. Refusé
- * aussi si elle appartient à un projet de la corbeille, qui doit la retrouver
- * à sa restauration.
+ * Vrai si une des personnes `futureReaders` (qui verraient la tâche après la
+ * modification) ne la voit pas aujourd'hui.
  */
-async function assertParentKeepsVisibility(tx: Prisma.TransactionClient, taskId: string, parentId: string) {
+async function gainsReaders(workspaceId: string, taskId: string, futureReaders: string[]): Promise<boolean> {
+  const unique = [...new Set(futureReaders)];
+  if (unique.length === 0) return false;
+  const current = new Set(await readersAmong(workspaceId, taskId, unique));
+  return unique.some((id) => !current.has(id));
+}
+
+/**
+ * Devenir la sous-tâche de `parentId` remplace les projets de la tâche par
+ * ceux de sa parente : elle est alors visible de qui voit la parente (ses
+ * projets, ou ses créateur / responsable / collaborateurs si elle est libre).
+ * Refusé si cela l'ouvrait à une personne qui ne la voit pas aujourd'hui.
+ * Refusé aussi si elle appartient à un projet de la corbeille, qui doit la
+ * retrouver à sa restauration.
+ */
+async function assertParentKeepsVisibility(tx: Prisma.TransactionClient, workspaceId: string, taskId: string, parentId: string) {
   const own = await tx.taskProject.findMany({
     where: { taskId },
-    select: { projectId: true, project: { select: { deletedAt: true, visibility: true } } },
+    select: { projectId: true, project: { select: { deletedAt: true } } },
   });
   if (own.some((m) => m.project.deletedAt)) {
     throw new TaskValidationError("Cette tâche appartient aussi à un projet de la corbeille : elle ne peut pas devenir une sous-tâche.");
   }
-  const openToWorkspace = own.length === 0 || own.some((m) => m.project.visibility === "WORKSPACE");
-  if (openToWorkspace) return;
-  const ownIds = new Set(own.map((m) => m.projectId));
-  const parentProjects = await tx.taskProject.findMany({
-    where: { taskId: parentId, project: { deletedAt: null } },
-    select: { projectId: true },
+  const parent = await tx.task.findUniqueOrThrow({
+    where: { id: parentId },
+    select: {
+      assigneeId: true,
+      createdById: true,
+      followers: { where: { kind: "COLLABORATOR" }, select: { userId: true } },
+      projects: {
+        where: { project: { deletedAt: null } },
+        select: { project: { select: { ownerId: true, createdById: true, members: { select: { userId: true } } } } },
+      },
+    },
   });
-  if (parentProjects.length === 0 || parentProjects.some((m) => !ownIds.has(m.projectId))) {
+  const futureReaders =
+    parent.projects.length > 0
+      ? parent.projects.flatMap(({ project }) => [project.ownerId ?? project.createdById, ...project.members.map((m) => m.userId)])
+      : [parent.assigneeId, parent.createdById, ...parent.followers.map((f) => f.userId)];
+  if (await gainsReaders(workspaceId, taskId, futureReaders.filter((id): id is string => Boolean(id)))) {
     throw new TaskValidationError(
-      "Sous cette parente, la tâche deviendrait visible de personnes qui ne la voient pas aujourd'hui (elle est dans un projet privé que la parente ne partage pas).",
+      "Sous cette parente, la tâche deviendrait visible de personnes qui ne la voient pas aujourd'hui.",
     );
   }
 }
@@ -1636,7 +1722,7 @@ export async function setTaskParent(ctx: MutationContext, taskId: string, parent
       if (parent.parentId) throw new TaskValidationError("Une sous-tâche ne peut pas avoir de sous-tâches.");
       const children = await tx.task.count({ where: { parentId: taskId, deletedAt: null } });
       if (children) throw new TaskValidationError("Cette tâche a déjà des sous-tâches.");
-      await assertParentKeepsVisibility(tx, taskId, parentId);
+      await assertParentKeepsVisibility(tx, ctx.actor.workspaceId, taskId, parentId);
       await checkpoint("setTaskParent:checked");
       await tx.taskProject.deleteMany({ where: { taskId } });
       await tx.task.update({ where: { id: taskId }, data: { parentId, version: { increment: 1 } } });
@@ -2066,7 +2152,7 @@ async function requireOwnComment(ctx: MutationContext, commentId: string) {
       where: { id: comment.statusUpdateId, workspaceId: ctx.actor.workspaceId },
       select: { project: { select: projectAccessSelect(ctx.actor) } },
     });
-    if (!update || !canReadProject(update.project)) throw new TaskAccessError("NOT_FOUND");
+    if (!update || !canReadProject(update.project, ctx.actor)) throw new TaskAccessError("NOT_FOUND");
   }
   if (comment.authorId !== ctx.actor.id) throw new TaskAccessError("FORBIDDEN", "Seul l'auteur peut modifier ce commentaire.");
   return comment;
@@ -2099,7 +2185,7 @@ export async function toggleReaction(ctx: MutationContext, commentId: string, em
       where: { id: comment.statusUpdate.projectId, workspaceId: ctx.actor.workspaceId },
       select: projectAccessSelect(ctx.actor),
     });
-    if (!project || !canReadProject(project)) throw new TaskAccessError("NOT_FOUND");
+    if (!project || !canReadProject(project, ctx.actor)) throw new TaskAccessError("NOT_FOUND");
   }
   const key = { commentId_userId_emoji: { commentId, userId: ctx.actor.id, emoji } };
   const existing = await prisma.commentReaction.findUnique({ where: key });

@@ -39,6 +39,7 @@ import {
   resetDatabase,
   signIn,
   type TestUser,
+  defaultOwnerId,
 } from "./fixtures";
 
 /**
@@ -218,7 +219,7 @@ describe("archivage", () => {
 
     const followUp = await prisma.followUp.create({
       data: {
-        workspaceId: user.workspaceId,
+        workspaceId: user.workspaceId, ownerId: await defaultOwnerId(user.workspaceId),
         contactId,
         title: "Devis à relancer",
         ballOwner: "THEM",
@@ -381,7 +382,7 @@ describe("filtres, tri et pagination", () => {
 
     await prisma.followUp.create({
       data: {
-        workspaceId: user.workspaceId,
+        workspaceId: user.workspaceId, ownerId: await defaultOwnerId(user.workspaceId),
         contactId: withOpen,
         title: "En cours",
         ballOwner: "THEM",
@@ -390,7 +391,7 @@ describe("filtres, tri et pagination", () => {
     });
     await prisma.followUp.create({
       data: {
-        workspaceId: user.workspaceId,
+        workspaceId: user.workspaceId, ownerId: await defaultOwnerId(user.workspaceId),
         contactId: withClosed,
         title: "Fini",
         status: "COMPLETED",
@@ -420,6 +421,7 @@ describe("filtres, tri et pagination", () => {
       data: [
         {
           workspaceId: user.workspaceId,
+          ownerId: user.userId,
           contactId: ids[0],
           title: "a",
           ballOwner: "THEM",
@@ -427,6 +429,7 @@ describe("filtres, tri et pagination", () => {
         },
         {
           workspaceId: user.workspaceId,
+          ownerId: user.userId,
           contactId: ids[0],
           title: "b",
           ballOwner: "THEM",
@@ -434,6 +437,7 @@ describe("filtres, tri et pagination", () => {
         },
         {
           workspaceId: user.workspaceId,
+          ownerId: user.userId,
           contactId: ids[1],
           title: "c",
           ballOwner: "THEM",
@@ -497,6 +501,7 @@ describe("filtres, tri et pagination", () => {
     await prisma.contact.createMany({
       data: Array.from({ length: total }, (_, index) => ({
         workspaceId: user.workspaceId,
+        ownerId: user.userId,
         firstName: `Contact${String(index).padStart(2, "0")}`,
         lastName: "Test",
       })),

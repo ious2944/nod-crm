@@ -6,7 +6,6 @@ import {
   createProjectAction,
   createTaskAction,
   deleteTaskAction,
-  duplicateTaskAction,
   moveTaskAction,
   saveCustomFieldAction,
   setCustomFieldValueAction,
@@ -31,7 +30,7 @@ import {
   searchTasks,
 } from "@/lib/tasks/work-queries";
 
-import { addUserToWorkspace, createContactRecord, createWorkspaceWithUser, resetDatabase, signIn, type TestUser } from "./fixtures";
+import { addUserToWorkspace, createContactRecord, createWorkspaceWithUser, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
 
 /**
  * Politique d'accès appliquée, rôle par rôle (voir `docs/tasks.md`) :
@@ -78,6 +77,8 @@ describe("permissions par rôle et tâches privées", () => {
     carol = await addUserToWorkspace(alice.workspaceId, "Carol");
     dan = await addUserToWorkspace(alice.workspaceId, "Dan");
     eve = await addUserToWorkspace(alice.workspaceId, "Eve");
+    // Lot A (décision b) : les personnes du scénario partagent un projet « Équipe », donc l'annuaire.
+    await shareDirectory(alice, bob, carol, dan);
     await signIn(alice);
 
     P = ok(await createProjectAction({ name: "Projet Privé P", visibility: "PRIVATE" }));
@@ -105,67 +106,45 @@ describe("permissions par rôle et tâches privées", () => {
   });
 
   describe("responsable non membre (Bob)", () => {
+    // Lot A : un responsable n'accède à une tâche de projet que par un projet
+    // qu'il lit. Bob, responsable de « Tâche de Bob » sans être membre de P,
+    // n'en voit donc rien — par aucune voie. (Le droit du responsable en
+    // Lecture est le sujet du lot B.)
     beforeEach(async () => signIn(bob));
 
-    it("voit sa tâche et ses éléments propres, sans rien du projet", async () => {
-      const detail = await getTaskDetail(actorOf(bob), assigned);
-      expect(detail.task.title).toBe("Tâche de Bob");
-      expect(detail.description).toContain("confidentiels");
-      expect(detail.task.memberships).toEqual([]); // le projet n'est pas divulgué
-      expect(detail.projects).toEqual([]);
-      expect(detail.subtasks.map((s) => s.id)).toEqual([sub]); // sous-tâche : élément propre
-      expect(detail.attachments.map((a) => a.fileName)).toEqual(["brief.txt"]);
-      expect((await readFile(attachmentOnAssigned)).status).toBe(200);
-      // Champ propre à P : valeur masquée, définition absente du contexte.
-      expect(detail.task.custom[pField]).toBeUndefined();
-      expect((await getWorkContext(actorOf(bob))).fields.map((f) => f.id)).not.toContain(pField);
-      // Historique : la ligne « Section » de P (nom de section) est masquée.
-      expect(detail.activity.some((a) => a.kind === "moved")).toBe(false);
-      expect(detail.activity.some((a) => a.kind === "created")).toBe(true);
-      ok(await addCommentAction(assigned, "Bien reçu."));
-    });
-
-    it("ne voit ni les autres tâches du projet, ni le projet, ni ses fichiers", async () => {
+    it("ne voit ni sa tâche, ni ses sous-tâches, ni ses fichiers, ni rien du projet", async () => {
+      await expect(getTaskDetail(actorOf(bob), assigned)).rejects.toMatchObject({ code: "NOT_FOUND" });
+      await expect(getTaskDetail(actorOf(bob), sub)).rejects.toMatchObject({ code: "NOT_FOUND" });
+      await expect(getTaskDetail(actorOf(bob), other)).rejects.toMatchObject({ code: "NOT_FOUND" });
       await expect(getProjectBundle(actorOf(bob), P)).rejects.toThrow();
-      await expect(getTaskDetail(actorOf(bob), other)).rejects.toThrow();
+      expect((await readFile(attachmentOnAssigned)).status).toBe(404);
       expect((await readFile(attachmentOnOther)).status).toBe(404);
-      const found = await searchTasks(actorOf(bob), { search: "tâche", completion: "all" });
-      expect(found.map((t) => t.id).sort()).toEqual([assigned, sub].sort());
-      // Description complète, mais seulement des tâches visibles.
-      expect((await searchTasks(actorOf(bob), { search: "Budget interne", completion: "all" }))).toEqual([]);
-      // Filtrer par un projet illisible ne révèle rien, même la tâche visible.
+      expect(await searchTasks(actorOf(bob), { search: "tâche", completion: "all" })).toEqual([]);
       expect(await searchTasks(actorOf(bob), { projectIds: [P], completion: "all" })).toEqual([]);
-      const ids = await searchGet(new Request(`http://localhost/api/tasks/search?idsOnly=1&filters=${encodeURIComponent(JSON.stringify({ projectIds: [P], completion: "all" }))}`));
+      const ids = await searchGet(new Request(`http://localhost/api/tasks/search?idsOnly=1&filters=${encodeURIComponent(JSON.stringify({ completion: "all" }))}`));
       expect(await ids.json()).toEqual({ ids: [] });
+      expect((await getWorkContext(actorOf(bob))).fields.map((f) => f.id)).not.toContain(pField);
     });
 
-    it("la fiche CRM liée ne montre que la tâche autorisée", async () => {
-      const linked = await getLinkedWork(actorOf(bob), "contact", contactId);
-      expect(linked.tasks.map((t) => t.id)).toEqual([assigned]);
-      expect(linked.projects).toEqual([]);
+    it("la fiche CRM liée n'existe pas pour lui (le CRM n'est jamais partagé)", async () => {
+      await expect(getLinkedWork(actorOf(bob), "contact", contactId)).rejects.toMatchObject({ code: "NOT_FOUND" });
     });
 
-    it("peut modifier sa tâche, mais ni la réaffecter, ni la partager, ni la sortir du projet", async () => {
-      ok(await updateTaskAction(assigned, { status: "IN_PROGRESS" }));
-      const detail = await getTaskDetail(actorOf(bob), assigned);
-      expect(detail.task).toMatchObject({ canEdit: true, canManage: false });
-      expect(await updateTaskAction(assigned, { assigneeId: eve.userId })).toMatchObject({ ok: false, code: "FORBIDDEN" });
-      expect(await setFollowerAction(assigned, eve.userId, "FOLLOWER")).toMatchObject({ ok: false, code: "FORBIDDEN" });
-      expect(await setFollowerAction(assigned, bob.userId, "COLLABORATOR")).toMatchObject({ ok: false, code: "FORBIDDEN" });
-      expect(await deleteTaskAction(assigned)).toMatchObject({ ok: false, code: "FORBIDDEN" });
-      expect(await duplicateTaskAction(assigned)).toMatchObject({ ok: false });
+    it("ne peut rien modifier : la tâche répond comme une tâche inexistante", async () => {
+      expect(await updateTaskAction(assigned, { status: "IN_PROGRESS" })).toMatchObject({ ok: false, code: "NOT_FOUND" });
+      expect(await setFollowerAction(assigned, bob.userId, "FOLLOWER")).toMatchObject({ ok: false, code: "NOT_FOUND" });
+      expect(await addCommentAction(assigned, "Bien reçu.")).toMatchObject({ ok: false, code: "NOT_FOUND" });
+      expect(await deleteTaskAction(assigned)).toMatchObject({ ok: false, code: "NOT_FOUND" });
+      expect(await setCustomFieldValueAction(assigned, pField, "piraté")).toMatchObject({ ok: false, code: "NOT_FOUND" });
       const free = ok(await createTaskAction({ title: "Libre de Bob" }));
-      expect(await setTaskParentAction(free.id, assigned)).toMatchObject({ ok: false, code: "FORBIDDEN" });
-      expect(await setCustomFieldValueAction(assigned, pField, "piraté")).toMatchObject({ ok: false });
+      expect(await setTaskParentAction(free.id, assigned)).toMatchObject({ ok: false, code: "NOT_FOUND" });
+      const row = await prisma.task.findUniqueOrThrow({ where: { id: assigned } });
+      expect(row.status).toBe("TODO");
       expect((await prisma.taskCustomFieldValue.findUniqueOrThrow({ where: { taskId_fieldId: { taskId: assigned, fieldId: pField } } })).textValue).toBe("12 k€");
-      // Ajouter la tâche à un projet ouvert l'exposerait à tout l'espace.
-      await signIn(alice);
-      const open = ok(await createProjectAction({ name: "Ouvert" }));
-      await signIn(bob);
-      expect(await addTaskToProjectAction(assigned, open, null)).toMatchObject({ ok: false, code: "FORBIDDEN" });
     });
 
     it("une mention ne donne aucun accès à la personne mentionnée", async () => {
+      await signIn(alice);
       ok(await addCommentAction(assigned, `Voir avec @[Eve](${eve.userId})`));
       expect(await prisma.taskFollower.findFirst({ where: { taskId: assigned, userId: eve.userId } })).toBeNull();
       expect(await prisma.notification.count({ where: { userId: eve.userId } })).toBe(0);
@@ -173,19 +152,15 @@ describe("permissions par rôle et tâches privées", () => {
     });
 
     it("notifications et export suivent l'accès", async () => {
-      expect((await listNotifications(actorOf(bob))).some((n) => n.taskId === assigned)).toBe(true);
+      // L'affectation a pu le notifier (ligne en base) : sur une tâche qu'il ne
+      // lit pas, elle n'apparaît ni dans sa boîte ni dans son compteur.
+      expect((await listNotifications(actorOf(bob))).some((n) => n.taskId === assigned)).toBe(false);
+      expect((await getWorkContext(actorOf(bob))).unreadCount).toBe(0);
       const csv = await exportCsv(`filters=${encodeURIComponent(JSON.stringify({ completion: "all" }))}`);
-      expect(csv.text).toContain("Tâche de Bob");
+      expect(csv.text).not.toContain("Tâche de Bob");
       expect(csv.text).not.toContain("Autre tâche de P");
       expect(csv.text).not.toContain("Projet Privé P");
       expect((await exportCsv(`projectId=${P}`)).status).toBe(404);
-
-      // La tâche part à la corbeille : la notification disparaît de sa boîte.
-      await signIn(alice);
-      ok(await deleteTaskAction(assigned));
-      await signIn(bob);
-      expect((await listNotifications(actorOf(bob))).some((n) => n.taskId === assigned)).toBe(false);
-      await expect(getTaskDetail(actorOf(bob), assigned)).rejects.toThrow();
       expect(await listTrash(actorOf(bob))).toEqual([]);
     });
   });
@@ -235,7 +210,8 @@ describe("permissions par rôle et tâches privées", () => {
     it("n'obtient rien, par aucune voie", async () => {
       for (const id of [assigned, other, sub, shared]) await expect(getTaskDetail(actorOf(eve), id)).rejects.toThrow();
       expect(await searchTasks(actorOf(eve), { completion: "all" })).toEqual([]);
-      expect((await getLinkedWork(actorOf(eve), "contact", contactId)).tasks).toEqual([]);
+      // Lot A : le contact d'Alice n'existe pas pour Eve.
+      await expect(getLinkedWork(actorOf(eve), "contact", contactId)).rejects.toMatchObject({ code: "NOT_FOUND" });
       expect((await readFile(attachmentOnAssigned)).status).toBe(404);
       expect(await listNotifications(actorOf(eve))).toEqual([]);
       expect(await addCommentAction(other, "?")).toMatchObject({ ok: false, code: "NOT_FOUND" });

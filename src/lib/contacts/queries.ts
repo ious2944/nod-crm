@@ -4,7 +4,8 @@ import type { Prisma } from "@/generated/prisma/client";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { toFollowUpView, type FollowUpView } from "@/lib/follow-ups/view";
 import { prisma } from "@/lib/prisma";
-import { getWorkspaceIdForPage } from "@/lib/workspace";
+import { crmReadableWhere, type CrmOwned } from "@/lib/authz/crm-access";
+import { getActorForPage } from "@/lib/workspace";
 import {
   CONTACTS_PAGE_SIZE,
   escapeLikePattern,
@@ -116,7 +117,7 @@ const CLOSED_STATUSES = ["COMPLETED", "ABANDONED"] as const;
  * saisie n'est jamais concaténée dans le SQL.
  */
 function buildWhere(
-  workspaceId: string,
+  owned: CrmOwned,
   params: ContactListParams,
 ): Prisma.ContactWhereInput {
   const and: Prisma.ContactWhereInput[] = [];
@@ -172,7 +173,7 @@ function buildWhere(
   }
 
   return {
-    workspaceId,
+    ...owned,
     // Un contact archivé sort de la liste ET de la recherche : c'est tout
     // l'intérêt de l'archivage par rapport à une suppression.
     archivedAt: null,
@@ -205,8 +206,8 @@ function buildOrderBy(sort: ContactListParams["sort"]): Prisma.ContactOrderByWit
 export async function listContactsPage(
   params: ContactListParams,
 ): Promise<ContactListPage> {
-  const workspaceId = await getWorkspaceIdForPage();
-  const where = buildWhere(workspaceId, params);
+  const owned = crmReadableWhere(await getActorForPage());
+  const where = buildWhere(owned, params);
 
   const [total, records] = await Promise.all([
     prisma.contact.count({ where }),
@@ -220,7 +221,7 @@ export async function listContactsPage(
   ]);
 
   const counts = await countFollowUpsByContact(
-    workspaceId,
+    owned,
     records.map((record) => record.id),
   );
 
@@ -279,7 +280,7 @@ export async function listContactsPage(
  * la page.
  */
 async function countFollowUpsByContact(
-  workspaceId: string,
+  owned: CrmOwned,
   contactIds: string[],
 ): Promise<Map<string, { open: number; closed: number }>> {
   const counts = new Map<string, { open: number; closed: number }>();
@@ -287,7 +288,7 @@ async function countFollowUpsByContact(
 
   const rows = await prisma.followUp.groupBy({
     by: ["contactId", "status"],
-    where: { workspaceId, contactId: { in: contactIds } },
+    where: { ...owned, contactId: { in: contactIds } },
     _count: { _all: true },
   });
 
@@ -307,17 +308,17 @@ async function countFollowUpsByContact(
 
 /** Fiche détaillée. `null` si l'identifiant ne désigne rien dans CE workspace. */
 export async function getContactDetail(id: string): Promise<ContactDetail | null> {
-  const workspaceId = await getWorkspaceIdForPage();
+  const owned = crmReadableWhere(await getActorForPage());
 
   const record = await prisma.contact.findFirst({
-    where: { id, workspaceId },
+    where: { id, ...owned },
     select: CONTACT_FIELDS,
   });
 
   if (!record) return null;
 
   const followUps = await prisma.followUp.findMany({
-    where: { workspaceId, contactId: id },
+    where: { ...owned, contactId: id },
     // Les suivis ouverts d'abord, les plus urgents en tête.
     orderBy: [{ status: "asc" }, { dueAt: "asc" }, { createdAt: "asc" }],
     include: { contact: FOLLOW_UP_CONTACT_SELECTION },
@@ -360,10 +361,10 @@ export async function getContactDetail(id: string): Promise<ContactDetail | null
  * champ texte historique.
  */
 export async function listOrganizationOptions(): Promise<string[]> {
-  const workspaceId = await getWorkspaceIdForPage();
+  const owned = crmReadableWhere(await getActorForPage());
 
   const rows = await prisma.organization.findMany({
-    where: { workspaceId, archivedAt: null },
+    where: { ...owned, archivedAt: null },
     select: { name: true },
     orderBy: { name: "asc" },
   });
@@ -380,9 +381,9 @@ export async function listOrganizationOptions(): Promise<string[]> {
 export async function searchContactOptions(
   search: string,
 ): Promise<ContactPickerOption[]> {
-  const workspaceId = await getWorkspaceIdForPage();
+  const owned = crmReadableWhere(await getActorForPage());
 
-  const where = buildWhere(workspaceId, {
+  const where = buildWhere(owned, {
     search,
     organization: "",
     followUp: "any",

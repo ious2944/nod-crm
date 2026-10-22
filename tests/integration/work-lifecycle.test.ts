@@ -31,7 +31,7 @@ import {
   searchTasks,
 } from "@/lib/tasks/work-queries";
 
-import { addUserToWorkspace, createWorkspaceWithUser, formData, resetDatabase, signIn, type TestUser } from "./fixtures";
+import { addUserToWorkspace, createWorkspaceWithUser, formData, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
 
 /**
  * Complétude fonctionnelle : sections, corbeille, champs partagés,
@@ -56,6 +56,8 @@ describe("cycle de vie des tâches", () => {
     alice = await createWorkspaceWithUser("lifecycle-ws");
     bob = await addUserToWorkspace(alice.workspaceId, "Bob");
     dan = await addUserToWorkspace(alice.workspaceId, "Dan");
+    // Lot A (décision b) : les personnes du scénario partagent un projet « Équipe », donc l'annuaire.
+    await shareDirectory(alice, bob, dan);
     await signIn(alice);
   });
 

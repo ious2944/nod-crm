@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { getCurrentUser } from "@/lib/auth/dal";
+import { crmReadableWhere } from "@/lib/authz/crm-access";
 import { prisma } from "@/lib/prisma";
 import { objectStore } from "@/lib/storage";
 
@@ -38,7 +39,8 @@ export async function GET(
   }
 
   const contact = await prisma.contact.findFirst({
-    where: { id, workspaceId: user.workspaceId },
+    // La photo d'un contact d'autrui répond comme un contact inexistant (lot A).
+    where: { id, ...crmReadableWhere({ id: user.id, workspaceId: user.workspaceId }) },
     select: { photoKey: true, photoMimeType: true },
   });
 

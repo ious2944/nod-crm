@@ -14,6 +14,7 @@ import {
   resetDatabase,
   signIn,
   type TestUser,
+  defaultOwnerId,
 } from "./fixtures";
 
 /**
@@ -42,7 +43,7 @@ async function createFollowUp(
   const now = new Date();
   const followUp = await prisma.followUp.create({
     data: {
-      workspaceId,
+      workspaceId, ownerId: await defaultOwnerId(workspaceId),
       contactId: options.contactId ?? null,
       title: options.title,
       ballOwner: options.ballOwner ?? "THEM",
@@ -341,7 +342,7 @@ describe("cockpit — contacts et fuseau", () => {
     const todayKey = dayKey(new Date(), APP_TIME_ZONE);
     await prisma.followUp.create({
       data: {
-        workspaceId: user.workspaceId,
+        workspaceId: user.workspaceId, ownerId: await defaultOwnerId(user.workspaceId),
         title: "Dû aujourd'hui",
         ballOwner: "THEM",
         dueAt: startOfDay(todayKey, APP_TIME_ZONE),

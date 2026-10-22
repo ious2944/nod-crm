@@ -5,10 +5,11 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import { recordAudit } from "@/lib/audit/log";
 import { AUDIT_ENTITY_TYPES } from "@/lib/audit/types";
+import { authorize } from "@/lib/authz/authorize";
 import { prisma } from "@/lib/prisma";
 import { objectStore } from "@/lib/storage";
 
-import { TaskAccessError, TaskValidationError, type Actor } from "./access";
+import { directoryUserWhere, TaskAccessError, TaskValidationError, type Actor } from "./access";
 import { ruleInputSchema } from "./automation-model";
 import { MAX_ATTACHMENT_BYTES, NOTIFICATION_TYPES } from "./constants";
 import {
@@ -34,6 +35,29 @@ import { viewConfigSchema } from "./query-engine";
 import { publishChange } from "./realtime";
 import { createTask, requireTaskEdit, requireTaskRead, userContext } from "./service";
 
+// ─── Réglages d'espace : auteur ───────────────────────────────────────────────
+
+/**
+ * Point de contrôle central sur un réglage d'espace (lot A, décision a) :
+ * étiquette et champ d'espace — lisibles par tous, modifiables par leur
+ * créateur (refus explicite sinon) ; règle et modèle d'espace — personnels
+ * (introuvables pour les autres).
+ */
+function assertAuthor(
+  actor: Actor,
+  capability: "workspace.tag.write" | "workspace.field.write" | "workspace.rule.write" | "workspace.template.write",
+  record: { workspaceId: string; createdById: string | null },
+  refused: string,
+): void {
+  const decision = authorize(actor, capability, { kind: "record", workspaceId: record.workspaceId, ownerId: record.createdById });
+  if (!decision.allowed) throw new TaskAccessError(decision.code, decision.code === "FORBIDDEN" ? refused : undefined);
+}
+
+/** Règles et modèles d'espace visibles de l'acteur : les siens. */
+export function personalSettingWhere(actor: Actor) {
+  return { workspaceId: actor.workspaceId, OR: [{ projectId: { not: null } }, { createdById: actor.id }] };
+}
+
 // ─── Tags ─────────────────────────────────────────────────────────────────────
 
 export async function createTag(actor: Actor, raw: unknown): Promise<{ id: string; name: string; color: string }> {
@@ -41,7 +65,7 @@ export async function createTag(actor: Actor, raw: unknown): Promise<{ id: strin
   if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Tag invalide.");
   const tag = await prisma.tag.upsert({
     where: { workspaceId_name: { workspaceId: actor.workspaceId, name: parsed.data.name } },
-    create: { workspaceId: actor.workspaceId, name: parsed.data.name, color: parsed.data.color ?? "slate" },
+    create: { workspaceId: actor.workspaceId, name: parsed.data.name, color: parsed.data.color ?? "slate", createdById: actor.id },
     update: {},
     select: { id: true, name: true, color: true },
   });
@@ -52,13 +76,22 @@ export async function createTag(actor: Actor, raw: unknown): Promise<{ id: strin
 export async function updateTag(actor: Actor, tagId: string, raw: unknown): Promise<void> {
   const parsed = tagInputSchema.partial().safeParse(raw);
   if (!parsed.success) throw new TaskValidationError(parsed.error.issues[0]?.message ?? "Tag invalide.");
-  const { count } = await prisma.tag.updateMany({ where: { id: tagId, workspaceId: actor.workspaceId }, data: parsed.data });
+  const tag = await prisma.tag.findFirst({ where: { id: tagId, workspaceId: actor.workspaceId }, select: { workspaceId: true, createdById: true } });
+  if (!tag) throw new TaskAccessError("NOT_FOUND");
+  assertAuthor(actor, "workspace.tag.write", tag, TAG_REFUSED);
+  const { count } = await prisma.tag.updateMany({ where: { id: tagId, workspaceId: actor.workspaceId, createdById: actor.id }, data: parsed.data });
   if (!count) throw new TaskAccessError("NOT_FOUND");
   await publishChange({ w: actor.workspaceId, a: actor.id, k: "context" });
 }
 
+const TAG_REFUSED = "Seule la personne qui a créé cette étiquette peut la modifier ou la supprimer.";
+const FIELD_REFUSED = "Seule la personne qui a créé ce champ peut le modifier ou le supprimer.";
+
 export async function deleteTag(actor: Actor, tagId: string): Promise<void> {
-  const { count } = await prisma.tag.deleteMany({ where: { id: tagId, workspaceId: actor.workspaceId } });
+  const tag = await prisma.tag.findFirst({ where: { id: tagId, workspaceId: actor.workspaceId }, select: { workspaceId: true, createdById: true } });
+  if (!tag) throw new TaskAccessError("NOT_FOUND");
+  assertAuthor(actor, "workspace.tag.write", tag, TAG_REFUSED);
+  const { count } = await prisma.tag.deleteMany({ where: { id: tagId, workspaceId: actor.workspaceId, createdById: actor.id } });
   if (!count) throw new TaskAccessError("NOT_FOUND");
   await publishChange({ w: actor.workspaceId, a: actor.id, k: "context" });
 }
@@ -79,8 +112,10 @@ export async function saveCustomField(actor: Actor, fieldId: string | null, raw:
   if (fieldId) {
     const existing = await prisma.customField.findFirst({ where: { id: fieldId, workspaceId: actor.workspaceId } });
     if (!existing) throw new TaskAccessError("NOT_FOUND");
-    // Un champ propre à un projet se modifie avec les droits d'édition de ce projet.
+    // Un champ propre à un projet se modifie avec les droits d'édition de ce
+    // projet ; un champ d'espace, par son créateur seul (décision a).
     if (existing.projectId) await requireProjectEdit(actor, existing.projectId);
+    else assertAuthor(actor, "workspace.field.write", existing, FIELD_REFUSED);
     if (existing.type !== input.type) throw new TaskValidationError("Le type d'un champ existant ne peut pas changer.");
     await prisma.customField.update({ where: { id: fieldId }, data: { name: input.name, options } });
     // Options supprimées : on retire leurs valeurs pour ne pas laisser d'orphelins.
@@ -98,7 +133,7 @@ export async function saveCustomField(actor: Actor, fieldId: string | null, raw:
     // Créé depuis un projet : le champ appartient à ce projet et n'est
     // utilisable que là. Créé depuis la bibliothèque : partagé par l'espace.
     const created = await prisma.customField.create({
-      data: { workspaceId: actor.workspaceId, name: input.name, type: input.type, options, projectId: projectId ?? null },
+      data: { workspaceId: actor.workspaceId, name: input.name, type: input.type, options, projectId: projectId ?? null, createdById: actor.id },
       select: { id: true },
     });
     id = created.id;
@@ -118,9 +153,13 @@ export async function saveCustomField(actor: Actor, fieldId: string | null, raw:
 }
 
 export async function deleteCustomField(actor: Actor, fieldId: string): Promise<void> {
-  const field = await prisma.customField.findFirst({ where: { id: fieldId, workspaceId: actor.workspaceId }, select: { projectId: true } });
+  const field = await prisma.customField.findFirst({
+    where: { id: fieldId, workspaceId: actor.workspaceId },
+    select: { projectId: true, workspaceId: true, createdById: true },
+  });
   if (!field) throw new TaskAccessError("NOT_FOUND");
   if (field.projectId) await requireProjectEdit(actor, field.projectId);
+  else assertAuthor(actor, "workspace.field.write", field, FIELD_REFUSED);
   const { count } = await prisma.customField.deleteMany({ where: { id: fieldId, workspaceId: actor.workspaceId } });
   if (!count) throw new TaskAccessError("NOT_FOUND");
   await recordAudit({ workspaceId: actor.workspaceId, userId: actor.id, action: "DELETE", entityType: AUDIT_ENTITY_TYPES.CUSTOM_FIELD, entityId: fieldId });
@@ -158,7 +197,8 @@ async function assertRuleReferences(actor: Actor, projectId: string | null, inpu
     if (n !== tagIds.size) throw new TaskValidationError("Tag introuvable.");
   }
   if (userIds.size) {
-    const n = await prisma.user.count({ where: { id: { in: [...userIds] }, workspaceId: actor.workspaceId } });
+    // Destinataires et responsables : l'annuaire de l'auteur (décision b).
+    const n = await prisma.user.count({ where: { AND: [{ id: { in: [...userIds] } }, directoryUserWhere(actor)] } });
     if (n !== userIds.size) throw new TaskValidationError("Utilisateur introuvable.");
   }
 }
@@ -166,25 +206,18 @@ async function assertRuleReferences(actor: Actor, projectId: string | null, inpu
 /**
  * Gestion des règles (politique documentée dans `docs/tasks.md`) :
  *   - règle de projet : toute personne qui peut modifier le contenu du projet ;
- *   - règle d'espace : n'importe quel membre de l'espace peut en créer une
- *     (elle n'agit qu'avec ses propres droits), mais seule la personne qui
- *     l'a enregistrée peut la modifier ou la supprimer — sauf si celle-ci est
- *     désactivée ou supprimée : la règle est alors inerte et peut être
- *     reprise ou supprimée par un autre membre.
+ *   - règle d'espace : **personnelle** (lot A, décision a) — visible,
+ *     modifiable et supprimable par la seule personne qui l'a enregistrée ;
+ *     pour les autres, elle n'existe pas.
  * Enregistrer une règle (création ou modification) la fait exécuter avec les
  * droits de la personne qui l'enregistre (`created_by_id`).
  */
-async function requireRuleManage(actor: Actor, rule: { projectId: string | null; createdById: string | null }) {
+async function requireRuleManage(actor: Actor, rule: { workspaceId: string; projectId: string | null; createdById: string | null }) {
   if (rule.projectId) {
     await requireProjectEdit(actor, rule.projectId);
     return;
   }
-  if (rule.createdById === actor.id || !rule.createdById) return;
-  const author = await prisma.user.findFirst({
-    where: { id: rule.createdById, workspaceId: actor.workspaceId, isActive: true },
-    select: { id: true },
-  });
-  if (author) throw new TaskAccessError("FORBIDDEN", "Seule la personne qui a enregistré cette règle d'espace peut la modifier ou la supprimer.");
+  assertAuthor(actor, "workspace.rule.write", rule, "");
 }
 
 export async function saveRule(actor: Actor, ruleId: string | null, projectId: string | null, raw: unknown): Promise<string> {
@@ -249,14 +282,15 @@ export async function saveTaskTemplate(actor: Actor, templateId: string | null, 
   const input = parsed.data;
   // Modèle existant : d'abord les droits sur son projet actuel (même réponse
   // qu'un identifiant inconnu si on ne peut pas le lire), puis sur le projet
-  // demandé. Un modèle d'espace reste modifiable par tout l'espace.
+  // demandé. Un modèle d'espace est personnel (lot A, décision a).
   if (templateId) {
     const existing = await prisma.taskTemplate.findFirst({
       where: { id: templateId, workspaceId: actor.workspaceId },
-      select: { projectId: true },
+      select: { projectId: true, workspaceId: true, createdById: true },
     });
     if (!existing) throw new TaskAccessError("NOT_FOUND");
     if (existing.projectId) await requireProjectEdit(actor, existing.projectId);
+    else assertAuthor(actor, "workspace.template.write", existing, "");
   }
   if (input.projectId) await requireProjectEdit(actor, input.projectId);
   if (input.tagIds?.length) {
@@ -276,7 +310,8 @@ export async function saveTaskTemplate(actor: Actor, templateId: string | null, 
   if (templateId) {
     const { count } = await prisma.taskTemplate.updateMany({
       where: { id: templateId, workspaceId: actor.workspaceId },
-      data: "projectId" in input ? { ...data, projectId: input.projectId ?? null } : data,
+      // Un modèle qui redevient « d'espace » devient celui de qui l'y place.
+      data: "projectId" in input ? { ...data, projectId: input.projectId ?? null, ...(input.projectId ? {} : { createdById: actor.id }) } : data,
     });
     if (!count) throw new TaskAccessError("NOT_FOUND");
     return templateId;
@@ -292,6 +327,7 @@ export async function deleteTaskTemplate(actor: Actor, templateId: string): Prom
   const template = await prisma.taskTemplate.findFirst({ where: { id: templateId, workspaceId: actor.workspaceId } });
   if (!template) throw new TaskAccessError("NOT_FOUND");
   if (template.projectId) await requireProjectEdit(actor, template.projectId);
+  else assertAuthor(actor, "workspace.template.write", template, "");
   await prisma.taskTemplate.delete({ where: { id: templateId } });
 }
 
@@ -380,8 +416,15 @@ export async function submitForm(
     select: { id: true, name: true, projectId: true, sectionId: true, fields: true, project: { select: { ownerId: true, archivedAt: true } } },
   });
   if (!form) throw new TaskAccessError("NOT_FOUND", "Formulaire introuvable ou désactivé.");
-  if (form.project.archivedAt) throw new TaskValidationError("Ce projet est archivé.");
-  await requireProjectRead(actor, form.projectId);
+  // Lot A : envoyer un formulaire crée une tâche dans le projet, donc exige
+  // l'Édition — vérifiée AVANT tout autre message (un projet non lisible
+  // reste introuvable ; un projet archivé est refusé par la même règle).
+  try {
+    await requireProjectEdit(actor, form.projectId);
+  } catch (error) {
+    if (error instanceof TaskAccessError && error.code === "NOT_FOUND") throw new TaskAccessError("NOT_FOUND", "Formulaire introuvable ou désactivé.");
+    throw error;
+  }
   const fields = formInputSchema.shape.fields.parse(form.fields ?? {});
 
   const custom: Record<string, unknown> = {};
@@ -389,9 +432,7 @@ export async function submitForm(
     if (raw.custom && fieldId in raw.custom) custom[fieldId] = raw.custom[fieldId];
   }
 
-  // La création se fait dans le contexte d'une règle « formulaire » : le
-  // demandeur peut ne pas avoir le droit d'écrire dans le projet.
-  const ctx = { actor, trusted: true };
+  const ctx = userContext(actor);
   const task = await createTask(ctx, {
     title: raw.title,
     description: fields.description ? (raw.description ?? null) : null,
@@ -501,7 +542,9 @@ export async function importCsv(actor: Actor, projectId: string, text: string): 
   if (rows.length - 1 > MAX_IMPORT_ROWS) throw new TaskValidationError(`${MAX_IMPORT_ROWS} lignes maximum par import.`);
 
   const [users, sections, tags] = await Promise.all([
-    prisma.user.findMany({ where: { workspaceId: actor.workspaceId, isActive: true }, select: { id: true, email: true, displayName: true } }),
+    // Responsables reconnus : l'annuaire de l'acteur seulement (décision b) — sinon
+    // l'import servirait à sonder les adresses de l'espace.
+    prisma.user.findMany({ where: { AND: [{ isActive: true }, directoryUserWhere(actor)] }, select: { id: true, email: true, displayName: true } }),
     prisma.projectSection.findMany({ where: { projectId }, select: { id: true, name: true } }),
     prisma.tag.findMany({ where: { workspaceId: actor.workspaceId }, select: { id: true, name: true } }),
   ]);

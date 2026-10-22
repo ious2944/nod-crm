@@ -3,7 +3,8 @@ import "server-only";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { dayKey, endOfDay } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
-import { getWorkspaceIdForPage } from "@/lib/workspace";
+import { crmReadableWhere, type CrmOwned } from "@/lib/authz/crm-access";
+import { getActorForPage } from "@/lib/workspace";
 import { type FollowUpFilter } from "./filters";
 import { toFollowUpView, type FollowUpView } from "./view";
 
@@ -53,7 +54,7 @@ export async function getFollowUpBoard(
   filter: FollowUpFilter,
   query: string = "",
 ): Promise<FollowUpBoard> {
-  const workspaceId = await getWorkspaceIdForPage();
+  const owned = crmReadableWhere(await getActorForPage());
   const now = new Date();
   const todayKey = dayKey(now, APP_TIME_ZONE);
   const endOfToday = endOfDay(todayKey, APP_TIME_ZONE);
@@ -61,13 +62,13 @@ export async function getFollowUpBoard(
   // Compteurs via SQL — aucun chargement de lignes en mémoire.
   const [open, ballWithMe, ballWithThem, toNudge, needsAttentionCount, completed] =
     await prisma.$transaction([
-      prisma.followUp.count({ where: { workspaceId, status: "OPEN" } }),
-      prisma.followUp.count({ where: { workspaceId, status: "OPEN", ballOwner: "ME" } }),
-      prisma.followUp.count({ where: { workspaceId, status: "OPEN", ballOwner: "THEM" } }),
+      prisma.followUp.count({ where: { ...owned, status: "OPEN" } }),
+      prisma.followUp.count({ where: { ...owned, status: "OPEN", ballOwner: "ME" } }),
+      prisma.followUp.count({ where: { ...owned, status: "OPEN", ballOwner: "THEM" } }),
       // toNudge : balle chez eux + échéance passée (= matchesOpenFilter("nudge"))
       prisma.followUp.count({
         where: {
-          workspaceId,
+          ...owned,
           status: "OPEN",
           ballOwner: "THEM",
           dueAt: { lte: endOfToday },
@@ -75,10 +76,10 @@ export async function getFollowUpBoard(
       }),
       // needsAttention : échéance atteinte ou passée (= overdueDays >= 0)
       prisma.followUp.count({
-        where: { workspaceId, status: "OPEN", dueAt: { lte: endOfToday } },
+        where: { ...owned, status: "OPEN", dueAt: { lte: endOfToday } },
       }),
       prisma.followUp.count({
-        where: { workspaceId, status: { in: ["COMPLETED", "ABANDONED"] } },
+        where: { ...owned, status: { in: ["COMPLETED", "ABANDONED"] } },
       }),
     ]);
 
@@ -93,7 +94,7 @@ export async function getFollowUpBoard(
 
   if (filter === "done") {
     // Les terminés sont plafonnés à 100 : on leur applique la recherche côté DB.
-    const doneWhere = buildSearchWhere(workspaceId, { in: ["COMPLETED", "ABANDONED"] }, query);
+    const doneWhere = buildSearchWhere(owned, { in: ["COMPLETED", "ABANDONED"] }, query);
     const doneRecords = await prisma.followUp.findMany({
       where: doneWhere,
       orderBy: [{ completedAt: "desc" }, { updatedAt: "desc" }],
@@ -108,7 +109,7 @@ export async function getFollowUpBoard(
   }
 
   // Pour les ouverts : filtre côté DB selon l'onglet actif, recherche côté DB.
-  const openWhere = buildOpenWhere(workspaceId, filter, query, endOfToday);
+  const openWhere = buildOpenWhere(owned, filter, query, endOfToday);
   const openRecords = await prisma.followUp.findMany({
     where: openWhere,
     orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
@@ -129,12 +130,12 @@ export async function getFollowUpBoard(
  * on ne charge que les enregistrements utiles plutôt que tout en mémoire.
  */
 function buildOpenWhere(
-  workspaceId: string,
+  owned: CrmOwned,
   filter: FollowUpFilter,
   query: string,
   endOfToday: Date,
 ): object {
-  const base: Record<string, unknown> = { workspaceId, status: "OPEN" };
+  const base: Record<string, unknown> = { ...owned, status: "OPEN" };
 
   switch (filter) {
     case "me":
@@ -173,11 +174,11 @@ function buildOpenWhere(
  * `mode: "insensitive"` génère ILIKE sur PostgreSQL.
  */
 function buildSearchWhere(
-  workspaceId: string,
+  owned: CrmOwned,
   status: { in: string[] } | string,
   query: string,
 ): object {
-  const base = { workspaceId, status };
+  const base = { ...owned, status };
   const q = query.trim();
   if (!q) return base;
 
@@ -199,11 +200,11 @@ function buildSearchWhere(
  * La borne est la fin du jour courant dans `APP_TIME_ZONE`.
  */
 export async function getActionableFollowUps(endOfToday: Date): Promise<FollowUpView[]> {
-  const workspaceId = await getWorkspaceIdForPage();
+  const owned = crmReadableWhere(await getActorForPage());
   const now = new Date();
 
   const records = await prisma.followUp.findMany({
-    where: { workspaceId, status: "OPEN", dueAt: { lte: endOfToday } },
+    where: { ...owned, status: "OPEN", dueAt: { lte: endOfToday } },
     orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
     include: { contact: CONTACT_SELECTION },
   });

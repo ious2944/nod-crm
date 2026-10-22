@@ -8,15 +8,18 @@ import { prisma } from "@/lib/prisma";
 import {
   canEditProjectContent,
   canReadProject,
+  directoryUserWhere,
   evaluateTaskAccess,
   NOT_TEMPLATE_TASK,
   projectAccessSelect,
+  readableNotificationWhere,
   readableProjectWhere,
   taskAccessSelect,
   TaskAccessError,
   visibleTaskWhere,
   type Actor,
 } from "./access";
+import { crmReadableWhere } from "@/lib/authz/crm-access";
 import { ruleInputSchema, type AutomationRuleItem, type AutomationRunItem } from "./automation-model";
 import { formInputSchema } from "./inputs";
 import { viewConfigSchema, type TaskFilters, type ViewConfig } from "./query-engine";
@@ -65,8 +68,9 @@ const contactLabel = (c: { firstName: string; lastName: string }) => `${c.firstN
 
 export async function getWorkContext(actor: Actor): Promise<WorkContext> {
   const [users, tags, fields, projects, unreadCount] = await Promise.all([
+    // Annuaire (décision b) : soi-même et les co-membres des projets lisibles.
     prisma.user.findMany({
-      where: { workspaceId: actor.workspaceId },
+      where: directoryUserWhere(actor),
       select: { id: true, email: true, displayName: true, isActive: true },
       orderBy: [{ displayName: "asc" }, { email: "asc" }],
     }),
@@ -81,7 +85,7 @@ export async function getWorkContext(actor: Actor): Promise<WorkContext> {
       select: projectSummarySelect(actor),
       orderBy: [{ name: "asc" }],
     }),
-    prisma.notification.count({ where: { userId: actor.id, workspaceId: actor.workspaceId, readAt: null, archivedAt: null } }),
+    prisma.notification.count({ where: { AND: [readableNotificationWhere(actor), { readAt: null, archivedAt: null }] } }),
   ]);
   const refs = users.map(toUserRef);
   const me = refs.find((u) => u.id === actor.id)!;
@@ -148,7 +152,7 @@ export async function getProjectDetail(actor: Actor, projectId: string): Promise
       opportunity: { select: { id: true, name: true } },
     },
   });
-  if (!project || !canReadProject(project)) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
+  if (!project || !canReadProject(project, actor)) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
   const members = await prisma.projectMember.findMany({
     where: { projectId },
     select: { userId: true, role: true },
@@ -463,7 +467,7 @@ export async function resolveTaskLocation(actor: Actor, taskId: string): Promise
     },
   });
   if (!task) throw new TaskAccessError("NOT_FOUND");
-  const readable = [...task.projects, ...(task.parent?.projects ?? [])].find((p) => canReadProject(p.project));
+  const readable = [...task.projects, ...(task.parent?.projects ?? [])].find((p) => canReadProject(p.project, actor));
   const projectId = readable?.projectId;
   return projectId ? `/tasks/projects/${projectId}?view=list&task=${taskId}` : `/tasks?task=${taskId}`;
 }
@@ -550,10 +554,10 @@ export async function getLinkedWork(actor: Actor, kind: CrmKind, id: string) {
 
   const exists =
     kind === "contact"
-      ? await prisma.contact.findFirst({ where: { id, workspaceId: actor.workspaceId }, select: { id: true } })
+      ? await prisma.contact.findFirst({ where: { id, ...crmReadableWhere(actor) }, select: { id: true } })
       : kind === "organization"
-        ? await prisma.organization.findFirst({ where: { id, workspaceId: actor.workspaceId }, select: { id: true } })
-        : await prisma.opportunity.findFirst({ where: { id, workspaceId: actor.workspaceId }, select: { id: true } });
+        ? await prisma.organization.findFirst({ where: { id, ...crmReadableWhere(actor) }, select: { id: true } })
+        : await prisma.opportunity.findFirst({ where: { id, ...crmReadableWhere(actor) }, select: { id: true } });
   if (!exists) throw new TaskAccessError("NOT_FOUND");
 
   const since = new Date(Date.now() - 90 * 86_400_000);
@@ -581,14 +585,14 @@ export async function getLinkedWork(actor: Actor, kind: CrmKind, id: string) {
 
 export async function getCrmRef(actor: Actor, kind: CrmKind, id: string): Promise<CrmRef | null> {
   if (kind === "contact") {
-    const c = await prisma.contact.findFirst({ where: { id, workspaceId: actor.workspaceId }, select: { id: true, firstName: true, lastName: true } });
+    const c = await prisma.contact.findFirst({ where: { id, ...crmReadableWhere(actor) }, select: { id: true, firstName: true, lastName: true } });
     return c ? { id: c.id, label: contactLabel(c) } : null;
   }
   if (kind === "organization") {
-    const o = await prisma.organization.findFirst({ where: { id, workspaceId: actor.workspaceId }, select: { id: true, name: true } });
+    const o = await prisma.organization.findFirst({ where: { id, ...crmReadableWhere(actor) }, select: { id: true, name: true } });
     return o ? { id: o.id, label: o.name } : null;
   }
-  const o = await prisma.opportunity.findFirst({ where: { id, workspaceId: actor.workspaceId }, select: { id: true, name: true } });
+  const o = await prisma.opportunity.findFirst({ where: { id, ...crmReadableWhere(actor) }, select: { id: true, name: true } });
   return o ? { id: o.id, label: o.name } : null;
 }
 
@@ -598,7 +602,7 @@ export async function searchCrm(actor: Actor, kind: CrmKind, term: string): Prom
   if (kind === "contact") {
     const rows = await prisma.contact.findMany({
       where: {
-        workspaceId: actor.workspaceId,
+        ...crmReadableWhere(actor),
         archivedAt: null,
         ...(q ? { OR: [{ firstName: { contains: q, mode: "insensitive" } }, { lastName: { contains: q, mode: "insensitive" } }, { email: { contains: q, mode: "insensitive" } }] } : {}),
       },
@@ -610,7 +614,7 @@ export async function searchCrm(actor: Actor, kind: CrmKind, term: string): Prom
   }
   if (kind === "organization") {
     const rows = await prisma.organization.findMany({
-      where: { workspaceId: actor.workspaceId, archivedAt: null, ...(q ? { name: { contains: q, mode: "insensitive" } } : {}) },
+      where: { ...crmReadableWhere(actor), archivedAt: null, ...(q ? { name: { contains: q, mode: "insensitive" } } : {}) },
       take: 10,
       orderBy: { updatedAt: "desc" },
       select: { id: true, name: true },
@@ -618,7 +622,7 @@ export async function searchCrm(actor: Actor, kind: CrmKind, term: string): Prom
     return rows.map((o) => ({ id: o.id, label: o.name }));
   }
   const rows = await prisma.opportunity.findMany({
-    where: { workspaceId: actor.workspaceId, ...(q ? { name: { contains: q, mode: "insensitive" } } : {}) },
+    where: { ...crmReadableWhere(actor), ...(q ? { name: { contains: q, mode: "insensitive" } } : {}) },
     take: 10,
     orderBy: { updatedAt: "desc" },
     select: { id: true, name: true },
@@ -648,28 +652,13 @@ export async function quickFindTasks(actor: Actor, term: string, excludeId?: str
 // ─── Notifications ────────────────────────────────────────────────────────────
 
 export async function listNotifications(actor: Actor, archived = false): Promise<NotificationItem[]> {
+  // Masquées dès la perte d'accès : voir `readableNotificationWhere`.
   const rows = await prisma.notification.findMany({
-    where: { userId: actor.id, workspaceId: actor.workspaceId, archivedAt: archived ? { not: null } : null },
+    where: { AND: [readableNotificationWhere(actor), { archivedAt: archived ? { not: null } : null }] },
     orderBy: { createdAt: "desc" },
     take: 200,
   });
-  // Une notification ne survit pas à la perte d'accès : tâche à la corbeille,
-  // retirée du projet, projet devenu privé… Elle est masquée, pas supprimée.
-  const taskIds = [...new Set(rows.map((n) => n.taskId).filter((id): id is string => Boolean(id)))];
-  const projectIds = [...new Set(rows.map((n) => n.projectId).filter((id): id is string => Boolean(id)))];
-  const [visibleTasks, readableProjects] = await Promise.all([
-    taskIds.length
-      ? prisma.task.findMany({ where: { AND: [visibleTaskWhere(actor), { id: { in: taskIds } }] }, select: { id: true } })
-      : [],
-    projectIds.length
-      ? prisma.project.findMany({ where: { AND: [readableProjectWhere(actor), { id: { in: projectIds } }] }, select: { id: true } })
-      : [],
-  ]);
-  const okTasks = new Set(visibleTasks.map((t) => t.id));
-  const okProjects = new Set(readableProjects.map((p) => p.id));
-  return rows
-    .filter((n) => (n.taskId ? okTasks.has(n.taskId) : n.projectId ? okProjects.has(n.projectId) : true))
-    .map((n) => ({
+  return rows.map((n) => ({
     id: n.id,
     type: n.type,
     title: n.title,
@@ -694,18 +683,19 @@ export async function getNotificationPreferences(actor: Actor): Promise<Record<s
 export async function getProjectSettings(actor: Actor, projectId: string) {
   const detail = await getProjectDetail(actor, projectId);
   const [rules, runs, forms, templates, projectTemplates] = await Promise.all([
+    // Règles et modèles d'espace : personnels (décision a) — seulement les siens.
     prisma.automationRule.findMany({
-      where: { workspaceId: actor.workspaceId, OR: [{ projectId }, { projectId: null }] },
+      where: { workspaceId: actor.workspaceId, OR: [{ projectId }, { projectId: null, createdById: actor.id }] },
       orderBy: { createdAt: "asc" },
     }),
     prisma.automationRun.findMany({
-      where: { workspaceId: actor.workspaceId, rule: { OR: [{ projectId }, { projectId: null }] } },
+      where: { workspaceId: actor.workspaceId, rule: { OR: [{ projectId }, { projectId: null, createdById: actor.id }] } },
       orderBy: { createdAt: "desc" },
       take: 50,
     }),
     prisma.taskForm.findMany({ where: { projectId }, orderBy: { createdAt: "asc" } }),
     prisma.taskTemplate.findMany({
-      where: { workspaceId: actor.workspaceId, OR: [{ projectId }, { projectId: null }] },
+      where: { workspaceId: actor.workspaceId, OR: [{ projectId }, { projectId: null, createdById: actor.id }] },
       orderBy: { name: "asc" },
     }),
     prisma.project.findMany({
@@ -721,16 +711,9 @@ export async function getProjectSettings(actor: Actor, projectId: string) {
       ? (await prisma.task.findMany({ where: { AND: [visibleTaskWhere(actor), { id: { in: runTaskIds } }] }, select: { id: true } })).map((t) => t.id)
       : [],
   );
-  // Règles d'espace : modifiables par la personne qui les a enregistrées, ou
-  // par tous si elle n'est plus active (la règle est alors inerte).
-  const authorIds = [...new Set(rules.filter((r) => !r.projectId && r.createdById).map((r) => r.createdById!))];
-  const activeAuthors = new Set(
-    authorIds.length
-      ? (await prisma.user.findMany({ where: { id: { in: authorIds }, workspaceId: actor.workspaceId, isActive: true }, select: { id: true } })).map((u) => u.id)
-      : [],
-  );
+  // Règles d'espace : personnelles, donc toujours les siennes ici.
   const canManageRule = (rule: { projectId: string | null; createdById: string | null }) =>
-    rule.projectId ? detail.canEdit : rule.createdById === actor.id || !rule.createdById || !activeAuthors.has(rule.createdById);
+    rule.projectId ? detail.canEdit : rule.createdById === actor.id;
   return {
     rules: rules
       .map((rule): AutomationRuleItem | null => {
@@ -791,7 +774,7 @@ export async function getForm(actor: Actor, formId: string) {
     where: { id: formId, workspaceId: actor.workspaceId },
     include: { project: { select: { ...projectSummarySelect(actor) } } },
   });
-  if (!form || !canReadProject(form.project)) throw new TaskAccessError("NOT_FOUND", "Formulaire introuvable.");
+  if (!form || !canReadProject(form.project, actor)) throw new TaskAccessError("NOT_FOUND", "Formulaire introuvable.");
   return {
     id: form.id,
     name: form.name,
@@ -835,7 +818,8 @@ export async function getWorkload(actor: Actor, fromKey: string, weeks: number) 
       },
       { take: 5000 },
     ),
-    prisma.user.findMany({ where: { workspaceId: actor.workspaceId }, select: { id: true, weeklyCapacityMinutes: true } }),
+    // Capacités : l'annuaire de l'acteur seulement (décision b).
+    prisma.user.findMany({ where: directoryUserWhere(actor), select: { id: true, weeklyCapacityMinutes: true } }),
   ]);
   const capacities = Object.fromEntries(users.map((u) => [u.id, u.weeklyCapacityMinutes]));
   return { tasks, from: fromKey, to: toKeyStr, capacities };

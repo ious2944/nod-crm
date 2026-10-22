@@ -67,7 +67,7 @@ for (const assigneeId of [null, "me", "other"]) {
 const expected = (allowed: boolean, readable: boolean) =>
   allowed ? { allowed: true } : { allowed: false, code: readable ? "FORBIDDEN" : "NOT_FOUND" };
 
-describe("authorize — lot 0, sans règle nouvelle", () => {
+describe("authorize — délègue aux règles de access.ts", () => {
   it("sans ressource, autorise tout acteur de session pour chaque capacité", () => {
     for (const capability of CAPABILITIES) expect(authorize(me, capability)).toEqual({ allowed: true });
   });
@@ -104,7 +104,7 @@ describe("authorize — lot 0, sans règle nouvelle", () => {
 
   it("projets : identique à canReadProject / canEditProjectContent / canManageProject", () => {
     for (const project of projects) {
-      const readable = canReadProject(project);
+      const readable = canReadProject(project, me);
       const resource = { kind: "project" as const, workspaceId: W, project };
       expect(authorize(me, "project.read", resource)).toEqual(expected(readable, readable));
       expect(authorize(me, "project.edit", resource)).toEqual(expected(readable && canEditProjectContent(project, me), readable));
@@ -128,6 +128,42 @@ describe("authorize — lot 0, sans règle nouvelle", () => {
       expect(authorize(me, "task.restore", resource)).toEqual(expected(rights.canRestore, visible));
       expect(authorize(me, "task.purge", resource)).toEqual(expected(rights.canPurge, visible));
     }
+  });
+
+  it("lot A — fiche CRM / RGPD : seul le propriétaire, sinon introuvable", () => {
+    for (const capability of CAPABILITIES.filter((c) => CAPABILITY_RULES[c].scope === "owned")) {
+      expect(authorize(me, capability, { kind: "record", workspaceId: W, ownerId: "me" })).toEqual({ allowed: true });
+      expect(authorize(me, capability, { kind: "record", workspaceId: W, ownerId: "other" })).toEqual({ allowed: false, code: "NOT_FOUND" });
+    }
+  });
+
+  it("lot A — étiquette et champ d'espace : visibles, modifiables par leur créateur seul (refus explicite)", () => {
+    for (const capability of ["workspace.tag.write", "workspace.field.write"] as const) {
+      expect(authorize(me, capability, { kind: "record", workspaceId: W, ownerId: "me" })).toEqual({ allowed: true });
+      expect(authorize(me, capability, { kind: "record", workspaceId: W, ownerId: "other" })).toEqual({ allowed: false, code: "FORBIDDEN" });
+      expect(authorize(me, capability, { kind: "record", workspaceId: W, ownerId: null })).toEqual({ allowed: false, code: "FORBIDDEN" });
+    }
+  });
+
+  it("lot A — règle et modèle d'espace : personnels, introuvables pour les autres", () => {
+    for (const capability of ["workspace.rule.write", "workspace.template.write"] as const) {
+      expect(authorize(me, capability, { kind: "record", workspaceId: W, ownerId: "me" })).toEqual({ allowed: true });
+      expect(authorize(me, capability, { kind: "record", workspaceId: W, ownerId: "other" })).toEqual({ allowed: false, code: "NOT_FOUND" });
+    }
+  });
+
+  it("lot A — un projet WORKSPACE dont on n'est ni propriétaire ni membre n'est pas lisible", () => {
+    const project: ProjectAccessInfo = {
+      id: "p",
+      visibility: "WORKSPACE",
+      archivedAt: null,
+      isTemplate: false,
+      ownerId: "other",
+      createdById: "other",
+      deletedAt: null,
+      members: [],
+    };
+    expect(authorize(me, "project.read", { kind: "project", workspaceId: W, project })).toEqual({ allowed: false, code: "NOT_FOUND" });
   });
 
   it("une ressource qui ne correspond pas à la capacité est une erreur de programmation", () => {

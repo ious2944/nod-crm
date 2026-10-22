@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { createProjectAction, createTaskAction, saveRuleAction, updateTaskAction } from "@/app/(app)/tasks/work-actions";
+import { createProjectAction, createTaskAction, saveRuleAction, setProjectMemberAction, updateTaskAction } from "@/app/(app)/tasks/work-actions";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { addDaysToKey, dayKey, startOfDay } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
@@ -8,7 +8,7 @@ import { acquireLease } from "@/lib/tasks/jobs";
 import { REMINDER_JOB, runTaskReminders } from "@/lib/tasks/task-reminders";
 import type { ActionResult } from "@/lib/tasks/types";
 
-import { addUserToWorkspace, createWorkspaceWithUser, dropCookie, resetDatabase, signIn, type TestUser } from "./fixtures";
+import { addUserToWorkspace, createWorkspaceWithUser, dropCookie, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
 
 /**
  * Rappels d'échéance planifiés : exécution sans session, fuseau horaire,
@@ -31,6 +31,8 @@ describe("rappels d'échéance planifiés", () => {
     await resetDatabase();
     alice = await createWorkspaceWithUser("reminders-ws");
     bob = await addUserToWorkspace(alice.workspaceId, "Bob");
+    // Lot A (décision b) : les personnes du scénario partagent un projet « Équipe », donc l'annuaire.
+    await shareDirectory(alice, bob);
     await signIn(alice);
   });
 
@@ -59,6 +61,8 @@ describe("rappels d'échéance planifiés", () => {
 
   it("une seule déduplication pour le rappel intégré et les règles", async () => {
     const project = ok(await createProjectAction({ name: "Règles" }));
+    // Lot A : un responsable ne lit la tâche (et n'en reçoit les rappels) que s'il lit son projet.
+    ok(await setProjectMemberAction(project, bob.userId, "EDITOR"));
     const rule = ok(await saveRuleAction(null, project, { name: "J-2", trigger: "DUE_DATE_APPROACHING", triggerConfig: { days: 2 }, conditions: [], actions: [{ kind: "create_reminder" }], isEnabled: true }));
     const task = ok(await createTaskAction({ title: "Doublon ?", projectId: project, assigneeId: bob.userId, dueDate: addDaysToKey(today(), 1) }));
     dropCookie();

@@ -2,7 +2,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 
-import { evaluateTaskAccess, taskAccessSelect, type Actor } from "./access";
+import { canReadProject, evaluateTaskAccess, projectAccessSelect, taskAccessSelect, type Actor } from "./access";
 import type { NotificationType } from "./constants";
 import { publishChange } from "./realtime";
 
@@ -71,19 +71,18 @@ export async function notify(input: NotifyInput): Promise<number> {
   }
 
   if (input.projectId && !input.taskId && allowed.length) {
-    const readers = await prisma.project.findMany({
-      where: {
-        id: input.projectId,
-        workspaceId: input.workspaceId,
-      },
-      select: { visibility: true, deletedAt: true, members: { where: { userId: { in: allowed } }, select: { userId: true } } },
-    });
-    const project = readers[0];
-    if (!project || project.deletedAt) return 0;
-    if (project.visibility === "PRIVATE") {
-      const memberIds = new Set(project.members.map((m) => m.userId));
-      allowed = allowed.filter((id) => memberIds.has(id));
-    }
+    // Même règle que la lecture du projet (`canReadProject`) : propriétaire ou membre.
+    const checks = await Promise.all(
+      allowed.map(async (userId) => {
+        const actor: Actor = { id: userId, workspaceId: input.workspaceId };
+        const project = await prisma.project.findFirst({
+          where: { id: input.projectId!, workspaceId: input.workspaceId },
+          select: projectAccessSelect(actor),
+        });
+        return project && canReadProject(project, actor) ? userId : null;
+      }),
+    );
+    allowed = checks.filter((id): id is string => id !== null);
   }
 
   if (allowed.length === 0) return 0;

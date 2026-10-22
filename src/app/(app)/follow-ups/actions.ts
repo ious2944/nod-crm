@@ -70,6 +70,7 @@ export async function createFollowUp(
       const contact = await prisma.contact.create({
         data: {
           workspaceId,
+          ownerId: userId,
           firstName: input.newContactFirstName ?? "",
           lastName: input.newContactLastName ?? "",
           organizationName: input.newContactOrganization,
@@ -91,7 +92,7 @@ export async function createFollowUp(
       // que le contact d'un autre workspace. Le sélecteur ne le propose plus,
       // mais un formulaire resté ouvert dans un onglet, lui, le poste encore.
       const contact = await prisma.contact.findFirst({
-        where: { id: input.contactId, workspaceId, archivedAt: null },
+        where: { id: input.contactId, workspaceId, ownerId: userId, archivedAt: null },
         select: { id: true },
       });
 
@@ -112,6 +113,7 @@ export async function createFollowUp(
         where: {
           id: input.opportunityId,
           workspaceId,
+          ownerId: userId,
           status: { in: ["A_QUALIFIER", "EN_DISCUSSION", "PROPOSITION"] },
         },
         select: { id: true },
@@ -130,6 +132,7 @@ export async function createFollowUp(
     const followUp = await prisma.followUp.create({
       data: {
         workspaceId,
+        ownerId: userId,
         contactId,
         opportunityId,
         title: input.title,
@@ -168,7 +171,7 @@ export async function applyQuickAction(formData: FormData): Promise<void> {
     const { id, intent, days } = parsed.data;
 
     const followUp = await prisma.followUp.findFirst({
-      where: { id, workspaceId },
+      where: { id, workspaceId, ownerId: userId },
       select: { id: true, status: true, dueAt: true, opportunityId: true },
     });
 
@@ -192,7 +195,7 @@ export async function applyQuickAction(formData: FormData): Promise<void> {
     // encore la ligne dans cet état — l'autre repart à zéro ligne modifiée.
     // C'est ce qui rend la transition atomique sans transaction explicite.
     const { count } = await prisma.followUp.updateMany({
-      where: { id, workspaceId, status: followUp.status, dueAt: followUp.dueAt },
+      where: { id, workspaceId, ownerId: userId, status: followUp.status, dueAt: followUp.dueAt },
       data,
     });
 
@@ -249,7 +252,7 @@ export async function updateFollowUp(
 
     if (contactId) {
       const contact = await prisma.contact.findFirst({
-        where: { id: contactId, workspaceId, archivedAt: null },
+        where: { id: contactId, workspaceId, ownerId: userId, archivedAt: null },
         select: { id: true },
       });
 
@@ -264,7 +267,7 @@ export async function updateFollowUp(
     }
 
     const { count } = await prisma.followUp.updateMany({
-      where: { id, workspaceId },
+      where: { id, workspaceId, ownerId: userId },
       data: {
         title,
         description,

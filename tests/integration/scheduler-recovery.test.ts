@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { REMINDER_JOB } from "@/lib/tasks/task-reminders";
 import type { ActionResult } from "@/lib/tasks/types";
 
-import { addUserToWorkspace, createWorkspaceWithUser, resetDatabase, signIn, type TestUser } from "./fixtures";
+import { addUserToWorkspace, createWorkspaceWithUser, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
 
 /**
  * Reprise du planificateur avec de **vrais processus** distincts
@@ -88,6 +88,8 @@ describe("reprise du planificateur après arrêt brutal (processus réels)", { t
     await resetDatabase();
     const alice = await createWorkspaceWithUser("scheduler-ws");
     bob = await addUserToWorkspace(alice.workspaceId, "Bob");
+    // Lot A (décision b) : les personnes du scénario partagent un projet « Équipe », donc l'annuaire.
+    await shareDirectory(alice, bob);
     await signIn(alice);
     const today = dayKey(new Date(), APP_TIME_ZONE);
     for (let i = 0; i < TASKS; i += 1) ok(await createTaskAction({ title: `Échéance ${i}`, assigneeId: bob.userId, dueDate: today }));

@@ -13,6 +13,11 @@
  * `scope` dit quelle règle existante s'applique quand une ressource est
  * fournie à `authorize` (voir `authorize.ts`) :
  *   - `record`  : la donnée appartient à l'espace de l'acteur ;
+ *   - `owned`   : en plus, l'acteur en est propriétaire (`ownerId`) — CRM et
+ *     RGPD ; sinon introuvable (même filtre que `crmReadableWhere`) ;
+ *   - `authored`: lisible par l'espace, modifiable par son créateur seul
+ *     (`createdById`) ; sinon refus explicite (la donnée est visible) ;
+ *   - `personal`: visible et modifiable par son auteur seul ; sinon introuvable ;
  *   - `task`    : droit de `evaluateTaskAccess` (`right`) ;
  *   - `task-trash` / `project-trash` : `evaluateTrashAccess` / `evaluateProjectTrashAccess` ;
  *   - `project` : `canReadProject` / `canEditProjectContent` / `canManageProject`.
@@ -22,34 +27,34 @@
 
 export const CAPABILITY_RULES = {
   // ─── CRM ─────────────────────────────────────────────────────────────────
-  "crm.organization.read": { scope: "record" },
-  "crm.organization.create": { scope: "record" },
-  "crm.organization.update": { scope: "record" },
-  "crm.organization.archive": { scope: "record" },
-  "crm.contact.read": { scope: "record" },
-  "crm.contact.create": { scope: "record" },
-  "crm.contact.update": { scope: "record" },
-  "crm.contact.archive": { scope: "record" },
-  "crm.contact.import": { scope: "record" },
-  "crm.opportunity.read": { scope: "record" },
-  "crm.opportunity.create": { scope: "record" },
-  "crm.opportunity.update": { scope: "record" },
-  "crm.opportunity.delete": { scope: "record" },
-  "crm.followup.read": { scope: "record" },
-  "crm.followup.create": { scope: "record" },
-  "crm.followup.update": { scope: "record" },
+  "crm.organization.read": { scope: "owned" },
+  "crm.organization.create": { scope: "owned" },
+  "crm.organization.update": { scope: "owned" },
+  "crm.organization.archive": { scope: "owned" },
+  "crm.contact.read": { scope: "owned" },
+  "crm.contact.create": { scope: "owned" },
+  "crm.contact.update": { scope: "owned" },
+  "crm.contact.archive": { scope: "owned" },
+  "crm.contact.import": { scope: "owned" },
+  "crm.opportunity.read": { scope: "owned" },
+  "crm.opportunity.create": { scope: "owned" },
+  "crm.opportunity.update": { scope: "owned" },
+  "crm.opportunity.delete": { scope: "owned" },
+  "crm.followup.read": { scope: "owned" },
+  "crm.followup.create": { scope: "owned" },
+  "crm.followup.update": { scope: "owned" },
 
   // ─── RGPD ────────────────────────────────────────────────────────────────
-  "privacy.treatment.create": { scope: "record" },
-  "privacy.treatment.update": { scope: "record" },
-  "privacy.treatment.archive": { scope: "record" },
-  "privacy.processor.create": { scope: "record" },
-  "privacy.processor.update": { scope: "record" },
-  "privacy.processor.archive": { scope: "record" },
-  "privacy.request.create": { scope: "record" },
-  "privacy.request.update": { scope: "record" },
-  "privacy.incident.create": { scope: "record" },
-  "privacy.incident.update": { scope: "record" },
+  "privacy.treatment.create": { scope: "owned" },
+  "privacy.treatment.update": { scope: "owned" },
+  "privacy.treatment.archive": { scope: "owned" },
+  "privacy.processor.create": { scope: "owned" },
+  "privacy.processor.update": { scope: "owned" },
+  "privacy.processor.archive": { scope: "owned" },
+  "privacy.request.create": { scope: "owned" },
+  "privacy.request.update": { scope: "owned" },
+  "privacy.incident.create": { scope: "owned" },
+  "privacy.incident.update": { scope: "owned" },
 
   // ─── Tâches ──────────────────────────────────────────────────────────────
   /** Créer une tâche (libre, ou dans un projet modifiable — vérifié par le service). */
@@ -82,12 +87,14 @@ export const CAPABILITY_RULES = {
   "project.purge": { scope: "project-trash", right: "canPurge" },
 
   // ─── Espace (réglages partagés) ──────────────────────────────────────────
-  "workspace.tag.write": { scope: "record" },
-  /** Bibliothèque de champs ; un champ propre à un projet exige aussi `project.edit` (service). */
-  "workspace.field.write": { scope: "record" },
-  /** Règles d'automatisation (auteur ou éditeur du projet : vérifié par le service). */
-  "workspace.rule.write": { scope: "record" },
-  "workspace.template.write": { scope: "record" },
+  /** Étiquettes : tout l'espace les lit, seul leur créateur les modifie (décision a). */
+  "workspace.tag.write": { scope: "authored" },
+  /** Bibliothèque de champs : idem ; un champ propre à un projet exige `project.edit` (service). */
+  "workspace.field.write": { scope: "authored" },
+  /** Règles d'espace : personnelles (une règle de projet suit `project.edit`, service). */
+  "workspace.rule.write": { scope: "personal" },
+  /** Modèles de tâche d'espace : personnels (un modèle de projet suit `project.edit`, service). */
+  "workspace.template.write": { scope: "personal" },
 
   // ─── Préférences personnelles ────────────────────────────────────────────
   "user.view.write": { scope: "record" },
@@ -96,7 +103,7 @@ export const CAPABILITY_RULES = {
 } as const satisfies Record<string, CapabilityRule>;
 
 export type CapabilityRule =
-  | { scope: "record" }
+  | { scope: "record" | "owned" | "authored" | "personal" }
   | { scope: "task"; right: "canRead" | "canComment" | "canEdit" | "canManage" }
   | { scope: "task-trash" | "project-trash"; right: "canRestore" | "canPurge" }
   | { scope: "project"; right: "read" | "edit" | "manage" };

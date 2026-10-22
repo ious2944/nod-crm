@@ -45,6 +45,7 @@ import {
   resetDatabase,
   signIn,
   type TestUser,
+  shareDirectory,
 } from "./fixtures";
 
 /**
@@ -77,6 +78,8 @@ describe("gestion de travail", () => {
     await resetDatabase();
     alice = await createWorkspaceWithUser("work-ws");
     bob = await addUserToWorkspace(alice.workspaceId, "Bob");
+    // Lot A (décision b) : les personnes du scénario partagent un projet « Équipe », donc l'annuaire.
+    await shareDirectory(alice, bob);
     await signIn(alice);
   });
 
@@ -248,7 +251,11 @@ describe("gestion de travail", () => {
     });
 
     it("commentaires : la mention notifie la personne mentionnée", async () => {
-      const task = ok(await createTaskAction({ title: "À discuter" }));
+      // Lot A : une mention ne notifie qu'une personne qui lit la tâche — ici
+      // un membre du projet (une tâche libre n'est visible que de ses proches).
+      const { id } = await newProject();
+      ok(await setProjectMemberAction(id, bob.userId, "EDITOR"));
+      const task = ok(await createTaskAction({ title: "À discuter", projectId: id }));
       ok(await addCommentAction(task.id, `Peux-tu regarder @[Bob](${bob.userId}) ?`));
       const notifications = await prisma.notification.findMany({ where: { userId: bob.userId } });
       expect(notifications).toContainEqual(expect.objectContaining({ type: "MENTIONED", taskId: task.id }));
@@ -342,6 +349,8 @@ describe("gestion de travail", () => {
   describe("automatisations", () => {
     it("tâche passée en urgente → le responsable est notifié, exécution tracée", async () => {
       const { id } = await newProject();
+      // Lot A : le responsable ne lit la tâche (ni n'est notifié) que s'il lit le projet.
+      ok(await setProjectMemberAction(id, bob.userId, "EDITOR"));
       const ruleId = ok(await saveRuleAction(null, id, { name: "Urgent", trigger: "PRIORITY_CHANGED", triggerConfig: { priority: "URGENT" }, conditions: [], actions: [{ kind: "notify", target: "assignee" }], isEnabled: true }));
       const task = ok(await createTaskAction({ title: "Incident", projectId: id, assigneeId: bob.userId }));
       ok(await updateTaskAction(task.id, { priority: "URGENT" }));
@@ -362,6 +371,7 @@ describe("gestion de travail", () => {
 
     it("toutes les sous-tâches terminées → suggestion de terminer la parente", async () => {
       const { id } = await newProject();
+      ok(await setProjectMemberAction(id, bob.userId, "EDITOR"));
       ok(await saveRuleAction(null, id, { name: "Suggestion", trigger: "SUBTASKS_COMPLETED", triggerConfig: {}, conditions: [], actions: [{ kind: "suggest_complete_parent" }], isEnabled: true }));
       const parent = ok(await createTaskAction({ title: "Parente", projectId: id, assigneeId: bob.userId }));
       const s1 = ok(await createTaskAction({ title: "s1", parentId: parent.id }));
@@ -385,6 +395,7 @@ describe("gestion de travail", () => {
 
     it("rappel d'échéance : jamais envoyé deux fois", async () => {
       const { id } = await newProject();
+      ok(await setProjectMemberAction(id, bob.userId, "EDITOR"));
       ok(await saveRuleAction(null, id, { name: "Rappel", trigger: "DUE_DATE_APPROACHING", triggerConfig: { days: 2 }, conditions: [], actions: [{ kind: "create_reminder" }], isEnabled: true }));
       ok(await createTaskAction({ title: "Bientôt", projectId: id, assigneeId: bob.userId, dueDate: addDaysToKey(today(), 1) }));
       await runTaskReminders();
@@ -438,6 +449,7 @@ describe("cockpit et visibilité", () => {
     await resetDatabase();
     const alice = await createWorkspaceWithUser("cockpit-ws");
     const bob = await addUserToWorkspace(alice.workspaceId, "Bob");
+    await shareDirectory(alice, bob);
     await signIn(alice);
     const privateId = ok(await createProjectAction({ name: "Privé", visibility: "PRIVATE" }));
     ok(await createTaskAction({ title: "Privée d'Alice", projectId: privateId, assigneeId: null, dueDate: today() }));
@@ -449,16 +461,18 @@ describe("cockpit et visibilité", () => {
     const end = endOfDay(today(), APP_TIME_ZONE);
 
     await signIn(bob);
-    // Défaut historique : toutes les tâches accessibles, collègues compris —
-    // jamais celle du projet privé dont Bob n'est pas membre.
+    // Lot A : toutes les tâches accessibles — une tâche libre ne l'est que de
+    // son créateur, de son responsable et de ses collaborateurs. Bob ne voit
+    // donc ni la tâche libre d'Alice, ni celle du projet privé.
     const bobAll = await getActionableTasks(end);
-    expect(bobAll.map((t) => t.title).sort()).toEqual(["Pour Bob", "Pour moi"]);
-    expect(bobAll.find((t) => t.title === "Pour moi")).toMatchObject({ assigneeName: expect.any(String), assignedToMe: false });
+    expect(bobAll.map((t) => t.title).sort()).toEqual(["Pour Bob"]);
     expect((await getActionableTasks(end, "mine")).map((t) => t.title)).toEqual(["Pour Bob"]);
 
     await signIn(alice);
-    // Membre du projet privé : sa tâche y figure ; celle de Bob aussi (tâche libre).
-    expect((await getActionableTasks(end)).map((t) => t.title).sort()).toEqual(["Pour Bob", "Pour moi", "Privée d'Alice"]);
+    // Propriétaire du projet privé : sa tâche y figure ; celle qu'elle a créée pour Bob aussi.
+    const aliceAll = await getActionableTasks(end);
+    expect(aliceAll.map((t) => t.title).sort()).toEqual(["Pour Bob", "Pour moi", "Privée d'Alice"]);
+    expect(aliceAll.find((t) => t.title === "Pour Bob")).toMatchObject({ assigneeName: "Bob", assignedToMe: false });
     expect((await getActionableTasks(end, "mine")).map((t) => t.title)).toEqual(["Pour moi"]);
   });
 });

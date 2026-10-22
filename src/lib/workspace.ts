@@ -17,6 +17,16 @@ export async function getWorkspaceIdForPage(): Promise<string> {
   return (await requireUser()).workspaceId;
 }
 
+/**
+ * Pour une page ou une lecture CRM / RGPD : l'acteur complet (redirige vers
+ * /login sans session). Depuis le lot A, une fiche se lit par son
+ * propriétaire : l'espace seul ne suffit plus (`crmReadableWhere`).
+ */
+export async function getActorForPage(): Promise<{ id: string; workspaceId: string }> {
+  const user = await requireUser();
+  return { id: user.id, workspaceId: user.workspaceId };
+}
+
 /** Pour une Server Action : lève `UnauthenticatedError` si la session est absente. */
 export async function getWorkspaceIdForAction(): Promise<string> {
   return (await requireActor()).workspaceId;
