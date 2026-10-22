@@ -1,16 +1,18 @@
 # Permissions V1 — cadrage
 
-> Statut : **cadrage + lot 0**. Ce document décrit la règle cible, l'inventaire
-> des points d'entrée et le plan des lots. Seul le lot 0 (point de contrôle
-> central, sans changement de comportement) est implémenté.
+> Statut : **cadrage + lot 0 + lot A**. Ce document décrit la règle cible,
+> l'inventaire des points d'entrée et le plan des lots. Le lot 0 (point de
+> contrôle central) et le lot A (privé par défaut + migration, §9) sont
+> implémentés ; les lots B et C restent à faire.
 >
 > Documents liés : [`security-model.md`](security-model.md) (règle actuelle,
 > frontière d'espace) et [`tasks.md`](tasks.md) (droits du module Tâches).
 
-**Avertissement opérationnel.** Tant que les lots A et B ne sont pas livrés,
-**ne créez aucun compte partenaire** (`npm run user:create`) dans un espace
-existant. Aujourd'hui, un nouvel utilisateur d'un espace voit immédiatement
-tout le CRM, le registre RGPD, les tâches libres et les projets `WORKSPACE`.
+**Avertissement opérationnel.** Le lot A rend un nouvel utilisateur aveugle
+aux données des autres, mais le partage de projet (masquages des liens CRM,
+des autres projets et des sous-tâches hors projet) n'arrive qu'au lot B.
+**Ne partagez aucun projet avec un partenaire avant le lot B**, et ne créez
+de compte partenaire qu'avec le lot C.
 
 ---
 
@@ -484,3 +486,215 @@ Limites connues, assumées au lot 0 : `withActor` prend la capacité en second
 argument optionnel (une route d'écriture qui l'oublie compile ; seul le test la
 rattrape) ; rien n'interdit techniquement à une route `GET` d'écrire (aucune ne
 le fait aujourd'hui).
+
+---
+
+## 9. Lot A — privé par défaut + migration (implémenté)
+
+### 9.1 Décisions figées appliquées
+
+| Décision | Mise en œuvre |
+|---|---|
+| (a) étiquettes, champs d'espace | lisibles par tout l'espace ; modification et suppression par leur créateur seul (`createdById`, refus `FORBIDDEN` car la donnée est visible). Règles d'automatisation et modèles de tâche **d'espace** : personnels (`NOT_FOUND` pour les autres). Les règles et modèles **de projet** suivent l'Édition du projet, inchangé. |
+| (b) annuaire | `directoryUserWhere(actor)` : soi + propriétaires et membres des projets lisibles. Sert à `getWorkContext` (et donc à tous les sélecteurs), à la charge, et **côté serveur** à la validation d'un responsable, d'un collaborateur, d'un abonné, des destinataires d'une règle et des responsables d'un import CSV. L'adresse d'une autre personne n'est plus exposée (nom affiché, sinon « Membre de l'espace »). |
+| (e) RGPD | traitements, sous-traitants, demandes, incidents : par propriétaire, comme le CRM. |
+| (f) `WORKSPACE` | conservé dans l'enum ; tous les projets passent en `PRIVATE` (backfill) ; défaut du schéma `PRIVATE` ; création, modification et duplication refusent ou neutralisent `WORKSPACE` ; option retirée de l'interface ; aucun prédicat ne lit plus la visibilité. |
+| (g) abonnés | un `FOLLOWER` n'a plus aucun accès ; créateur, responsable et `COLLABORATOR` restent les voies d'accès à une tâche **libre**. |
+
+### 9.2 Règle implémentée
+
+- **CRM et RGPD** : `crmReadableWhere(actor)` = `{ workspaceId, ownerId: actor.id }`
+  dans chaque lecture (pages, sélecteurs, cockpit, `/today`, fiches, photo,
+  `searchCrm`, `getCrmRef`, `getLinkedWork`) et chaque écriture (fiche visée et
+  toutes les liaisons : organisation, contact, opportunité, suivi,
+  sous-traitant). `ownerId = actor.id` à toute création, jamais lu du client.
+- **Projets** : propriétaire (`ownerId`, sinon `createdById` s'il n'y en a plus)
+  ou membre. `projectAccessWhere` / `readableProjectWhere` / `canReadProject`
+  sont la seule source ; le filtre temps réel et `notify.ts` les utilisent.
+- **Tâches** : racine visible si elle est dans un projet lisible, ou libre et
+  l'acteur en est créateur, responsable ou collaborateur ; une sous-tâche
+  suit sa racine et seulement elle. Un responsable non membre d'un projet ne
+  lit plus la tâche (la règle « responsable en Lecture » est au lot B).
+- **Corbeille des tâches libres** : réservée aux personnes impliquées (et à
+  celle qui a supprimé), plus à tout l'espace.
+- **Retirer une tâche de son seul projet / la rattacher à une parente** :
+  refusé seulement si une personne y gagnerait l'accès (`gainsReaders`) — les
+  anciennes gardes reposaient sur « une tâche libre est visible de tous ».
+- **`submitForm`** : exige l'Édition (introuvable sans lecture ; refus explicite
+  pour un commentateur). Le contexte de confiance n'est plus utilisé.
+- **Import de contacts** : analyse, dédoublonnage, complément et organisations
+  rattachées dans les seuls contacts de l'acteur.
+- **Automatisations** (`canAutomateTask`) : une règle n'agit que sur une tâche
+  libre de son auteur ou une tâche d'un projet où il a l'Édition — le contrôle
+  est dans `runRule`, donc vaut pour les événements d'activité, le
+  planificateur et les rappels. Un tiers qui déclenche une règle n'obtient
+  jamais, par elle, une écriture que l'auteur ne pourrait pas faire.
+- **Notifications** : `readableNotificationWhere` filtre la liste **et** le
+  compteur : seulement les siennes, sur une tâche ou un projet lisible.
+- **Temps réel** : un changement sans cible visible n'est pas transmis ;
+  l'auteur d'un changement n'est transmis que s'il s'agit de soi ou si la
+  cible est visible.
+- **`authorize`** : capacités par ressource désormais actives — portées `owned`
+  (CRM, RGPD), `authored` (étiquettes, champs), `personal` (règles et modèles
+  d'espace), `task.*` et `project.*` passés par `requireTask*` /
+  `requireProject*`. Introuvable pour une ressource non lisible, réponse
+  actuelle conservée pour une ressource lisible mais non modifiable.
+
+### 9.3 Migration et déploiement
+
+Trois étapes, déployables séparément :
+
+1. **`20261021090000_permissions_owner_additive`** — `owner_id` nullable sur les
+   8 modèles CRM / RGPD (`ON DELETE NO ACTION` : la suppression d'un espace
+   passe, celle d'un utilisateur qui possède des fiches est refusée),
+   `created_by_id` sur `tags` et `custom_fields`, index `(workspace_id,
+   owner_id)`. Aucun changement de comportement.
+2. **`scripts/backfill-owner.mjs`** — attribue tout au propriétaire de
+   migration (voir l'en-tête du script pour le détail et les garde-fous :
+   refus si un autre utilisateur actif existe hors comptes e2e désignés par
+   `--e2e-user` et en `.test`, idempotent, `--dry-run`, une transaction, verrou
+   consultatif). Il préserve aussi ce que voyait la propriétaire : adhésion
+   `EDITOR` sur un projet « espace » qu'elle ne possédait pas, collaboratrice
+   des tâches libres d'une autre personne, règles et modèles d'espace sans
+   auteur (ou d'un auteur inactif) repris — les règles désactivées, puisqu'elles
+   ne s'exécutaient pas.
+3. **`20261021100000_permissions_owner_required`** — `owner_id` NOT NULL,
+   défaut `PRIVATE`. Refuse de s'appliquer, avant toute modification, s'il
+   reste un NULL ou un projet `WORKSPACE` (message nommant les tables).
+
+`prisma migrate deploy` (service `migrate` de `docker-compose.yml`) applique
+toutes les migrations en attente d'un coup : les étapes passent donc par **deux
+déploiements**, avec le backfill entre les deux. Le code d'avant le lot A ne
+renseigne pas `owner_id` : toute création faite entre les deux déploiements
+laisse un NULL — d'où la **relance du backfill application arrêtée**, juste
+avant le déploiement final.
+
+#### Procédure VPS, pas à pas
+
+Depuis le répertoire du dépôt sur le serveur, en `sudo` comme pour les
+sauvegardes. Les références : `D1 = d0c2829` (migration 1 seule, code
+inchangé), `FINAL` = la version du lot A à déployer (tête de la branche une fois
+fusionnée).
+
+1. **Sauvegarde vérifiée** (base et photos) :
+   ```bash
+   sudo ./deploy/backup/nod-crm-backup.sh
+   sudo ./deploy/backup/nod-crm-restore.sh --verify
+   ```
+   Conserver le nom de l'archive : c'est le point de retour arrière.
+2. **Repérer l'espace et la propriétaire** :
+   ```bash
+   docker compose exec app node scripts/admin.mjs list-workspaces
+   docker compose exec app node scripts/admin.mjs list-users
+   ```
+   Désactiver (`admin.mjs disable-user`) tout compte actif qui n'est ni la
+   propriétaire ni un compte de test e2e — sinon le backfill refuse. Un compte
+   e2e se désigne avec `--e2e-user`, un par un, et doit avoir une adresse en
+   `.test`.
+3. **Déploiement 1 — migration 1** (code inchangé) :
+   ```bash
+   git fetch && git checkout d0c2829
+   docker compose up -d --build
+   docker compose logs migrate | tail   # « All migrations have been successfully applied »
+   ```
+4. **Préparer l'image finale sans la démarrer** et faire un dry-run :
+   ```bash
+   git checkout FINAL
+   docker compose build app
+   docker compose run --rm --no-deps app node scripts/backfill-owner.mjs \
+     --workspace <id> --owner <email> [--e2e-user e2e@nod-crm.test] --dry-run
+   ```
+   Vérifier **la liste des comptes exclus** (e-mail, `isActive`) et les
+   comptes par table, en particulier la section « Accès perdus ».
+   `--no-deps` évite de lancer le service `migrate` (qui appliquerait la
+   migration 2 trop tôt).
+5. **Backfill** (application encore en ligne) : même commande sans `--dry-run`.
+6. **Maintenance** : arrêter l'application, puis **relancer le backfill**
+   (idempotent : il ne rattrape que les créations faites depuis l'étape 5) :
+   ```bash
+   docker compose stop app
+   docker compose run --rm --no-deps app node scripts/backfill-owner.mjs \
+     --workspace <id> --owner <email> [--e2e-user …]
+   ```
+   Répéter les étapes 4 à 6 pour chaque espace.
+7. **Déploiement final** — migration 2 et code du lot A :
+   ```bash
+   docker compose up -d
+   docker compose logs migrate | tail
+   ```
+   Si la migration 2 refuse (« backfill incomplet »), rien n'a été modifié :
+   ```bash
+   docker compose run --rm --no-deps app npx prisma migrate resolve \
+     --rolled-back 20261021100000_permissions_owner_required
+   ```
+   puis relancer l'étape 6 pour l'espace nommé, et refaire l'étape 7.
+8. **Contrôle** : se connecter en propriétaire ; vérifier projets, tâches,
+   fiches et notifications ; `GET /api/health`.
+
+#### Retour arrière
+
+- **Après l'étape 3 seulement** : rien à faire, la migration 1 est additive et
+  l'ancien code l'ignore. Pour revenir au code d'avant : `git checkout 3c83e86
+  && docker compose up -d --build`.
+- **Après l'étape 7** : l'ancien code ne peut plus écrire (colonne NOT NULL).
+  Le retour se fait par la sauvegarde de l'étape 1 :
+  ```bash
+  git checkout 3c83e86
+  docker compose build app
+  sudo ./deploy/backup/nod-crm-restore.sh --into-production <archive de l'étape 1> --yes-i-am-sure
+  docker compose up -d
+  ```
+  Les écritures faites depuis l'étape 1 sont perdues ; tout le monde est
+  déconnecté. Restaurer aussi les photos si des contacts ont été ajoutés
+  depuis (voir `backup-restore.md`).
+
+### 9.4 Tests
+
+| Test | Ce qu'il prouve |
+|---|---|
+| `tests/integration/lot-a-new-user.test.ts` | Un utilisateur créé après coup dans l'espace : zéro donnée sur **chaque** point de lecture (101 points : fonctions exportées des modules de requêtes, pages, routes `GET`, actions de lecture, SSE). La liste attendue est recalculée depuis le code : un point de lecture ajouté sans sonde fait échouer le test. Chaque identifiant existant est introuvable en écriture, et l'empreinte de toutes les tables est inchangée. Exceptions explicites : étiquette et champ d'espace (a), annuaire = soi (b). |
+| `tests/snapshot/run-owner-snapshot.sh` (`npm run test:owner-snapshot`, base jetable) | Non-régression de la propriétaire : instantané avec le **code d'avant le lot A** puis après migration 1 → refus de la migration 2 → backfill (dry-run, exécution, relance idempotente) → migration 2. Seules des différences attendues et justifiées : visibilité `PRIVATE`, adhésion `EDITOR` ajoutée, collaboratrice ajoutée, règles dormantes désactivées, projet orphelin attribué (gestion), annuaire réduit (b). C'est ce test qui a trouvé le défaut de comparaison NULL du backfill. |
+| `tests/integration/lot-a-backfill.test.ts` | dry-run sans écriture, idempotence, relance après des créations faites entre deux déploiements (la migration 2 refuse puis passe), refus d'un second utilisateur actif, comptes e2e (domaine, appartenance, liste avec `isActive`). |
+| `tests/integration/lot-a-rules.test.ts` | (a), (f), (g), liaisons CRM d'autrui refusées partout, formulaire sans Édition, automatisation sans effet sur les données d'un tiers, membres existants qui gardent exactement leurs droits. |
+| `tests/integration/authz-isolation.test.ts`, `tests/unit/authz-inventory.test.ts` | lot 0, toujours verts (table des capacités inchangée). |
+
+**Tests existants adaptés** (chacun parce qu'il figeait la règle d'avant) :
+
+- fixtures : propriétaire par défaut (premier utilisateur de l'espace) pour les
+  fiches CRM / RGPD et créateur par défaut pour les tâches ; `shareDirectory`
+  (projet « Équipe ») pour mettre les personnes d'un scénario dans l'annuaire ;
+- créations directes en base : `ownerId` ajouté (cockpit, contacts, suivis,
+  RGPD, isolation) ; `createdById` pour une tâche libre (commerce) ;
+- projets « ouverts à l'espace » des scénarios (`work-automation-rights`,
+  `work-copies`, `work-history-links`, `work-trash-integrity`) : remplacés par
+  un projet partagé avec les mêmes personnes en éditrices ;
+- responsable non membre (`work-permissions`, `work-project-trash`,
+  `work-reminders`, `work-management`) : il ne voit plus rien et n'est plus
+  notifié ; les scénarios qui testaient autre chose (rappels, mentions,
+  automatisations) en font un membre ;
+- règles d'espace d'autrui : `NOT_FOUND` au lieu de `FORBIDDEN`, plus de reprise
+  d'une règle d'auteur inactif, journal invisible ;
+- gardes de visibilité (`work-trash-integrity`) : refus seulement si quelqu'un
+  gagnerait l'accès ; contrôle d'exposition fondé sur l'appartenance au projet ;
+- `migration-work-management` : nombre de migrations en attente calculé ; le
+  scénario 093000 s'arrête avant les migrations du lot A ;
+- cockpit : la tâche libre d'une collègue n'est plus visible.
+
+### 9.5 Ce qui reste pour le lot B
+
+- Interface de partage : recherche d'une personne par e-mail exact (le
+  sélecteur ne propose plus que l'annuaire) ; `setProjectMember` accepte déjà
+  tout utilisateur actif de l'espace.
+- Masquages dans un projet partagé : liens CRM (projet → contact /
+  organisation / opportunité ; tâche → contact / suivi / opportunité), autres
+  projets d'une tâche multi-projets, sous-tâches et dépendances hors projet
+  (« tâche non accessible »), valeurs figées de l'historique (`TaskActivity`,
+  dont les noms et adresses en texte libre) et des notifications.
+- Règle des saisies de temps (décision c) et du responsable en Lecture
+  (décision d).
+- Réactions et commentaires des points d'avancement : capacité de portée
+  projet (`project.read` avec ressource), au lieu de `task.comment`.
+- Affecter une tâche libre à un co-membre la lui partage : à trancher avec le
+  lot B (seuls les projets sont partageables).
+- Lot C : rôle d'espace minimal, création du compte partenaire.
+

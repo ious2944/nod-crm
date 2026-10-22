@@ -43,7 +43,11 @@ loss would be expensive.
 ### Out of model
 
 Host compromise, physical access, npm supply-chain attacks, and a legitimate
-user acting maliciously (V0.1 has no privilege separation inside a workspace).
+user acting maliciously beyond what they are allowed to see. Since Permissions
+V1 lot A, a workspace is no longer "everyone sees everything": CRM and GDPR
+records are private to their owner, projects to their owner and members, free
+tasks to their creator, assignee and collaborators — see
+[`permissions-v1.md`](permissions-v1.md) §9.
 
 ## 2. Authentication
 
