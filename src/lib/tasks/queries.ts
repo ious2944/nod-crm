@@ -3,7 +3,7 @@ import "server-only";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth/dal";
-import { crmReadableWhere } from "@/lib/authz/crm-access";
+import { canReadCrm, CRM_OWNER_SELECT, crmReadableWhere } from "@/lib/authz/crm-access";
 import { getActorForPage } from "@/lib/workspace";
 
 import type { Prisma } from "@/generated/prisma/client";
@@ -27,17 +27,38 @@ const TASK_INCLUDE = {
   contact: {
     // `archivedAt` sert à afficher « archivé » : une tâche ne doit pas perdre
     // silencieusement le contact qui lui donne son contexte.
-    select: { id: true, firstName: true, lastName: true, archivedAt: true },
+    select: { id: true, firstName: true, lastName: true, archivedAt: true, ...CRM_OWNER_SELECT },
   },
   followUp: {
     select: {
       id: true,
       title: true,
+      ...CRM_OWNER_SELECT,
       contact: { select: { firstName: true, lastName: true } },
     },
   },
   assignee: { select: { id: true, displayName: true, email: true } },
 } as const;
+
+type TaskIncludeRecord = Prisma.TaskGetPayload<{ include: typeof TASK_INCLUDE }>;
+
+/**
+ * Lot B : une tâche d'un projet partagé peut être liée à une fiche CRM d'une
+ * autre personne. Le lien n'est montré qu'à qui lit la fiche ; pour les
+ * autres, la tâche s'affiche sans contact ni suivi.
+ */
+function toReadableView(actor: { id: string; workspaceId: string }, record: TaskIncludeRecord, now: Date) {
+  return toTaskView(
+    {
+      ...record,
+      contact: record.contact && canReadCrm(actor, record.contact) ? record.contact : null,
+      followUp: record.followUp && canReadCrm(actor, record.followUp) ? record.followUp : null,
+    },
+    now,
+    APP_TIME_ZONE,
+    actor.id,
+  );
+}
 
 /** Une section de la page Tâches : en retard, aujourd'hui, à venir. */
 export interface TaskSection {
@@ -83,11 +104,11 @@ export function cockpitTaskWhere(actor: { id: string; workspaceId: string }, sco
 async function scopeWhere(scope: TaskScope = "all") {
   const user = await requireUser();
   const actor = { id: user.id, workspaceId: user.workspaceId };
-  return { workspaceId: user.workspaceId, userId: user.id, AND: cockpitTaskWhere(actor, scope) };
+  return { workspaceId: user.workspaceId, actor, AND: cockpitTaskWhere(actor, scope) };
 }
 
 export async function getTaskList(filter: TaskFilter): Promise<TaskList> {
-  const { workspaceId, userId, AND } = await scopeWhere();
+  const { workspaceId, actor, AND } = await scopeWhere();
   const now = new Date();
 
   const [todoRecords, completedCount] = await Promise.all([
@@ -99,7 +120,7 @@ export async function getTaskList(filter: TaskFilter): Promise<TaskList> {
     prisma.task.count({ where: { workspaceId, AND, completedAt: { not: null } } }),
   ]);
 
-  const todo = todoRecords.map((record) => toTaskView(record, now, APP_TIME_ZONE, userId));
+  const todo = todoRecords.map((record) => toReadableView(actor, record, now));
 
   const sections: TaskSection[] = (["overdue", "today", "upcoming"] as const)
     .map((bucket) => ({
@@ -124,7 +145,7 @@ export async function getTaskList(filter: TaskFilter): Promise<TaskList> {
     todoCount: todo.length,
     completedCount,
     sections: [],
-    completed: completedRecords.map((record) => toTaskView(record, now, APP_TIME_ZONE, userId)),
+    completed: completedRecords.map((record) => toReadableView(actor, record, now)),
   };
 }
 
@@ -138,7 +159,7 @@ export async function getTaskList(filter: TaskFilter): Promise<TaskList> {
  * pour un serveur en UTC.
  */
 export async function getActionableTasks(endOfToday: Date, scope: TaskScope = "all"): Promise<TaskView[]> {
-  const { workspaceId, userId, AND } = await scopeWhere(scope);
+  const { workspaceId, actor, AND } = await scopeWhere(scope);
   const now = new Date();
 
   const records = await prisma.task.findMany({
@@ -147,7 +168,7 @@ export async function getActionableTasks(endOfToday: Date, scope: TaskScope = "a
     include: TASK_INCLUDE,
   });
 
-  return records.map((record) => toTaskView(record, now, APP_TIME_ZONE, userId));
+  return records.map((record) => toReadableView(actor, record, now));
 }
 
 /**
@@ -162,7 +183,7 @@ export async function getActionableTasks(endOfToday: Date, scope: TaskScope = "a
  * que le KPI « À venir » intègre bien les tâches futures proches.
  */
 export async function getTasksForKpi(endOfWindow: Date, scope: TaskScope = "all"): Promise<TaskView[]> {
-  const { workspaceId, userId, AND } = await scopeWhere(scope);
+  const { workspaceId, actor, AND } = await scopeWhere(scope);
   const now = new Date();
 
   const records = await prisma.task.findMany({
@@ -171,7 +192,7 @@ export async function getTasksForKpi(endOfWindow: Date, scope: TaskScope = "all"
     include: TASK_INCLUDE,
   });
 
-  return records.map((record) => toTaskView(record, now, APP_TIME_ZONE, userId));
+  return records.map((record) => toReadableView(actor, record, now));
 }
 
 export interface FollowUpPickerOption {

@@ -47,7 +47,7 @@ import { dateConflicts } from "@/lib/tasks/graph";
 import { formatBytes, minutesLabel, parseDuration, relativeTime } from "@/lib/tasks/format";
 import { describeRecurrence } from "@/lib/tasks/recurrence";
 import { toggleChecklistItem } from "@/lib/tasks/rich-text";
-import type { ActivityItem, CommentItem, CrmRef, CustomFieldDef, TaskDetail, TaskItem, TaskRef } from "@/lib/tasks/types";
+import { isHiddenCrm, type ActivityItem, type CommentItem, type CrmLink, type CrmRef, type CustomFieldDef, type TaskDetail, type TaskItem, type TaskRef } from "@/lib/tasks/types";
 
 import {
   CRM_LABELS,
@@ -426,9 +426,13 @@ function TaskPanel({ taskId }: { taskId: string }) {
             ))}
             {detail.followUp && (
               <Row label="Suivi">
-                <NextLink href="/follow-ups" className="inline-block truncate pt-1.5 text-[13px] text-accent hover:underline">
-                  {detail.followUp.label}
-                </NextLink>
+                {isHiddenCrm(detail.followUp) ? (
+                  <HiddenCrm />
+                ) : (
+                  <NextLink href="/follow-ups" className="inline-block truncate pt-1.5 text-[13px] text-accent hover:underline">
+                    {detail.followUp.label}
+                  </NextLink>
+                )}
               </Row>
             )}
             <Row label="Collaborateurs">
@@ -774,7 +778,21 @@ function TimeField({ task, detail, disabled, update, refresh }: { task: TaskItem
   );
 }
 
-function CrmField({ kind, value, disabled, onChange }: { kind: keyof typeof CRM_LABELS; value: CrmRef | null; disabled: boolean; onChange: (ref: CrmRef | null) => void }) {
+/** Lien vers la fiche d'une autre personne (lot B) : ni nom, ni lien, ni modification. */
+function HiddenCrm() {
+  return (
+    <span className="pt-1.5 text-[13px] italic text-muted" title="Cette fiche appartient à une autre personne.">
+      Fiche non accessible
+    </span>
+  );
+}
+
+function CrmField({ kind, value, disabled, onChange }: { kind: keyof typeof CRM_LABELS; value: CrmLink | null; disabled: boolean; onChange: (ref: CrmRef | null) => void }) {
+  if (isHiddenCrm(value)) return <HiddenCrm />;
+  return <OwnCrmField kind={kind} value={value} disabled={disabled} onChange={onChange} />;
+}
+
+function OwnCrmField({ kind, value, disabled, onChange }: { kind: keyof typeof CRM_LABELS; value: CrmRef | null; disabled: boolean; onChange: (ref: CrmRef | null) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const href = value ? (kind === "contact" ? `/contacts/${value.id}` : kind === "organization" ? `/organizations/${value.id}` : `/commerce/${value.id}`) : null;

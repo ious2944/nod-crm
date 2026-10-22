@@ -35,7 +35,7 @@ import {
   searchTasks,
 } from "@/lib/tasks/work-queries";
 
-import { addUserToWorkspace, createContactRecord, createWorkspaceWithUser, dropCookie, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
+import { addUserToWorkspace, assignOutsideProject, createContactRecord, createWorkspaceWithUser, dropCookie, resetDatabase, signIn, type TestUser, shareDirectory } from "./fixtures";
 
 /**
  * Corbeille des projets : suppression logique, permissions conservées,
@@ -94,7 +94,9 @@ describe("suppression et restauration des projets", () => {
     contactId = await createContactRecord(alice.workspaceId, { firstName: "Camille", lastName: "Client" });
     field = ok(await saveCustomFieldAction(null, { name: "Lot", type: "TEXT" }, P));
 
-    exclusive = ok(await createTaskAction({ title: "Exclusive privée", projectId: P, sectionId, assigneeId: bob.userId, contactId, dueDate: addDaysToKey(today(), 1) })).id;
+    exclusive = ok(await createTaskAction({ title: "Exclusive privée", projectId: P, sectionId, contactId, dueDate: addDaysToKey(today(), 1) })).id;
+    // Lot B : l'API ne nomme plus responsable un non-membre ; l'état hérité est posé en base.
+    await assignOutsideProject(exclusive, bob.userId);
     sub = ok(await createTaskAction({ title: "Sous-tâche", parentId: exclusive })).id;
     earlierSub = ok(await createTaskAction({ title: "Sous-tâche supprimée avant", parentId: exclusive })).id;
     ok(await addCommentAction(exclusive, "Commentaire"));
@@ -174,7 +176,9 @@ describe("suppression et restauration des projets", () => {
   it("rappels et automatisations ignorent les tâches inactives", async () => {
     ok(await saveRuleAction(null, P, { name: "Rappel P", trigger: "DUE_DATE_APPROACHING", triggerConfig: { days: 3 }, conditions: [], actions: [{ kind: "create_reminder" }], isEnabled: true }));
     ok(await saveRuleAction(null, P, { name: "Statut P", trigger: "STATUS_CHANGED", triggerConfig: {}, conditions: [], actions: [{ kind: "set_priority", priority: "URGENT" }], isEnabled: true }));
-    ok(await updateTaskAction(shared, { assigneeId: bob.userId, dueDate: addDaysToKey(today(), 1) }));
+    // Lot B : Bob n'est membre ni de P ni de W ; l'affectation héritée est posée en base.
+    await assignOutsideProject(shared, bob.userId);
+    ok(await updateTaskAction(shared, { dueDate: addDaysToKey(today(), 1) }));
     await prisma.automationRun.deleteMany();
     ok(await deleteProjectAction(P));
 

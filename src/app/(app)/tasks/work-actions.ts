@@ -198,6 +198,10 @@ export async function setProjectMemberAction(projectId: string, userId: string, 
   return runAction("project.manage", (actor) => projects.setProjectMember(actor, projectId, userId, role));
 }
 
+export async function addProjectMemberByEmailAction(projectId: string, email: string, role: ProjectRole) {
+  return runAction("project.manage", (actor) => projects.addProjectMemberByEmail(actor, projectId, email, role));
+}
+
 export async function setFavoriteAction(projectId: string, favorite: boolean) {
   return runAction("project.read", (actor) => projects.setFavorite(actor, projectId, favorite));
 }

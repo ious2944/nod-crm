@@ -30,6 +30,7 @@ import {
 import type { TaskEvent } from "./automation-model";
 import {
   APPROVAL_LABELS,
+  CRM_LINK_FIELD_LABELS,
   PRIORITY_LABELS,
   REACTION_EMOJIS,
   STATUS_LABELS,
@@ -240,6 +241,29 @@ async function assertUserInWorkspace(actor: Actor, userId: string | null | undef
   if (!user) throw new TaskValidationError("Cet utilisateur n'existe pas dans votre espace.");
 }
 
+export const ASSIGNEE_NOT_MEMBER =
+  "Cette personne n'est pas membre du projet de la tâche : ajoutez-la d'abord au projet.";
+
+/**
+ * Lot B : le responsable d'une tâche de projet doit pouvoir lire ce projet.
+ * Être nommé responsable n'ouvre pas le projet (lot A) : sans cette garde, la
+ * personne serait affectée à une tâche qu'elle ne voit pas. `rootTaskId` : la
+ * tâche, ou sa parente pour une sous-tâche (elle suit les projets de sa
+ * racine). Une tâche libre n'est pas concernée : son responsable la lit.
+ */
+async function assertAssigneeReadsProjects(actor: Actor, projectIds: string[], userId: string | null | undefined) {
+  if (!userId || projectIds.length === 0) return;
+  const readable = await prisma.project.count({
+    where: { AND: [{ id: { in: projectIds } }, readableProjectWhere({ id: userId, workspaceId: actor.workspaceId })] },
+  });
+  if (readable === 0) throw new TaskValidationError(ASSIGNEE_NOT_MEMBER);
+}
+
+async function rootProjectIds(rootTaskId: string): Promise<string[]> {
+  const rows = await prisma.taskProject.findMany({ where: { taskId: rootTaskId }, select: { projectId: true } });
+  return rows.map((r) => r.projectId);
+}
+
 /**
  * Liens CRM d'une copie (duplication de tâche ou de projet) : seuls ceux qui
  * visent une fiche de l'acteur sont conservés (lot A, « on ne lie qu'à ses
@@ -307,6 +331,29 @@ export async function assertCrmLinks(
     );
   }
   await Promise.all(checks);
+}
+
+export const LOCKED_CRM_LINK =
+  "Ce lien vers une fiche CRM appartient à une autre personne : vous ne pouvez ni le modifier ni le retirer.";
+
+/**
+ * Lot B — `current` : la valeur **actuelle** de chaque lien que l'appel va
+ * remplacer ou retirer. Un lien vers une fiche que l'acteur ne lit pas lui
+ * est montré « fiche non accessible » ; il ne peut ni le changer ni l'effacer
+ * (un formulaire qui renverrait le champ vide supprimerait sinon le lien posé
+ * par la propriétaire).
+ */
+export async function assertCrmLinksEditable(
+  actor: Actor,
+  current: { contactId?: string | null; organizationId?: string | null; opportunityId?: string | null },
+) {
+  const owned = crmReadableWhere(actor);
+  const counts = await Promise.all([
+    current.contactId ? prisma.contact.count({ where: { id: current.contactId, ...owned } }) : 1,
+    current.organizationId ? prisma.organization.count({ where: { id: current.organizationId, ...owned } }) : 1,
+    current.opportunityId ? prisma.opportunity.count({ where: { id: current.opportunityId, ...owned } }) : 1,
+  ]);
+  if (counts.some((n) => n === 0)) throw new TaskAccessError("FORBIDDEN", LOCKED_CRM_LINK);
 }
 
 /**
@@ -475,6 +522,9 @@ export async function createTask(ctx: MutationContext, raw: CreateTaskInputV1): 
   const assigneeId =
     input.assigneeId !== undefined ? input.assigneeId : !input.projectId && !parentId ? actor.id : null;
   await assertUserInWorkspace(actor, assigneeId);
+  if (assigneeId && assigneeId !== actor.id) {
+    await assertAssigneeReadsProjects(actor, input.projectId ? [input.projectId] : parentId ? await rootProjectIds(parentId) : [], assigneeId);
+  }
   // Affecter une sous-tâche à quelqu'un lui en donne l'accès : réservé à qui
   // peut gérer la tâche parente.
   if (parentId && !parentManageable && assigneeId && assigneeId !== actor.id) {
@@ -702,9 +752,7 @@ function fieldLabel(field: TaskPatchField): string {
     approvalStatus: "Validation",
     estimatedMinutes: "Temps estimé",
     recurrence: "Récurrence",
-    contactId: "Contact",
-    organizationId: "Organisation",
-    opportunityId: "Opportunité",
+    ...CRM_LINK_FIELD_LABELS,
   };
   return labels[field];
 }
@@ -789,6 +837,7 @@ export async function updateTaskFields(
     // Réaffecter donne l'accès à la nouvelle personne : droit de gestion.
     if (!permissions.canManage) throw new TaskAccessError("FORBIDDEN", MANAGE_REFUSED);
     await assertUserInWorkspace(actor, patch.assigneeId);
+    await assertAssigneeReadsProjects(actor, await rootProjectIds(record.parentId ?? taskId), patch.assigneeId);
   }
 
   // ── Circuit de validation ──
@@ -819,6 +868,11 @@ export async function updateTaskFields(
     approvalAfter = "PENDING";
     if (!changes.includes("approvalStatus")) changes.push("approvalStatus");
   }
+  await assertCrmLinksEditable(actor, {
+    contactId: changes.includes("contactId") ? record.contactId : null,
+    organizationId: changes.includes("organizationId") ? record.organizationId : null,
+    opportunityId: changes.includes("opportunityId") ? record.opportunityId : null,
+  });
   await assertCrmLinks(actor, {
     contactId: changes.includes("contactId") ? patch.contactId : null,
     organizationId: changes.includes("organizationId") ? patch.organizationId : null,
