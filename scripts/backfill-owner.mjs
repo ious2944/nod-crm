@@ -135,8 +135,11 @@ async function count(client, sql, params) {
  * Exécute le backfill sur une connexion ouverte. Renvoie le rapport
  * `{ section: { ligne: nombre } }`. Toujours dans une transaction ; annulée
  * si `dryRun`.
+ *
+ * @returns {Promise<Record<string, any>>}
  */
 export async function backfill(client, options) {
+  /** @type {Record<string, any>} */
   const report = { "Attribution": {}, "Projets": {}, "Tâches libres": {}, "Accès perdus (non préservables)": {} };
   await client.query("BEGIN");
   try {
@@ -188,7 +191,9 @@ export async function backfill(client, options) {
 
     // Tâches libres (racines sans aucun projet) : jusqu'ici partagées dans l'espace.
     const free = `t.workspace_id = $1 AND t.parent_id IS NULL AND NOT EXISTS (SELECT 1 FROM task_projects tp WHERE tp.task_id = t.id)`;
-    const linked = `(t.assignee_id = $2 OR t.created_by_id = $2 OR EXISTS (SELECT 1 FROM task_followers f WHERE f.task_id = t.id AND f.user_id = $2 AND f.kind = 'COLLABORATOR'))`;
+    // IS NOT DISTINCT FROM (et non =) : une colonne NULL rendrait la condition
+    // NULL, et « NOT linked » exclurait à tort les tâches sans responsable.
+    const linked = `(t.assignee_id IS NOT DISTINCT FROM $2 OR t.created_by_id IS NOT DISTINCT FROM $2 OR EXISTS (SELECT 1 FROM task_followers f WHERE f.task_id = t.id AND f.user_id = $2 AND f.kind = 'COLLABORATOR'))`;
     const tasks = report["Tâches libres"];
     tasks["créateur absent → propriétaire"] = (
       await client.query(`UPDATE tasks t SET created_by_id = $2 WHERE ${free} AND t.created_by_id IS NULL`, [w, ownerId])
