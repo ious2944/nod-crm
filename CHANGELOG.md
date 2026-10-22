@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- Permissions V1, lot B: in a shared project, links to CRM records (task →
+  contact / organisation / opportunity / follow-up, project → contact /
+  organisation / opportunity) are only shown to the record's owner; other
+  members see "Fiche non accessible", with neither id nor name, in task and
+  project details, task lists, `/tasks`, `/today` and history lines. A hidden
+  link cannot be changed or removed by someone who cannot read the record.
+
 ### Added
+
+- Projects: add a member by exact e-mail address (Lecture or Édition), to
+  reach an account that is not yet in one's directory (a partner).
+- Guide `docs/accueillir-un-partenaire.md`.
+
+### Changed
+
+- The assignee of a project task must be able to read the project.
 
 - Contacts: import from an Outlook CSV export (new and classic Outlook), with a
   preview step (columns, duplicates in the file and in the workspace, row-level

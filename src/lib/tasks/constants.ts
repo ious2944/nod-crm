@@ -226,6 +226,18 @@ export const NOTIFICATION_TYPES = {
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;
 
 /** Sections créées avec un nouveau projet vierge. */
+/**
+ * Libellés des lignes d'historique qui nomment une fiche CRM liée. Lot B :
+ * leurs valeurs ne sont montrées qu'à l'auteur de la ligne — depuis le lot A
+ * on ne lie que ses propres fiches, et avant, chaque espace n'avait qu'un
+ * utilisateur : l'auteur est donc la propriétaire des fiches citées.
+ */
+export const CRM_LINK_FIELD_LABELS = {
+  contactId: "Contact",
+  organizationId: "Organisation",
+  opportunityId: "Opportunité",
+} as const;
+
 export const DEFAULT_SECTIONS = ["À faire", "En cours", "Terminé"];
 
 /** Taille maximale d'une pièce jointe. */

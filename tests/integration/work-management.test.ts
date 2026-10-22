@@ -408,6 +408,8 @@ describe("gestion de travail", () => {
   describe("import / export CSV", () => {
     it("importe des lignes (sections, tags, responsables) et les réexporte", async () => {
       const { id } = await newProject();
+      // Lot B : le responsable d'une tâche de projet doit en être membre.
+      ok(await setProjectMemberAction(id, bob.userId, "EDITOR"));
       const csv = `Nom;Responsable;Échéance;Priorité;Section;Tags\nTâche importée;${bob.email};31/12/2026;Haute;Nouvelle colonne;client, urgent\n;;;;;\n`;
       const report = ok(await importCsvAction(id, csv));
       expect(report.created).toBe(1);

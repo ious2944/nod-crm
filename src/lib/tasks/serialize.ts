@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
+import { CRM_OWNER_SELECT, readableCrmId } from "@/lib/authz/crm-access";
 import { APP_TIME_ZONE } from "@/lib/config";
 import { dayKey } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
@@ -111,10 +112,12 @@ export function taskItemSelect(actor: Actor) {
     approvalStatus: true,
     estimatedMinutes: true,
     recurrence: true,
-    contactId: true,
-    organizationId: true,
-    opportunityId: true,
-    followUpId: true,
+    // Lot B : la propriétaire de chaque fiche liée, pour ne transmettre
+    // l'identifiant qu'à qui la lit (`readableCrmId`).
+    contact: { select: { id: true, ...CRM_OWNER_SELECT } },
+    organization: { select: { id: true, ...CRM_OWNER_SELECT } },
+    opportunity: { select: { id: true, ...CRM_OWNER_SELECT } },
+    followUp: { select: { id: true, ...CRM_OWNER_SELECT } },
     version: true,
     tags: { select: { tagId: true } },
     customValues: {
@@ -301,10 +304,10 @@ export function toTaskItem(
     recurrence: parseRecurrence(record.recurrence),
     hasDescription: Boolean(record.notes?.trim()),
     excerpt: plain.slice(0, 300),
-    contactId: record.contactId,
-    organizationId: record.organizationId,
-    opportunityId: record.opportunityId,
-    followUpId: record.followUpId,
+    contactId: readableCrmId(actor, record.contact),
+    organizationId: readableCrmId(actor, record.organization),
+    opportunityId: readableCrmId(actor, record.opportunity),
+    followUpId: readableCrmId(actor, record.followUp),
     version: record.version,
     canEdit: access.canEdit,
     canManage: access.canManage,

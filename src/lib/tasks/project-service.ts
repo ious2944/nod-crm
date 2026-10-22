@@ -31,7 +31,7 @@ import {
 } from "./inputs";
 import { notify } from "./notify";
 import { publishChange } from "./realtime";
-import { assertCrmLinks, keepOwnedCrmLinks } from "./service";
+import { assertCrmLinks, assertCrmLinksEditable, keepOwnedCrmLinks } from "./service";
 import { lockTasks, structureTransaction } from "./structure";
 import { checkpoint } from "./test-hooks";
 import type { ProjectRole } from "./types";
@@ -398,7 +398,24 @@ export async function updateProject(actor: Actor, projectId: string, raw: unknow
   const input = parsed.data;
   refuseWorkspaceVisibility(input.visibility);
   if (input.ownerId) await validMemberIds(actor, [input.ownerId]);
-  await assertCrmLinks(actor, input);
+  // Seuls les liens CRM qui changent sont vérifiés : renvoyer tel quel un lien
+  // existant n'est pas le modifier. Lot B : un lien vers une fiche que
+  // l'acteur ne lit pas ne peut être ni changé ni retiré.
+  const currentLinks = await prisma.project.findUniqueOrThrow({
+    where: { id: projectId },
+    select: { contactId: true, organizationId: true, opportunityId: true },
+  });
+  const linkChanged = (field: keyof typeof currentLinks) => input[field] !== undefined && input[field] !== currentLinks[field];
+  await assertCrmLinksEditable(actor, {
+    contactId: linkChanged("contactId") ? currentLinks.contactId : null,
+    organizationId: linkChanged("organizationId") ? currentLinks.organizationId : null,
+    opportunityId: linkChanged("opportunityId") ? currentLinks.opportunityId : null,
+  });
+  await assertCrmLinks(actor, {
+    contactId: linkChanged("contactId") ? input.contactId : null,
+    organizationId: linkChanged("organizationId") ? input.organizationId : null,
+    opportunityId: linkChanged("opportunityId") ? input.opportunityId : null,
+  });
   if (baseVersion !== undefined && baseVersion !== project.version) {
     throw new TaskValidationError("Ce projet a été modifié entre-temps. Rechargez la page.");
   }
@@ -421,9 +438,9 @@ export async function updateProject(actor: Actor, projectId: string, raw: unknow
     if (count !== 1) throw new TaskValidationError("Ce projet a été modifié entre-temps. Rechargez la page.");
     const links: Prisma.ProjectUncheckedUpdateInput = {};
     if (input.ownerId !== undefined) links.ownerId = input.ownerId;
-    if (input.contactId !== undefined) links.contactId = input.contactId;
-    if (input.organizationId !== undefined) links.organizationId = input.organizationId;
-    if (input.opportunityId !== undefined) links.opportunityId = input.opportunityId;
+    if (linkChanged("contactId")) links.contactId = input.contactId;
+    if (linkChanged("organizationId")) links.organizationId = input.organizationId;
+    if (linkChanged("opportunityId")) links.opportunityId = input.opportunityId;
     if (Object.keys(links).length) await tx.project.update({ where: { id: projectId }, data: links });
     if (input.ownerId) {
       await tx.projectMember.upsert({
@@ -870,6 +887,36 @@ export async function setProjectMember(actor: Actor, projectId: string, userId: 
   }
   await prisma.project.update({ where: { id: projectId }, data: { version: { increment: 1 } } });
   await changed(actor, [projectId]);
+}
+
+/**
+ * Lot B — partager un projet avec une personne qui n'est pas encore dans
+ * l'annuaire de l'acteur (un partenaire qui vient d'être créé) : par son
+ * adresse **exacte**, parmi les comptes actifs de l'espace. Réservé à qui gère
+ * le projet ; Lecture ou Édition seulement — la Gestion se donne ensuite, à
+ * un membre déjà présent, en connaissance de cause.
+ */
+export async function addProjectMemberByEmail(
+  actor: Actor,
+  projectId: string,
+  rawEmail: string,
+  role: ProjectRole,
+): Promise<{ userId: string }> {
+  await requireProjectManage(actor, projectId);
+  if (role !== "EDITOR" && role !== "COMMENTER") throw new TaskValidationError("Niveau d'accès invalide.");
+  const email = String(rawEmail ?? "").trim().toLowerCase();
+  if (!email || email.length > 254) throw new TaskValidationError("Adresse e-mail invalide.");
+  const user = await prisma.user.findFirst({
+    // Insensible à la casse : `admin.mjs` enregistre l'adresse en minuscules,
+    // un compte plus ancien peut l'avoir gardée telle quelle.
+    where: { email: { equals: email, mode: "insensitive" }, workspaceId: actor.workspaceId, isActive: true },
+    select: { id: true },
+  });
+  if (!user) throw new TaskValidationError("Aucun compte actif de votre espace n'a cette adresse.");
+  const existing = await prisma.projectMember.findUnique({ where: { projectId_userId: { projectId, userId: user.id } } });
+  if (existing) throw new TaskValidationError("Cette personne est déjà membre du projet.");
+  await setProjectMember(actor, projectId, user.id, role);
+  return { userId: user.id };
 }
 
 export async function setFavorite(actor: Actor, projectId: string, favorite: boolean): Promise<void> {

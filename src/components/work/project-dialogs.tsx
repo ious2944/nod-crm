@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import {
+  addProjectMemberByEmailAction,
   createProjectAction,
   postStatusUpdateAction,
   setProjectMemberAction,
@@ -17,7 +18,7 @@ import {
   PROJECT_STATUS_LABELS,
   ROLE_LABELS,
 } from "@/lib/tasks/constants";
-import type { CrmRef, ProjectDetail, ProjectRole, ProjectStatus, SectionItem } from "@/lib/tasks/types";
+import { isHiddenCrm, type CrmLink, type CrmRef, type ProjectDetail, type ProjectRole, type ProjectStatus, type SectionItem } from "@/lib/tasks/types";
 
 import { CRM_LABELS, CrmPickerPanel, DatePicker, TagList, TagPickerPanel, UserPicker, UserPickerPanel, useToday } from "./pickers";
 import { RichTextEditor } from "./rich-text";
@@ -26,6 +27,9 @@ import { useTaskOps } from "./task-ops";
 import { Avatar, BTN_PRIMARY, BTN_SECONDARY, DueText, iconComponent, INPUT, Modal, Popover, ProjectIcon, Spinner, useUser } from "./ui";
 
 const LABEL = "mb-1 block text-[12px] font-semibold text-muted";
+
+/** Lien CRM à envoyer : un lien masqué (fiche d'une autre personne, lot B) n'est jamais renvoyé. */
+const linkPayload = (link: CrmLink | null) => (isHiddenCrm(link) ? undefined : (link?.id ?? null));
 
 /* ─── Nouvelle tâche ──────────────────────────────────────────────────────── */
 
@@ -238,7 +242,7 @@ export function ProjectFormModal({
   const [dates, setDates] = useState({ startDate: project?.startDate ?? null, dueDate: project?.dueDate ?? null, dueTime: null as string | null });
   const [templateId, setTemplateId] = useState(defaults.templateId ?? "");
   const [templates, setTemplates] = useState<{ id: string; name: string }[]>([]);
-  const [crm, setCrm] = useState<{ contact: CrmRef | null; organization: CrmRef | null; opportunity: CrmRef | null }>({
+  const [crm, setCrm] = useState<{ contact: CrmLink | null; organization: CrmLink | null; opportunity: CrmLink | null }>({
     contact: project?.contact ?? defaults.contact ?? null,
     organization: project?.organization ?? defaults.organization ?? null,
     opportunity: project?.opportunity ?? defaults.opportunity ?? null,
@@ -267,9 +271,9 @@ export function ProjectFormModal({
       ownerId,
       startDate: dates.startDate,
       dueDate: dates.dueDate,
-      contactId: crm.contact?.id ?? null,
-      organizationId: crm.organization?.id ?? null,
-      opportunityId: crm.opportunity?.id ?? null,
+      contactId: linkPayload(crm.contact),
+      organizationId: linkPayload(crm.organization),
+      opportunityId: linkPayload(crm.opportunity),
     };
     if (project) {
       const ok = await run(() => updateProjectAction(project.id, payload, project.version), "Projet mis à jour.");
@@ -378,19 +382,30 @@ export function ProjectFormModal({
         <div>
           <span className={LABEL}>Rattachement CRM</span>
           <div className="flex flex-wrap gap-2">
-            {(["organization", "contact", "opportunity"] as const).map((kind) => (
+            {(["organization", "contact", "opportunity"] as const).map((kind) => {
+              const link = crm[kind];
+              if (isHiddenCrm(link)) {
+                return (
+                  <span key={kind} className="inline-flex items-center gap-1 rounded-md border border-border-subtle px-2 py-1 text-[12px]" title="Cette fiche appartient à une autre personne.">
+                    <span className="text-muted">{CRM_LABELS[kind]} :</span>
+                    <span className="italic text-muted">fiche non accessible</span>
+                  </span>
+                );
+              }
+              return (
               <span key={kind} className="inline-flex items-center gap-1 rounded-md border border-border-subtle px-2 py-1 text-[12px]">
                 <span className="text-muted">{CRM_LABELS[kind]} :</span>
                 <button type="button" onClick={(e) => { crmRef.current = e.currentTarget; setCrmOpen(kind); }} className="font-medium text-ink hover:text-accent">
-                  {crm[kind]?.label ?? "choisir"}
+                  {link?.label ?? "choisir"}
                 </button>
-                {crm[kind] && (
+                {link && (
                   <button type="button" aria-label={`Retirer ${CRM_LABELS[kind]}`} onClick={() => setCrm({ ...crm, [kind]: null })} className="text-muted hover:text-ink">
                     ×
                   </button>
                 )}
               </span>
-            ))}
+              );
+            })}
           </div>
           <Popover open={crmOpen !== null} anchor={crmRef} onClose={() => setCrmOpen(null)} label="Rattacher">
             {crmOpen && <CrmPickerPanel kind={crmOpen} onPick={(ref) => { setCrm({ ...crm, [crmOpen]: ref }); setCrmOpen(null); }} />}
@@ -409,9 +424,26 @@ export function ProjectFormModal({
 /* ─── Membres ─────────────────────────────────────────────────────────────── */
 
 export function MembersModal({ project, onClose, onChanged }: { project: ProjectDetail; onClose: () => void; onChanged: () => void }) {
-  const { run, store } = useWorkApi();
+  const { run, store, reloadContext } = useWorkApi();
   const users = useWork((s) => s.context?.users ?? []);
   const [adding, setAdding] = useState(false);
+  const [email, setEmail] = useState("");
+  const [emailRole, setEmailRole] = useState<"EDITOR" | "COMMENTER">("COMMENTER");
+  const [inviting, setInviting] = useState(false);
+  // Lot B : une personne hors de l'annuaire (un partenaire qui vient d'être
+  // créé) se retrouve par son adresse exacte ; le serveur vérifie tout.
+  const addByEmail = async () => {
+    if (!email.trim()) return;
+    setInviting(true);
+    const added = await run(() => addProjectMemberByEmailAction(project.id, email.trim(), emailRole), "Membre ajouté.");
+    setInviting(false);
+    if (added) {
+      setEmail("");
+      store.setProject({ ...project, members: [...project.members, { userId: added.userId, role: emailRole }] });
+      await reloadContext();
+      onChanged();
+    }
+  };
   const anchor = useRef<HTMLButtonElement>(null);
   const set = async (userId: string, role: ProjectRole | null) => {
     const ok = await run(() => setProjectMemberAction(project.id, userId, role));
@@ -471,6 +503,28 @@ export function MembersModal({ project, onClose, onChanged }: { project: Project
               }}
             />
           </Popover>
+          <form
+            className="mt-3 border-t border-border-subtle pt-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void addByEmail();
+            }}
+          >
+            <label htmlFor="member-email" className={LABEL}>
+              Ajouter par adresse e-mail exacte
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <input id="member-email" type="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="prenom@partenaire.fr" className={`${INPUT} min-w-0 flex-1`} />
+              <select aria-label="Niveau d'accès" value={emailRole} onChange={(e) => setEmailRole(e.target.value as "EDITOR" | "COMMENTER")} className={`${INPUT} w-auto`}>
+                <option value="COMMENTER">{ROLE_LABELS.COMMENTER}</option>
+                <option value="EDITOR">{ROLE_LABELS.EDITOR}</option>
+              </select>
+              <button type="submit" disabled={inviting || !email.trim()} className={BTN_SECONDARY}>
+                Ajouter
+              </button>
+            </div>
+            <p className="mt-1 text-[11px] text-muted">Le compte doit déjà exister dans votre espace. Le CRM lié n&apos;est jamais partagé.</p>
+          </form>
         </>
       )}
       {!project.canManage && <p className="mt-3 text-[12px] text-muted">Seul le propriétaire du projet peut gérer les membres.</p>}

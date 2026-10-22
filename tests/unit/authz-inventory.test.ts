@@ -58,7 +58,7 @@ const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 /**
  * Capacité attendue de chaque point d'entrée — la même que la colonne
- * « Capacité » de `docs/permissions-v1.md` §3. 99 actions + 1 route.
+ * « Capacité » de `docs/permissions-v1.md` §3. 100 actions + 1 route.
  */
 const EXPECTED_CAPABILITIES: Record<string, string> = {
 "src/app/(app)/commerce/actions.ts › createOpportunity": "crm.opportunity.create",
@@ -133,6 +133,7 @@ const EXPECTED_CAPABILITIES: Record<string, string> = {
   "src/app/(app)/tasks/work-actions.ts › previewProjectPurgeAction": "project.purge",
   "src/app/(app)/tasks/work-actions.ts › purgeProjectAction": "project.purge",
   "src/app/(app)/tasks/work-actions.ts › setProjectMemberAction": "project.manage",
+  "src/app/(app)/tasks/work-actions.ts › addProjectMemberByEmailAction": "project.manage",
   "src/app/(app)/tasks/work-actions.ts › setFavoriteAction": "project.read",
   "src/app/(app)/tasks/work-actions.ts › createSectionAction": "project.edit",
   "src/app/(app)/tasks/work-actions.ts › renameSectionAction": "project.edit",
@@ -329,7 +330,7 @@ describe("inventaire des points d'écriture : tous passent par authorize", () =>
   it("trouve les fichiers d'actions et la route d'écriture attendus", () => {
     // Garde contre une détection cassée : ces nombres ne baissent pas sans raison.
     expect(actionFiles.length).toBeGreaterThanOrEqual(9);
-    expect(actionCases.length).toBe(99);
+    expect(actionCases.length).toBe(100);
     expect(routeCases.length).toBe(1);
   });
 

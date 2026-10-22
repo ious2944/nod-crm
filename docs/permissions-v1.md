@@ -1,18 +1,21 @@
 # Permissions V1 — cadrage
 
-> Statut : **cadrage + lot 0 + lot A**. Ce document décrit la règle cible,
-> l'inventaire des points d'entrée et le plan des lots. Le lot 0 (point de
-> contrôle central) et le lot A (privé par défaut + migration, §9) sont
-> implémentés ; les lots B et C restent à faire.
+> Statut : **cadrage + lot 0 + lot A + lot B**. Ce document décrit la règle
+> cible, l'inventaire des points d'entrée et le plan des lots. Le lot 0 (point
+> de contrôle central), le lot A (privé par défaut + migration, §9) et le lot B
+> (masquages dans un projet partagé, partage par e-mail, §10) sont
+> implémentés ; le lot C reste à faire.
 >
 > Documents liés : [`security-model.md`](security-model.md) (règle actuelle,
 > frontière d'espace) et [`tasks.md`](tasks.md) (droits du module Tâches).
 
 **Avertissement opérationnel.** Le lot A rend un nouvel utilisateur aveugle
-aux données des autres, mais le partage de projet (masquages des liens CRM,
-des autres projets et des sous-tâches hors projet) n'arrive qu'au lot B.
-**Ne partagez aucun projet avec un partenaire avant le lot B**, et ne créez
-de compte partenaire qu'avec le lot C.
+aux données des autres ; le lot B masque, dans un projet partagé, les fiches
+CRM liées. **Ne partagez aucun projet avec un partenaire avant que le lot B
+soit déployé.** Une fois le lot B en production, un partenaire peut être
+accueilli avec les précautions de
+[`accueillir-un-partenaire.md`](accueillir-un-partenaire.md) (le lot C, rôle
+d'espace, reste à faire : §10.5).
 
 ---
 
@@ -220,6 +223,7 @@ forme, d'où le helper transparent.
 | `previewProjectPurgeAction` *(lecture)* | Project (corbeille) | `project.purge` | `canPurge` |
 | `purgeProjectAction` | Project (corbeille) | `project.purge` | `canPurge` + jeton de périmètre |
 | `setProjectMemberAction` | ProjectMember | `project.manage` | `requireProjectManage` + `validMemberIds` |
+| `addProjectMemberByEmailAction` *(lot B)* | ProjectMember | `project.manage` | `requireProjectManage` ; compte actif de l'espace, adresse exacte ; Lecture ou Édition seulement |
 | `setFavoriteAction` | ProjectFavorite | `project.read` | `requireProjectRead` |
 | `createSectionAction` | ProjectSection | `project.edit` | `requireProjectEdit` |
 | `renameSectionAction` | ProjectSection | `project.edit` | `requireSection` (édition du projet) |
@@ -425,7 +429,7 @@ existant sans autre lien perd la tâche après migration (rare, à journaliser).
 |---|---|---|
 | **0** (ce lot) | `src/lib/authz` : `Capability`, `authorize`, `runCrmAction` ; toutes les actions et la route d'écriture passent par `authorize` ; test d'inventaire ; tests d'isolation A/B | **aucun** |
 | **A** — privé par défaut + migration | `ownerId` (§5) et migration ; `checkRecord` vérifie la propriété ; toutes les lectures CRM / RGPD (§4) filtrent *own* ; liaisons CRM limitées aux fiches *own* ; tâches libres limitées à créateur / responsable / collaborateur ; import de contacts dédoublonné sur *own* ; règles d'espace personnelles ; tests « un nouvel utilisateur voit zéro donnée » sur chaque lecture du §4 | oui, pour tout utilisateur autre que l'utilisateur de référence |
-| **B** — partage de projet + masquages | `readableProjectWhere` sans `WORKSPACE` implicite pour les partenaires ; niveaux Lecture / Édition / Gestion ; masquages de la règle 4 (sérialisation, historique, notifications, export, SSE) ; `submitForm` exige l'Édition ; les services passent leur ressource à `authorize` (`loadAccess`, `loadProject`, `requireProjectContentEdit`) | oui |
+| **B** — partage de projet + masquages (implémenté, §10) | `readableProjectWhere` sans `WORKSPACE` implicite pour les partenaires ; niveaux Lecture / Édition / Gestion ; masquages de la règle 4 (sérialisation, historique, notifications, export, SSE) ; `submitForm` exige l'Édition ; les services passent leur ressource à `authorize` (`loadAccess`, `loadProject`, `requireProjectContentEdit`) | oui |
 | **C** — compte partenaire | rôle d'espace minimal (h) ; création via `admin.mjs` (et éventuellement invitation) ; annuaire restreint (b) ; e-mail unique global à garder ou à revoir | oui |
 
 ---
@@ -687,7 +691,7 @@ sans adhésion y disparaîtrait jusqu'au déploiement final.
 | `tests/snapshot/run-owner-snapshot.sh` (`npm run test:owner-snapshot`, base jetable) | Non-régression de la propriétaire : instantané avec le **code d'avant le lot A** puis après migration 1 → refus de la migration 2 → backfill (dry-run, exécution, relance idempotente) → migration 2. Seules des différences attendues et justifiées : visibilité `PRIVATE`, adhésion `EDITOR` ajoutée, collaboratrice ajoutée, règles dormantes désactivées, projet orphelin attribué (gestion), annuaire réduit (b). C'est ce test qui a trouvé le défaut de comparaison NULL du backfill. |
 | `tests/integration/lot-a-backfill.test.ts` | dry-run sans écriture, idempotence, relance après des créations faites entre deux déploiements (la migration 2 refuse puis passe), refus d'un second utilisateur actif, comptes e2e (domaine, appartenance, liste avec `isActive`). |
 | `tests/integration/lot-a-rules.test.ts` | (a), (f), (g), liaisons CRM d'autrui refusées partout, formulaire sans Édition, automatisation sans effet sur les données d'un tiers, membres existants qui gardent exactement leurs droits. |
-| `tests/integration/lot-a-attack.test.ts` | Tests d'attaque (phase 2) : un nouvel utilisateur, un co-membre éditeur et une commentatrice cherchent à atteindre les données de la propriétaire (ids devinés, recherche, export, SSE, notifications, annuaire, liaisons, formulaires, automatisations, sous-tâches, dépendances, pièces jointes, photo, import, modèles, corbeille, oracle d'erreur). 21 sans fuite ; 5 tests de **caractérisation** affirment, champ par champ, la seule fuite restante, réservée au lot B (§9.6) — chacun échouera dès que le lot B corrigera le champ qu'il vise. |
+| `tests/integration/lot-a-attack.test.ts` | Tests d'attaque (phase 2) : un nouvel utilisateur, un co-membre éditeur et une commentatrice cherchent à atteindre les données de la propriétaire (ids devinés, recherche, export, SSE, notifications, annuaire, liaisons, formulaires, automatisations, sous-tâches, dépendances, pièces jointes, photo, import, modèles, corbeille, oracle d'erreur). 21 sans fuite ; 5 tests de **caractérisation** affirmaient, champ par champ, la seule fuite restante, réservée au lot B (§9.6) ; **inversés au lot B** (§10.3), ils prouvent son absence. |
 | `tests/integration/authz-isolation.test.ts`, `tests/unit/authz-inventory.test.ts` | lot 0, toujours verts (table des capacités inchangée). |
 
 **Tests existants adaptés** (chacun parce qu'il figeait la règle d'avant) :
@@ -729,7 +733,10 @@ sans adhésion y disparaîtrait jusqu'au déploiement final.
 - `MutationContext.trusted` n'est plus utilisé depuis que `submitForm` exige
   l'Édition ; à retirer avec le lot B s'il ne retrouve pas d'usage.
 
-### 9.6 Ce qui reste pour le lot B
+### 9.6 Ce qui restait pour le lot B
+
+> Liste d'origine, conservée telle quelle. Ce que le lot B a traité et ce
+> qu'il laisse : §10.
 
 - Interface de partage : recherche d'une personne par e-mail exact (le
   sélecteur ne propose plus que l'annuaire) ; `setProjectMember` accepte déjà
@@ -758,3 +765,220 @@ sans adhésion y disparaîtrait jusqu'au déploiement final.
   lot B (seuls les projets sont partageables).
 - Lot C : rôle d'espace minimal, création du compte partenaire.
 
+
+---
+
+## 10. Lot B — masquages dans un projet partagé, partage par e-mail (implémenté)
+
+### 10.1 Règle implémentée
+
+- **Liens CRM d'une tâche ou d'un projet.** Une fiche CRM liée n'est
+  transmise (identifiant et nom) qu'à qui la lit — sa propriétaire,
+  `canReadCrm` (`src/lib/authz/crm-access.ts`), même règle que
+  `crmReadableWhere`. Pour les autres membres du projet :
+  - `getTaskDetail` et `getProjectDetail` renvoient `{ hidden: true }`
+    (« fiche non accessible ») au lieu de `{ id, label }` ;
+  - les `TaskItem` (listes, tableaux, recherche, export, `getProjectBundle`,
+    Mes tâches) ont `contactId`, `organizationId`, `opportunityId`,
+    `followUpId` à `null` (`readableCrmId`, `serialize.ts`) ;
+  - les listes historiques (`getTaskList`, `getActionableTasks`,
+    `getTasksForKpi` : `/tasks`, `/today`, indicateurs) affichent la tâche
+    sans contact ni suivi.
+  Le lien est symétrique : si un co-membre lie **sa** fiche à une tâche
+  partagée, la propriétaire du projet voit « fiche non accessible ».
+- **Historique.** Les lignes « Contact », « Organisation », « Opportunité »
+  (`CRM_LINK_FIELD_LABELS`) ne montrent leurs valeurs qu'à leur auteur
+  (`TaskActivity.actorId`). Sans migration : depuis le lot A on ne lie que ses
+  propres fiches, et avant le lot A chaque espace n'avait qu'un utilisateur —
+  l'auteur d'une ligne est donc la propriétaire des fiches qu'elle nomme. Une
+  ligne écrite par une automatisation ou par un compte supprimé (`actorId`
+  nul) est masquée pour tout le monde.
+- **Un lien masqué ne se modifie pas.** `assertCrmLinksEditable`
+  (`service.ts`) : remplacer ou retirer un lien vers une fiche que l'acteur ne
+  lit pas est refusé (`FORBIDDEN`, `LOCKED_CRM_LINK`), pour une tâche
+  (`updateTaskFields`, donc aussi le formulaire historique et les
+  automatisations) comme pour un projet (`updateProject`). Renvoyer un lien
+  inchangé n'est pas le modifier : seuls les liens qui changent sont vérifiés
+  (au projet, `assertCrmLinks` ne vérifie plus que ceux-là). Le formulaire
+  historique `updateTask` renvoie le contact vide quand il ne l'affiche pas :
+  ce vide est ignoré si le contact actuel appartient à une autre personne.
+- **Partage par e-mail exact.** `addProjectMemberByEmailAction` (capacité
+  `project.manage`) : la personne qui gère le projet ajoute un compte **actif
+  de l'espace** par son adresse exacte (casse ignorée), en Lecture ou en
+  Édition seulement ; la Gestion se donne ensuite, à un membre déjà présent.
+  C'est la seule façon d'atteindre un compte qui n'est pas encore dans
+  l'annuaire de l'acteur (un partenaire tout juste créé).
+- **Responsable d'une tâche de projet.** Il doit pouvoir lire un des projets
+  de la tâche (de sa racine pour une sous-tâche) : création, modification,
+  automatisation `set_assignee`, import CSV. Message : `ASSIGNEE_NOT_MEMBER`.
+  Une tâche libre n'est pas concernée (son responsable la lit).
+
+Interface : « Fiche non accessible » dans le panneau de tâche (contact,
+organisation, opportunité, suivi), l'aperçu du projet et les réglages du
+projet, sans lien ni bouton de modification ; les réglages n'envoient jamais
+un lien masqué. La fenêtre « Membres du projet » a un champ « Ajouter par
+adresse e-mail exacte » avec le niveau (Lecture / Édition).
+
+**Aucune migration.** Le lot B ne change que du code : un seul déploiement,
+retour arrière par le code seul (§10.4).
+
+### 10.2 Ce qu'un co-membre lit encore (assumé)
+
+- Le **texte libre** écrit par les personnes du projet : nom et description du
+  projet, titres, descriptions, commentaires, pièces jointes, points
+  d'avancement. Rien ne peut y masquer le nom d'un client.
+- Les **noms** des étiquettes et des champs personnalisés d'espace (décision
+  a) — lisibles par tout l'espace.
+- Le nom affiché des membres des projets qu'il lit, et le sien (décision b).
+- Le **détail des saisies de temps** de tous les membres (décision c non
+  traitée).
+
+### 10.3 Tests
+
+| Test | Ce qu'il prouve |
+|---|---|
+| `tests/integration/lot-a-attack.test.ts` (5 tests inversés) | Les 5 tests de caractérisation de §9.6 affirment désormais l'**absence** de fuite : `getTaskDetail` (éditeur et commentatrice), `getProjectDetail`, `getProjectBundle`, historique. Chaque réponse est aussi fouillée en entier (`JSON.stringify`) : aucun nom ni identifiant des fiches d'Alice. Les 21 autres tests du fichier sont inchangés. |
+| `tests/integration/lot-b-sharing.test.ts` (15 tests) | Non-régression de la propriétaire (tous ses liens, listes historiques) ; listes historiques d'un co-membre ; lien masqué ni détachable ni remplaçable (tâche, formulaire historique — avec la raison du refus —, projet par un membre Gestion), modification des autres champs possible, symétrie (fiche d'un co-membre masquée pour la propriétaire) ; partage par e-mail (casse, compte inconnu / d'un autre espace / inactif / déjà membre, niveau Gestion refusé, non-gestionnaire refusé, introuvable pour qui ne lit pas le projet) ; règle du responsable (création, modification, sous-tâche ; membre de tout niveau et tâche libre acceptés). |
+| `tests/unit/authz-inventory.test.ts` | Nouvelle action déclarée : `addProjectMemberByEmailAction` → `project.manage` (100 actions + 1 route). |
+| `tests/snapshot/run-owner-snapshot.sh` | Rejoué avec le code du lot B : 0 différence inattendue pour la propriétaire. |
+
+**Contre-épreuve** (faite, non commitée ; 41 tests dans les deux fichiers) :
+- fuite réintroduite (`canReadCrm` → `true`, historique non filtré) : les 5
+  tests inversés échouent, ainsi que 4 tests de `lot-b-sharing` (9 échecs) ;
+- historique seul réintroduit : le test d'historique échoue, et celui de la
+  symétrie (la ligne d'historique de Bob nomme sa fiche à Alice) ;
+- verrou d'écriture retiré (`assertCrmLinksEditable` et le vide ignoré du
+  formulaire historique) : les 6 tests d'écriture de `lot-b-sharing` échouent ;
+- règle du responsable retirée : son test de refus échoue.
+
+**Tests existants adaptés** (règle du responsable seulement) : les scénarios
+« responsable non membre » (`work-permissions`, `work-project-trash`,
+`work-trash-integrity`, `work-automation-rights`) posent désormais
+l'affectation en base (`assignOutsideProject`, `fixtures.ts`) — l'état existe
+toujours (affectation antérieure au lot B, membre retiré, tâche déplacée) et
+ce qu'ils vérifient est inchangé ; l'import CSV de `work-management` rend le
+responsable importé membre du projet.
+
+### 10.4 Déploiement — installation réelle
+
+Installation de production (différente des exemples de `deploy/`) :
+dépôt dans **`/home/ubuntu/nod-crm-prod`**, application sur
+**`127.0.0.1:3024`**, sauvegardes dans **`/var/backups/nod-crm`** (lisible par
+root seulement : jamais de `*` hors `sudo`). Les scripts de sauvegarde
+reçoivent `NOD_CRM_DIR=/home/ubuntu/nod-crm-prod`.
+
+Références :
+- `pre-lot-b` — étiquette sur `b917ad6`, la branche principale avec le lot A,
+  telle qu'en production : point de retour. À poser **avant** le déploiement,
+  depuis un poste qui peut pousser :
+  ```bash
+  git fetch origin
+  git tag -a pre-lot-b b917ad6 -m "Production avant le lot B (lot A déployé)"
+  git push origin pre-lot-b
+  ```
+- `FINAL` — le commit de fusion du lot B sur la branche principale.
+
+Pas de migration, pas de backfill : **un seul déploiement**, une coupure de
+quelques secondes (recréation du conteneur).
+
+1. **État de départ**
+   ```bash
+   cd /home/ubuntu/nod-crm-prod
+   git status --short            # rien : aucun fichier modifié
+   git log -1 --format=%h        # b917ad6
+   docker compose ps             # nod-crm-postgres healthy, nod-crm-app up
+   curl -fsS http://127.0.0.1:3024/api/health
+   ```
+   L'avertissement de Compose sur le volume `nod-crm-postgres-data-prod`
+   (« created for project nod-crm-prod ») est connu et sans effet sur ce
+   déploiement.
+2. **Sauvegarde vérifiée** (base et photos, application en ligne) :
+   ```bash
+   sudo NOD_CRM_DIR=/home/ubuntu/nod-crm-prod ./deploy/backup/nod-crm-backup.sh
+   sudo NOD_CRM_DIR=/home/ubuntu/nod-crm-prod ./deploy/backup/nod-crm-restore.sh --verify
+   sudo ls -lt /var/backups/nod-crm | head -5
+   ```
+   Le `--verify` sans argument restaure **la plus récente** sur une base
+   jetable. **Noter le nom de l'archive `.sql.gz`** (dernier `ls`) : c'est le
+   filet de sécurité. Ne pas poursuivre si la vérification échoue.
+3. **Code du lot B, image construite pendant que l'application tourne**
+   ```bash
+   git fetch --tags origin
+   git checkout --detach FINAL
+   git log -1 --format='%h %s'   # le commit de fusion du lot B
+   docker compose build app
+   ```
+4. **Bascule**
+   ```bash
+   docker compose up -d
+   docker compose logs migrate | tail -5   # « No pending migrations to apply. »
+   docker compose ps
+   curl -fsS http://127.0.0.1:3024/api/health
+   ```
+   Le service `migrate` doit trouver **zéro** migration en attente : le lot B
+   n'en apporte pas. S'il en appliquait une, arrêter et revenir en arrière
+   (étape « Retour arrière ») : ce ne serait pas le bon commit.
+5. **Contrôles**
+   - Se connecter avec le compte de chaque espace utilisé : projets, tâches,
+     fiches CRM liées **nommées** (la propriétaire voit tous ses liens),
+     notifications, `/today`.
+   - Facultatif mais recommandé avant le premier partenaire : dérouler une
+     fois [`accueillir-un-partenaire.md`](accueillir-un-partenaire.md) avec un
+     compte de test (adresse en `.test`), dans un projet de test lié à une
+     fiche CRM ; vérifier, connecté en compte de test dans une fenêtre
+     privée, « Fiche non accessible » au lieu du nom ; puis désactiver le
+     compte de test (`admin.mjs disable-user`).
+
+#### Retour arrière
+
+Le lot B ne modifie ni le schéma ni les données existantes : le code du lot A
+relit tout ce que le lot B a écrit. Retour par le **code seul**, sans
+restauration :
+
+```bash
+cd /home/ubuntu/nod-crm-prod
+git checkout --detach pre-lot-b    # = b917ad6
+docker compose build app
+docker compose up -d
+curl -fsS http://127.0.0.1:3024/api/health
+```
+
+**Avant** ce retour, si un partenaire a déjà été ajouté à un projet : le
+retirer du projet (ou désactiver son compte, `admin.mjs disable-user`) — le
+code du lot A lui montrerait de nouveau les fiches CRM liées.
+
+La restauration de l'archive de l'étape 2 ne sert qu'en dernier recours
+(données abîmées, ce que rien dans le lot B ne fait) ; elle perd tout ce qui a
+été écrit depuis l'étape 2 et déconnecte tout le monde :
+```bash
+sudo NOD_CRM_DIR=/home/ubuntu/nod-crm-prod ./deploy/backup/nod-crm-restore.sh \
+  --into-production /var/backups/nod-crm/<archive de l'étape 2>.sql.gz --yes-i-am-sure
+```
+
+### 10.5 Ce qui reste
+
+- **Lot C** : rôle d'espace minimal (h) — réserver aux internes la création des
+  étiquettes et des champs d'espace (a), la création de projets, et la
+  recherche par e-mail (aujourd'hui, une personne qui gère un projet, même
+  partenaire sur son propre projet, peut vérifier si une adresse a un compte
+  dans l'espace) ; e-mail unique global (une adresse déjà utilisée dans un
+  autre espace ne peut pas être ajoutée).
+- **Mot de passe initial** : aucun moyen aujourd'hui, ni de changer son mot de
+  passe dans l'application, ni d'en forcer le changement à la première
+  connexion (seul `admin.mjs reset-password`, côté serveur). Ce n'est pas un
+  petit changement — colonne `must_change_password` (migration additive),
+  garde dans la DAL pour **toutes** les entrées (pages, actions, routes, flux
+  SSE), page et action de changement exclues de l'inventaire comme `login`,
+  limitation des essais : proposé pour le lot suivant. Procédure d'ici là :
+  [`accueillir-un-partenaire.md`](accueillir-un-partenaire.md), étape 2.
+- Décision (c) — saisies de temps : chacun les siennes et le total ; le détail
+  pour la Gestion.
+- Décision (d) — responsable en Lecture : éditer ses champs.
+- Réactions et commentaires des points d'avancement : capacité `project.read`
+  avec ressource au lieu de `task.comment`.
+- Un responsable peut encore se retrouver hors du projet par un autre chemin
+  que l'affectation (membre retiré, tâche déplacée, duplication qui garde les responsables) : il ne
+  voit alors plus la tâche (pas de fuite, mais une affectation sans effet).
+- Un lien CRM posé par une personne ensuite désactivée ne peut plus être
+  retiré par les autres membres (la fiche reste à elle).
+- `MutationContext.trusted`, inutilisé depuis le lot A : à retirer.

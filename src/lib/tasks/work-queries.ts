@@ -19,8 +19,9 @@ import {
   visibleTaskWhere,
   type Actor,
 } from "./access";
-import { crmReadableWhere } from "@/lib/authz/crm-access";
+import { canReadCrm, CRM_OWNER_SELECT, crmReadableWhere, type CrmOwned } from "@/lib/authz/crm-access";
 import { ruleInputSchema, type AutomationRuleItem, type AutomationRunItem } from "./automation-model";
+import { CRM_LINK_FIELD_LABELS } from "./constants";
 import { formInputSchema } from "./inputs";
 import { viewConfigSchema, type TaskFilters, type ViewConfig } from "./query-engine";
 import {
@@ -37,6 +38,7 @@ import type {
   ActivityItem,
   AttachmentItem,
   CommentItem,
+  CrmLink,
   CrmRef,
   NotificationItem,
   ProjectBundle,
@@ -63,6 +65,18 @@ export function todayKey(): string {
 }
 
 const contactLabel = (c: { firstName: string; lastName: string }) => `${c.firstName} ${c.lastName}`.trim() || "Contact";
+
+/**
+ * Lien d'une tâche ou d'un projet vers une fiche CRM (lot B) : nommé pour qui
+ * lit la fiche, sinon « fiche non accessible » — ni identifiant ni nom.
+ */
+function crmLink<R extends CrmOwned & { id: string }>(actor: Actor, record: R | null, label: (r: R) => string): CrmLink | null {
+  if (!record) return null;
+  return canReadCrm(actor, record) ? { id: record.id, label: label(record) } : { hidden: true };
+}
+
+/** Lignes d'historique qui nomment une fiche CRM : valeurs réservées à leur auteur (lot B). */
+const CRM_ACTIVITY_FIELDS = new Set<string>(Object.values(CRM_LINK_FIELD_LABELS));
 
 // ─── Contexte ─────────────────────────────────────────────────────────────────
 
@@ -147,9 +161,9 @@ export async function getProjectDetail(actor: Actor, projectId: string): Promise
       createdAt: true,
       version: true,
       customFields: { orderBy: { position: "asc" }, select: { fieldId: true } },
-      contact: { select: { id: true, firstName: true, lastName: true } },
-      organization: { select: { id: true, name: true } },
-      opportunity: { select: { id: true, name: true } },
+      contact: { select: { id: true, firstName: true, lastName: true, ...CRM_OWNER_SELECT } },
+      organization: { select: { id: true, name: true, ...CRM_OWNER_SELECT } },
+      opportunity: { select: { id: true, name: true, ...CRM_OWNER_SELECT } },
     },
   });
   if (!project || !canReadProject(project, actor)) throw new TaskAccessError("NOT_FOUND", "Projet introuvable.");
@@ -165,9 +179,9 @@ export async function getProjectDetail(actor: Actor, projectId: string): Promise
     dueDate: toKey(project.dueAt),
     members,
     customFieldIds: project.customFields.map((f) => f.fieldId),
-    contact: project.contact ? { id: project.contact.id, label: contactLabel(project.contact) } : null,
-    organization: project.organization ? { id: project.organization.id, label: project.organization.name } : null,
-    opportunity: project.opportunity ? { id: project.opportunity.id, label: project.opportunity.name } : null,
+    contact: crmLink(actor, project.contact, contactLabel),
+    organization: crmLink(actor, project.organization, (o) => o.name),
+    opportunity: crmLink(actor, project.opportunity, (o) => o.name),
     createdAt: project.createdAt.toISOString(),
     version: project.version,
   };
@@ -319,10 +333,10 @@ export async function getTaskDetail(actor: Actor, taskId: string): Promise<TaskD
       blockedBy: { where: { blocking: { deletedAt: null } }, select: { blockingId: true, blocking: { select: REF_SELECT } } },
       blocking: { where: { blocked: { deletedAt: null } }, select: { blockedId: true, blocked: { select: REF_SELECT } } },
       followers: { select: { userId: true, kind: true } },
-      contact: { select: { id: true, firstName: true, lastName: true } },
-      organization: { select: { id: true, name: true } },
-      opportunity: { select: { id: true, name: true } },
-      followUp: { select: { id: true, title: true } },
+      contact: { select: { id: true, firstName: true, lastName: true, ...CRM_OWNER_SELECT } },
+      organization: { select: { id: true, name: true, ...CRM_OWNER_SELECT } },
+      opportunity: { select: { id: true, name: true, ...CRM_OWNER_SELECT } },
+      followUp: { select: { id: true, title: true, ...CRM_OWNER_SELECT } },
       recurrenceNext: { select: { id: true } },
     },
   });
@@ -390,6 +404,8 @@ export async function getTaskDetail(actor: Actor, taskId: string): Promise<TaskD
   );
   const citedVisible = (a: { kind: string; refTaskId: string | null }) =>
     !CITING_ACTIVITY_KINDS.has(a.kind) || (a.refTaskId !== null && readableCited.has(a.refTaskId));
+  const valuesVisible = (a: { kind: string; refTaskId: string | null; field: string | null; actorId: string | null }) =>
+    citedVisible(a) && (a.field === null || !CRM_ACTIVITY_FIELDS.has(a.field) || a.actorId === actor.id);
 
   const projectIds = item.memberships.map((m) => m.projectId);
   const projects = projectIds.length
@@ -434,8 +450,8 @@ export async function getTaskDetail(actor: Actor, taskId: string): Promise<TaskD
         automationRuleId: a.automationRuleId,
         kind: a.kind,
         field: a.field,
-        oldValue: citedVisible(a) ? a.oldValue : null,
-        newValue: citedVisible(a) ? a.newValue : null,
+        oldValue: valuesVisible(a) ? a.oldValue : null,
+        newValue: valuesVisible(a) ? a.newValue : null,
         createdAt: a.createdAt.toISOString(),
       }),
     ),
@@ -446,10 +462,10 @@ export async function getTaskDetail(actor: Actor, taskId: string): Promise<TaskD
         return p ? { id: p.id, name: p.name, color: p.color, icon: p.icon, sectionId: m.sectionId, sections: p.sections } : null;
       })
       .filter((p): p is NonNullable<typeof p> => p !== null),
-    contact: record.contact ? { id: record.contact.id, label: contactLabel(record.contact) } : null,
-    organization: record.organization ? { id: record.organization.id, label: record.organization.name } : null,
-    opportunity: record.opportunity ? { id: record.opportunity.id, label: record.opportunity.name } : null,
-    followUp: record.followUp ? { id: record.followUp.id, label: record.followUp.title } : null,
+    contact: crmLink(actor, record.contact, contactLabel),
+    organization: crmLink(actor, record.organization, (o) => o.name),
+    opportunity: crmLink(actor, record.opportunity, (o) => o.name),
+    followUp: crmLink(actor, record.followUp, (f) => f.title),
     canComment: permissions.canComment,
     recurrenceNextId: record.recurrenceNext?.id ?? null,
   };
