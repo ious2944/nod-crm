@@ -1,0 +1,27 @@
+# NOD CRM — adopter des volumes de données qui existent déjà.
+#
+# Pour une installation dont les volumes ont été créés par une autre pile
+# Compose (un autre nom de projet, une ancienne version de ce fichier) ou à la
+# main. Compose avertit alors à chaque commande :
+#
+#   volume "…" already exists but was not created by Docker Compose / was
+#   created for project "…" (expected "nod-crm"). Use `external: true` …
+#
+# `external: true` dit à Compose que le volume existe et ne lui appartient pas :
+#   - il n'essaie plus de le créer ni de le réétiqueter (plus d'avertissement) ;
+#   - il ne le supprime jamais, même avec `docker compose down -v` ;
+#   - si le nom est faux, `up` échoue (« external volume … not found ») au lieu
+#     de créer en silence un volume vide — une base vide, pas de données.
+# Rien n'est copié ni recréé : les données restent où elles sont.
+#
+# Les noms restent ceux de docker-compose.yml (`POSTGRES_VOLUME_NAME`,
+# `UPLOADS_VOLUME_NAME` dans `.env`). Activation, une ligne dans `.env` :
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.adopt-volumes.yml
+#
+# Procédure complète : docs/self-hosting.md, « Adopting an existing deployment ».
+volumes:
+  postgres-data:
+    external: true
+  uploads-data:
+    external: true

@@ -166,6 +166,7 @@ jobs:
       - name: Validate compose files
         run: |
           docker compose --env-file .env.example config >/dev/null
+          docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.adopt-volumes.yml config >/dev/null
           docker compose -f docker-compose.dev.yml config >/dev/null
 
       # The image is what self-hosters run. A broken Dockerfile is a broken

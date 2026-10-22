@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `docker-compose.adopt-volumes.yml`: declares the data volumes as `external`
+  for installations whose volumes were created by another Compose project
+  (removes the "volume already exists but was created for project …" warning
+  without touching the data). See `docs/self-hosting.md` §9.
+
 - Contacts: import from an Outlook CSV export (new and classic Outlook), with a
   preview step (columns, duplicates in the file and in the workspace, row-level
   errors and warnings) and an all-or-nothing import. Existing contacts can be
