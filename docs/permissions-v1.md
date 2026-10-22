@@ -656,6 +656,7 @@ fusionnée).
 | `tests/snapshot/run-owner-snapshot.sh` (`npm run test:owner-snapshot`, base jetable) | Non-régression de la propriétaire : instantané avec le **code d'avant le lot A** puis après migration 1 → refus de la migration 2 → backfill (dry-run, exécution, relance idempotente) → migration 2. Seules des différences attendues et justifiées : visibilité `PRIVATE`, adhésion `EDITOR` ajoutée, collaboratrice ajoutée, règles dormantes désactivées, projet orphelin attribué (gestion), annuaire réduit (b). C'est ce test qui a trouvé le défaut de comparaison NULL du backfill. |
 | `tests/integration/lot-a-backfill.test.ts` | dry-run sans écriture, idempotence, relance après des créations faites entre deux déploiements (la migration 2 refuse puis passe), refus d'un second utilisateur actif, comptes e2e (domaine, appartenance, liste avec `isActive`). |
 | `tests/integration/lot-a-rules.test.ts` | (a), (f), (g), liaisons CRM d'autrui refusées partout, formulaire sans Édition, automatisation sans effet sur les données d'un tiers, membres existants qui gardent exactement leurs droits. |
+| `tests/integration/lot-a-attack.test.ts` | Tests d'attaque (phase 2) : un nouvel utilisateur, un co-membre éditeur et une commentatrice cherchent à atteindre les données de la propriétaire (ids devinés, recherche, export, SSE, notifications, annuaire, liaisons, formulaires, automatisations, sous-tâches, dépendances, pièces jointes, photo, import, modèles, corbeille, oracle d'erreur). 21 verts ; 5 `it.fails` démontrent la seule fuite restante, réservée au lot B (§9.5) — ils échoueront dès sa correction. |
 | `tests/integration/authz-isolation.test.ts`, `tests/unit/authz-inventory.test.ts` | lot 0, toujours verts (table des capacités inchangée). |
 
 **Tests existants adaptés** (chacun parce qu'il figeait la règle d'avant) :
@@ -685,7 +686,12 @@ fusionnée).
 - Interface de partage : recherche d'une personne par e-mail exact (le
   sélecteur ne propose plus que l'annuaire) ; `setProjectMember` accepte déjà
   tout utilisateur actif de l'espace.
-- Masquages dans un projet partagé : liens CRM (projet → contact /
+- Masquages dans un projet partagé — **seule fuite trouvée par l'attaque du
+  lot A**, démontrée par les 5 `it.fails` de `lot-a-attack.test.ts` : un
+  co-membre lit le nom et l'identifiant des fiches CRM liées (`getTaskDetail`,
+  `getProjectDetail` / `getProjectBundle`, champs `contactId…` des `TaskItem`,
+  historique « Contact »). Correction attendue : résoudre chaque lien via
+  `crmReadableWhere(actor)` (sinon « fiche non accessible »). Liens CRM (projet → contact /
   organisation / opportunité ; tâche → contact / suivi / opportunité), autres
   projets d'une tâche multi-projets, sous-tâches et dépendances hors projet
   (« tâche non accessible »), valeurs figées de l'historique (`TaskActivity`,
