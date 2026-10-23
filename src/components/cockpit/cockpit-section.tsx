@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
  * Cadre commun des zones du cockpit : titre, compteur, lien « voir tout »,
  * état vide.
  *
- * Une zone future (notes rapides, rappels, bloc Mirai) se branche en réutilisant
+ * Une zone future (notes rapides, rappels, bloc assistant IA) se branche en réutilisant
  * ce cadre : elle hérite alors de l'espacement, du titrage et du traitement des
  * listes vides sans les redéfinir.
  */

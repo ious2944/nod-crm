@@ -151,9 +151,9 @@ No placeholder is rendered. The room is in the structure:
 | Global search | `CockpitHeader` takes optional `search` / `actions` nodes; nothing renders until one is passed |
 | Contact history | the contact is a `ContactRef`, not a string, and already links to `/contacts/[id]` |
 | Organisations | `ContactRef.organizationHref` exists and stays `null` until organisations are entities |
-| Notes, GED links | `FollowUpRow` and `CompactFollowUpRow` have a trailing slot that takes a node |
+| Notes, document management links | `FollowUpRow` and `CompactFollowUpRow` have a trailing slot that takes a node |
 | Automations | every mutation is a Server Action in `follow-ups/actions.ts`; the UI holds none |
-| Mirai / AI | `getCockpit()` returns a plain, serialisable model that something else could summarise |
+| AI assistant | `getCockpit()` returns a plain, serialisable model that something else could summarise |
 | A new zone | `CockpitSection` gives title, count, "voir tout" and the empty state for free |
 
 ## What the cockpit deliberately does not do
@@ -161,4 +161,4 @@ No placeholder is rendered. The room is in the structure:
 - No chart, no KPI, no big decorative number.
 - No new business rule: it reuses the Follow-up state machine as it stands.
 - No write path of its own.
-- No document storage. The GED stays where it is, outside NOD CRM.
+- No document storage. Document management stays where it is, outside NOD CRM.

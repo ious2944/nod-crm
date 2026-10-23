@@ -859,13 +859,13 @@ toujours (affectation antérieure au lot B, membre retiré, tâche déplacée) e
 ce qu'ils vérifient est inchangé ; l'import CSV de `work-management` rend le
 responsable importé membre du projet.
 
-### 10.4 Déploiement — installation réelle
+### 10.4 Déploiement en production
 
-Installation de production (différente des exemples de `deploy/`) :
-dépôt dans **`/home/ubuntu/nod-crm-prod`**, application sur
-**`127.0.0.1:3024`**, sauvegardes dans **`/var/backups/nod-crm`** (lisible par
-root seulement : jamais de `*` hors `sudo`). Les scripts de sauvegarde
-reçoivent `NOD_CRM_DIR=/home/ubuntu/nod-crm-prod`.
+Exemple d'installation de production (à adapter) : dépôt dans
+**`/opt/nod-crm`** (`$NOD_CRM_DIR`), application sur
+**`127.0.0.1:${APP_HOST_PORT}`** (3000 par défaut), sauvegardes dans
+**`/var/backups/nod-crm`** (lisible par root seulement : jamais de `*` hors
+`sudo`). Les scripts de sauvegarde reçoivent `NOD_CRM_DIR=/opt/nod-crm`.
 
 Références :
 - `pre-lot-b` — étiquette sur `b917ad6`, la branche principale avec le lot A,
@@ -883,19 +883,19 @@ quelques secondes (recréation du conteneur).
 
 1. **État de départ**
    ```bash
-   cd /home/ubuntu/nod-crm-prod
+   cd /opt/nod-crm
    git status --short            # rien : aucun fichier modifié
    git log -1 --format=%h        # b917ad6
    docker compose ps             # nod-crm-postgres healthy, nod-crm-app up
-   curl -fsS http://127.0.0.1:3024/api/health
+   curl -fsS http://127.0.0.1:${APP_HOST_PORT:-3000}/api/health
    ```
-   L'avertissement de Compose sur le volume `nod-crm-postgres-data-prod`
-   (« created for project nod-crm-prod ») est connu et sans effet sur ce
+   L'avertissement de Compose sur le volume `nod-crm-postgres-data-old`
+   (« created for project ancien-projet ») est connu et sans effet sur ce
    déploiement.
 2. **Sauvegarde vérifiée** (base et photos, application en ligne) :
    ```bash
-   sudo NOD_CRM_DIR=/home/ubuntu/nod-crm-prod ./deploy/backup/nod-crm-backup.sh
-   sudo NOD_CRM_DIR=/home/ubuntu/nod-crm-prod ./deploy/backup/nod-crm-restore.sh --verify
+   sudo NOD_CRM_DIR=/opt/nod-crm ./deploy/backup/nod-crm-backup.sh
+   sudo NOD_CRM_DIR=/opt/nod-crm ./deploy/backup/nod-crm-restore.sh --verify
    sudo ls -lt /var/backups/nod-crm | head -5
    ```
    Le `--verify` sans argument restaure **la plus récente** sur une base
@@ -913,7 +913,7 @@ quelques secondes (recréation du conteneur).
    docker compose up -d
    docker compose logs migrate | tail -5   # « No pending migrations to apply. »
    docker compose ps
-   curl -fsS http://127.0.0.1:3024/api/health
+   curl -fsS http://127.0.0.1:${APP_HOST_PORT:-3000}/api/health
    ```
    Le service `migrate` doit trouver **zéro** migration en attente : le lot B
    n'en apporte pas. S'il en appliquait une, arrêter et revenir en arrière
@@ -936,11 +936,11 @@ relit tout ce que le lot B a écrit. Retour par le **code seul**, sans
 restauration :
 
 ```bash
-cd /home/ubuntu/nod-crm-prod
+cd /opt/nod-crm
 git checkout --detach pre-lot-b    # = b917ad6
 docker compose build app
 docker compose up -d
-curl -fsS http://127.0.0.1:3024/api/health
+curl -fsS http://127.0.0.1:${APP_HOST_PORT:-3000}/api/health
 ```
 
 **Avant** ce retour, si un partenaire a déjà été ajouté à un projet : le
@@ -951,7 +951,7 @@ La restauration de l'archive de l'étape 2 ne sert qu'en dernier recours
 (données abîmées, ce que rien dans le lot B ne fait) ; elle perd tout ce qui a
 été écrit depuis l'étape 2 et déconnecte tout le monde :
 ```bash
-sudo NOD_CRM_DIR=/home/ubuntu/nod-crm-prod ./deploy/backup/nod-crm-restore.sh \
+sudo NOD_CRM_DIR=/opt/nod-crm ./deploy/backup/nod-crm-restore.sh \
   --into-production /var/backups/nod-crm/<archive de l'étape 2>.sql.gz --yes-i-am-sure
 ```
 

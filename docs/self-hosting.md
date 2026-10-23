@@ -167,8 +167,8 @@ If the volumes were created under another Compose project name (an older
 version of this file, a different directory name), every command warns:
 
 ```
-volume "nod-crm-postgres-data-prod" already exists but was created for project
-"nod-crm-prod" (expected "nod-crm"). Use `external: true` to use an existing volume
+volume "nod-crm-postgres-data-old" already exists but was created for project
+"ancien-projet" (expected "nod-crm"). Use `external: true` to use an existing volume
 ```
 
 The warning is harmless, but it hides real ones. Declare the volumes as

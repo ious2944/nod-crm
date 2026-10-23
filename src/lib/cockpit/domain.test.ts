@@ -342,12 +342,12 @@ describe("toCockpitItem", () => {
 
 describe("greetingName", () => {
   it("préfère le prénom du nom affiché", () => {
-    expect(greetingName("Arnaud Dupont", "arnaud@nod-lab.fr")).toBe("Arnaud");
-    expect(greetingName("  Marie  ", "m@nod-lab.fr")).toBe("Marie");
+    expect(greetingName("Arnaud Dupont", "arnaud@example.com")).toBe("Arnaud");
+    expect(greetingName("  Marie  ", "m@example.com")).toBe("Marie");
   });
 
   it("retombe sur l'e-mail quand aucun nom n'est renseigné", () => {
-    expect(greetingName(null, "arnaud@nod-lab.fr")).toBe("arnaud");
-    expect(greetingName("   ", "arnaud@nod-lab.fr")).toBe("arnaud");
+    expect(greetingName(null, "arnaud@example.com")).toBe("arnaud");
+    expect(greetingName("   ", "arnaud@example.com")).toBe("arnaud");
   });
 });
