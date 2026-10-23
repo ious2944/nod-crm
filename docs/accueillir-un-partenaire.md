@@ -2,8 +2,9 @@
 
 Cette page explique, étape par étape, comment donner à une personne extérieure
 (un partenaire, une autre société) l'accès à **certains projets** de votre
-espace, sans rien lui montrer d'autre. Elle suit l'installation réelle de
-production (`/home/ubuntu/nod-crm-prod`).
+espace, sans rien lui montrer d'autre. Les exemples supposent
+un dépôt installé dans `/opt/nod-crm` (`$NOD_CRM_DIR`) : adaptez le chemin à
+votre serveur.
 
 Le détail technique est dans [`permissions-v1.md`](permissions-v1.md), §10.
 
@@ -39,7 +40,7 @@ Le détail technique est dans [`permissions-v1.md`](permissions-v1.md), §10.
 Toutes les commandes se lancent sur le serveur, depuis le dossier du dépôt :
 
 ```bash
-cd /home/ubuntu/nod-crm-prod
+cd /opt/nod-crm
 ```
 
 ---
@@ -51,7 +52,7 @@ docker compose exec app node scripts/admin.mjs list-workspaces
 docker compose exec app node scripts/admin.mjs list-users
 ```
 
-Notez le **slug** de votre espace (par exemple `nod-lab`) : le partenaire doit
+Notez le **slug** de votre espace (par exemple `acme`) : le partenaire doit
 être créé **dans votre espace**, pas dans un espace à lui.
 `list-users` montre aussi que l'adresse du partenaire n'existe pas encore.
 
@@ -93,7 +94,7 @@ D'ici là, la procédure la plus sûre est la suivante.
 
 ```bash
 docker compose exec app node scripts/admin.mjs create-user \
-  --email prenom@partenaire.fr --workspace nod-lab --name "Prénom Nom (Société)"
+  --email prenom@partenaire.fr --workspace acme --name "Prénom Nom (Société)"
 ```
 
 - Remplacez l'adresse, le slug (étape 1) et le nom affiché. Le **nom affiché**

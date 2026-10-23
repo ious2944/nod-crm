@@ -12,7 +12,7 @@ import { FollowUpActionRow } from "./follow-up-action-row";
  * du tableau Follow-up — c'est une liste de travail, pas une fiche.
  *
  * La zone `after` reste libre : c'est là que viendra se poser une action
- * discrète (« Ajouter une note », un lien GED) sans toucher à la structure.
+ * discrète (« Ajouter une note », un lien vers la gestion documentaire) sans toucher à la structure.
  */
 export function FollowUpRow({ item }: { item: CockpitItem }) {
   const isCritical = item.level === "critical";

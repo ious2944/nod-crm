@@ -20,17 +20,17 @@
 #   NOD_CRM_SKIP_UPLOADS  set to 1 to back up the database only
 #   NOD_CRM_RETENTION_DAYS  delete dumps older than this  (default 30)
 #   NOD_CRM_MIN_KEPT      never go below this many dumps  (default 7)
-#   NOD_CRM_RCLONE_REMOTE off-site rclone destination (e.g. b2:bucket/nod-crm/)
+#   NOD_CRM_RCLONE_REMOTE off-site rclone destination (e.g. mon-remote:mon-bucket/nod-crm/)
 #                         empty by default — see "Off-site copy" below
 #
 # --------------------------------------------------------------- off-site copy
 # A backup that lives only on the host it protects is not a backup, it is a
 # hope: a ransomware run or a dead disk destroys the data and its only copy in
-# the same instant. Set NOD_CRM_RCLONE_REMOTE to an rclone destination (the
-# same rclone/remote already used for the Mirai and GED backups on this VPS
-# works unchanged) and every successful run pushes both archives there right
-# after they are verified locally. Left unset, the script behaves exactly as
-# before — local-only, same as it always was.
+# the same instant. Set NOD_CRM_RCLONE_REMOTE to an rclone destination (any
+# rclone remote you already use for other backups works unchanged) and every
+# successful run pushes both archives there right after they are verified
+# locally. Left unset, the script behaves exactly as before — local-only, same
+# as it always was.
 #
 # Since V0.2 the database is no longer the whole story: contact photos are
 # files on the `nod-crm-uploads-data` volume, and the rows reference them. A

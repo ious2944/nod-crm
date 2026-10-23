@@ -7,7 +7,7 @@
  *
  * Tout est ici en fonctions pures — aucune requête, aucun JSX — pour que la
  * priorisation soit testable seule (`domain.test.ts`) et qu'un futur
- * automatisme (rappel, digest e-mail, Mirai) puisse la réutiliser telle quelle
+ * automatisme (rappel, digest e-mail, assistant IA) puisse la réutiliser telle quelle
  * sans passer par la page.
  */
 

@@ -22,6 +22,10 @@ loss would be expensive.
 | `createFollowUp` action | authenticated | `requireActor()`, then Zod, then workspace scoping |
 | `applyQuickAction` action | authenticated | same, plus object ownership **and** a transition guard |
 | `?f=` URL parameter | public | allow-list, silent fallback to `all` |
+| `GET /api/tasks/*` (15 read routes) | authenticated | `withActor()`: session checked, workspace from the session, permission predicates of `access.ts`, `404` for both missing and forbidden, `Cache-Control: private, no-store` |
+| `POST /api/tasks/items/[id]/attachments` | authenticated | same-origin check, `withActor(…, "task.edit")`, size and type checks |
+| `GET /api/tasks/stream` (SSE) | authenticated | session checked at connection; each event filtered per reader (`changeFor`) |
+| `GET /api/contacts/[id]/photo` | authenticated | session, then owner check (`crmReadableWhere`); `404` otherwise |
 | `GET /api/health` | loopback | no version, no hostname, no error detail; blocked at the proxy |
 | PostgreSQL | **none** | no published port, private Docker network |
 | Application port | **loopback** | never `0.0.0.0`, no firewall rule needed |
@@ -92,8 +96,14 @@ a user to take effect on the next request. One row and one index does that.
 
 `SameSite=Lax` plus Next.js Server Actions. Actions are POST-only, so `Lax`
 prevents them being triggered cross-site; Next additionally verifies the
-`Origin` against the host for Server Action requests. There is no cross-origin
-API to protect: NOD CRM exposes no endpoint other than the health probe.
+`Origin` against the host for Server Action requests.
+
+Route Handlers under `/api/` are not covered by that built-in check. All of
+them are `GET` reads with no side effect, except the attachment upload
+(`POST /api/tasks/items/[id]/attachments`), which compares the `Origin`
+header with the served host itself (`isSameOrigin`, `src/lib/tasks/route-helpers.ts`)
+before reading the request. The JSON responses are not readable cross-origin:
+no CORS header is ever sent.
 
 ### Account enumeration
 
@@ -327,10 +337,11 @@ list of files.
 
 ## 11. Dependencies
 
-Ten runtime dependencies. Every one is there because removing it would mean
-writing the same thing worse:
-Next.js, React, Prisma and its pg adapter, `pg`, `@node-rs/argon2`, Zod,
-`server-only`.
+Eleven runtime dependencies (`dependencies` in `package.json`). Every one is
+there because removing it would mean writing the same thing worse:
+Next.js, React and React DOM, Prisma (CLI, client and pg adapter — the CLI
+runs `migrate deploy` in the image), `pg`, `@node-rs/argon2`, Zod,
+`server-only` and `lucide-react` (icons).
 
 `npm audit` is expected to report zero vulnerabilities in the production
 dependency tree; one `overrides` entry (`deepmerge-ts`) exists to keep it that
@@ -372,7 +383,7 @@ An honest list of what is *not* covered.
 | Risk | Scope | Decision |
 | --- | --- | --- |
 | No MFA | a stolen password is enough | accepted in V0.1; the model is ready (§13) |
-| No roles or permissions | an authenticated user can do anything in their workspace | small teams, single trust level |
+| No workspace role | permissions are per record (owner) and per project (`OWNER` / `EDITOR` / `COMMENTER`, see [`permissions-v1.md`](permissions-v1.md)); there is no admin role inside a workspace, account creation stays in the CLI | a minimal workspace role is planned (lot C, `permissions-v1.md` §10.5) |
 | No self-service password reset | goes through the CLI and shell access | deliberate: no email to send, no reset flow to secure |
 | Session cookie not bound to an IP | a stolen cookie grants access | binding breaks mobile use for a modest gain |
 | Audit log covers mutations only | reads (viewing a contact sheet, an export) are not journalled | deliberate for this version; write-only tracing is the stated scope |

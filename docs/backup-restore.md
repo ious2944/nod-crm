@@ -179,18 +179,17 @@ data and its only copy in the same instant.
 
 Set `NOD_CRM_RCLONE_REMOTE` before running the script and the two archives
 from that run are pushed off-site right after they pass local verification —
-the same `rclone` remote already used for the Mirai and GED backups on this
-VPS works unchanged:
+any `rclone` remote you already use for other backups works unchanged:
 
 ```bash
-sudo NOD_CRM_RCLONE_REMOTE="b2:nodlab-backups-prod/nod-crm/" \
+sudo NOD_CRM_RCLONE_REMOTE="mon-remote:mon-bucket/nod-crm/" \
      /opt/nod-crm/deploy/backup/nod-crm-backup.sh
 ```
 
 Or, in the cron entry:
 
 ```cron
-17 3 * * * root NOD_CRM_RCLONE_REMOTE="b2:nodlab-backups-prod/nod-crm/" /opt/nod-crm/deploy/backup/nod-crm-backup.sh >> /var/log/nod-crm-backup.log 2>&1
+17 3 * * * root NOD_CRM_RCLONE_REMOTE="mon-remote:mon-bucket/nod-crm/" /opt/nod-crm/deploy/backup/nod-crm-backup.sh >> /var/log/nod-crm-backup.log 2>&1
 ```
 
 A push failure is logged as a warning, not fatal — the local archive already
