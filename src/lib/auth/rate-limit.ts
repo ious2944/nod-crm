@@ -25,11 +25,13 @@ export const MAX_FAILURES_PER_IP = 30;
 /** Les tentatives plus vieilles que ceci sont supprimées opportunément. */
 const RETENTION_MS = 24 * 60 * 60 * 1000;
 
-export interface RateLimitVerdict {
-  blocked: boolean;
-  /** Secondes avant la prochaine tentative autorisée, si bloqué. */
-  retryAfterSeconds: number;
-}
+export type LoginAttemptClaim =
+  | {
+      blocked: true;
+      /** Secondes avant la prochaine tentative autorisée. */
+      retryAfterSeconds: number;
+    }
+  | { blocked: false; attemptIds: string[] };
 
 function emailScope(email: string): string {
   return `email:${email.trim().toLowerCase()}`;
@@ -55,22 +57,43 @@ async function oldestFailure(scope: string, since: Date): Promise<Date | null> {
   return attempt?.createdAt ?? null;
 }
 
-/** À appeler avant toute vérification de mot de passe. */
-export async function checkLoginRateLimit(
+function scopesFor(email: string, ip: string | null): Array<{ scope: string; max: number }> {
+  const scopes = [{ scope: emailScope(email), max: MAX_FAILURES_PER_EMAIL }];
+  if (ip) scopes.push({ scope: ipScope(ip), max: MAX_FAILURES_PER_IP });
+  return scopes;
+}
+
+/**
+ * À appeler avant toute vérification de mot de passe.
+ *
+ * La tentative est enregistrée comme un échec *avant* d'être comptée : chaque
+ * requête se compte elle-même, et voit toutes celles enregistrées avant elle.
+ * Quel que soit le nombre de requêtes simultanées, au plus `max` d'entre elles
+ * trouvent un compteur sous le seuil — sans verrou ni transaction tenue
+ * pendant le hachage. Une tentative refusée retire ses lignes : elle ne pèse
+ * pas sur le compteur.
+ *
+ * Si le processus s'arrête en cours de vérification, la tentative reste
+ * comptée comme un échec, ce qui est le sens prudent.
+ */
+export async function claimLoginAttempt(
   email: string,
   ip: string | null,
-): Promise<RateLimitVerdict> {
+): Promise<LoginAttemptClaim> {
+  const scopes = scopesFor(email, ip);
+  const rows = await prisma.loginAttempt.createManyAndReturn({
+    data: scopes.map(({ scope }) => ({ scope, successful: false })),
+    select: { id: true },
+  });
+  const attemptIds = rows.map((row) => row.id);
   const since = new Date(Date.now() - WINDOW_MS);
 
-  const scopes: Array<{ scope: string; max: number }> = [
-    { scope: emailScope(email), max: MAX_FAILURES_PER_EMAIL },
-  ];
-  if (ip) scopes.push({ scope: ipScope(ip), max: MAX_FAILURES_PER_IP });
-
   for (const { scope, max } of scopes) {
+    // Le compte inclut la tentative en cours.
     const failures = await countFailures(scope, since);
-    if (failures < max) continue;
+    if (failures <= max) continue;
 
+    await prisma.loginAttempt.deleteMany({ where: { id: { in: attemptIds } } });
     const oldest = await oldestFailure(scope, since);
     const releaseAt = (oldest?.getTime() ?? Date.now()) + WINDOW_MS;
     return {
@@ -79,26 +102,20 @@ export async function checkLoginRateLimit(
     };
   }
 
-  return { blocked: false, retryAfterSeconds: 0 };
+  return { blocked: false, attemptIds };
 }
 
-/** Enregistre l'issue d'une tentative. Aucun mot de passe n'est journalisé. */
-export async function recordLoginAttempt(
-  email: string,
-  ip: string | null,
-  successful: boolean,
-): Promise<void> {
-  const rows = [{ scope: emailScope(email), successful }];
-  if (ip) rows.push({ scope: ipScope(ip), successful });
-
-  await prisma.loginAttempt.createMany({ data: rows });
-}
-
-/** Une connexion réussie remet les compteurs de ce compte à zéro. */
-export async function clearLoginFailures(email: string, ip: string | null): Promise<void> {
-  const scopes = [emailScope(email)];
-  if (ip) scopes.push(ipScope(ip));
-  await prisma.loginAttempt.deleteMany({ where: { scope: { in: scopes } } });
+/**
+ * Une connexion réussie remet à zéro le compteur du compte, et seulement
+ * celui-là : le compteur par IP garde ses échecs, la tentative en cours y est
+ * simplement marquée comme réussie.
+ */
+export async function recordLoginSuccess(email: string, attemptIds: string[]): Promise<void> {
+  await prisma.loginAttempt.updateMany({
+    where: { id: { in: attemptIds } },
+    data: { successful: true },
+  });
+  await prisma.loginAttempt.deleteMany({ where: { scope: emailScope(email) } });
 }
 
 /** Nettoyage de l'historique, déclenché après chaque connexion réussie. */

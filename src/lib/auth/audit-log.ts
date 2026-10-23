@@ -11,7 +11,7 @@ import "server-only";
  * masqué, et une empreinte courte de l'IP (jamais l'IP en clair, qui est une
  * donnée personnelle sans valeur ajoutée pour la détection).
  */
-import { createHash } from "node:crypto";
+import { hmac } from "./secret";
 
 type AuthEvent =
   | "login.success"
@@ -28,10 +28,14 @@ function maskEmail(email: string): string {
   return `${visible}@${domain}`;
 }
 
-/** Empreinte courte et non réversible en pratique, suffisante pour corréler. */
+/**
+ * Empreinte courte, suffisante pour corréler. Un HMAC sous `AUTH_SECRET`,
+ * comme pour les compteurs : sans le secret, impossible de retrouver l'IP en
+ * essayant toutes les adresses possibles.
+ */
 function fingerprint(value: string | null): string {
   if (!value) return "unknown";
-  return createHash("sha256").update(value).digest("hex").slice(0, 12);
+  return hmac(value).slice(0, 12);
 }
 
 export function logAuthEvent(

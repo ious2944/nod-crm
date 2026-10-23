@@ -8,10 +8,9 @@ import { getClientIp } from "@/lib/auth/client-ip";
 import { getCurrentUser } from "@/lib/auth/dal";
 import { burnPasswordTime, verifyPassword } from "@/lib/auth/password";
 import {
-  checkLoginRateLimit,
-  clearLoginFailures,
+  claimLoginAttempt,
   purgeOldLoginAttempts,
-  recordLoginAttempt,
+  recordLoginSuccess,
 } from "@/lib/auth/rate-limit";
 import { loginSchema, type LoginState } from "@/lib/auth/schemas";
 import { createSession, destroySession, purgeExpiredSessions } from "@/lib/auth/session";
@@ -37,10 +36,12 @@ export async function login(_previous: LoginState, formData: FormData): Promise<
   const { email, password } = parsed.data;
   const ip = await getClientIp();
 
-  const verdict = await checkLoginRateLimit(email, ip);
-  if (verdict.blocked) {
+  // La tentative est comptée comme un échec dès maintenant ; seule une
+  // connexion réussie change ce statut.
+  const claim = await claimLoginAttempt(email, ip);
+  if (claim.blocked) {
     logAuthEvent("login.blocked", { email, ip });
-    const minutes = Math.ceil(verdict.retryAfterSeconds / 60);
+    const minutes = Math.ceil(claim.retryAfterSeconds / 60);
     return {
       status: "error",
       message: `Trop de tentatives. Réessaie dans ${minutes} minute${minutes > 1 ? "s" : ""}.`,
@@ -55,7 +56,6 @@ export async function login(_previous: LoginState, formData: FormData): Promise<
   if (!user) {
     // Même coût de calcul que pour un compte existant : pas de fuite par timing.
     await burnPasswordTime(password);
-    await recordLoginAttempt(email, ip, false);
     logAuthEvent("login.failed", { email, ip });
     return { status: "error", message: GENERIC_FAILURE };
   }
@@ -63,12 +63,11 @@ export async function login(_previous: LoginState, formData: FormData): Promise<
   const valid = await verifyPassword(user.passwordHash, password);
 
   if (!valid || !user.isActive) {
-    await recordLoginAttempt(email, ip, false);
     logAuthEvent(user.isActive ? "login.failed" : "login.inactive", { email, ip });
     return { status: "error", message: GENERIC_FAILURE };
   }
 
-  await clearLoginFailures(email, ip);
+  await recordLoginSuccess(email, claim.attemptIds);
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
   await createSession(user.id, {
